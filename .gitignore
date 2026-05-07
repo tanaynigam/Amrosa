@@ -1,0 +1,29 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# App build output
+app/build/
+
+# Firebase config (contains API keys)
+app/google-services.json
+
+# Firebase service account key (secret — never commit)
+firestore/serviceAccountKey.json
+firestore/node_modules/
+
+# Cloud Functions
+functions/node_modules/
+functions/.env

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(where python3 *)",
+      "Bash(where py *)",
+      "Bash(ls /c/Python*)",
+      "Read(//c/Users/tanay/AppData/Local/Programs/**)",
+      "Bash(python3 -c \"import pandas; print\\('pandas ok'\\)\")",
+      "Bash(pip3 install *)",
+      "WebFetch(domain:claude.ai)",
+      "Bash(adb devices *)",
+      "PowerShell(adb devices)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\\\\bin\\\\keytool.exe\" -list -v -keystore \"$env:USERPROFILE\\\\.android\\\\debug.keystore\" -alias androiddebugkey -storepass android -keypass android 2>&1 | Select-String \"SHA1\")",
+      "PowerShell(cd \"C:\\\\Users\\\\tanay\\\\Desktop\\\\Projects\\\\WhenDiagram\"; $env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; .\\\\gradlew.bat assembleDebug 2>&1 | Select-Object -Last 60)",
+      "PowerShell($adb = \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\"; & $adb install -r \"C:\\\\Users\\\\tanay\\\\Desktop\\\\Projects\\\\WhenDiagram\\\\app\\\\build\\\\outputs\\\\apk\\\\debug\\\\app-debug.apk\" 2>&1)"
+    ]
+  }
+}
