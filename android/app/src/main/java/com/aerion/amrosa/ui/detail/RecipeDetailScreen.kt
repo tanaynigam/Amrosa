@@ -1,6 +1,7 @@
 package com.aerion.amrosa.ui.detail
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -219,13 +220,23 @@ fun RecipeDetailScreen(
             // ── Source links ────────────────────────────────────────
             if (recipe.sourceUrls.isNotEmpty()) {
                 item {
+                    val context = LocalContext.current
                     SectionHeader("Sources")
                     recipe.sourceUrls.forEach { url ->
                         Text(
                             text = "• $url",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp, vertical = 2.dp)
+                                .clickable {
+                                    val intent = android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse(url)
+                                    )
+                                    context.startActivity(intent)
+                                }
                         )
                     }
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
