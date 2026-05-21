@@ -181,7 +181,8 @@ class ImportViewModel(
 
                 val sections = parsed.sections.map { s ->
                     RecipeSectionEntity(
-                        id = sectionIdMap[s.id]!!,
+                        id = sectionIdMap[s.id]
+                            ?: throw IllegalArgumentException("No ID mapping for section '${s.id}'"),
                         recipeId = recipeId,
                         name = s.name,
                         orderIndex = s.orderIndex
@@ -190,7 +191,8 @@ class ImportViewModel(
 
                 val ingredients = parsed.ingredients.map { ing ->
                     IngredientEntity(
-                        id = ingredientIdMap[ing.id]!!,
+                        id = ingredientIdMap[ing.id]
+                            ?: throw IllegalArgumentException("No ID mapping for ingredient '${ing.id}'"),
                         recipeId = recipeId,
                         sectionId = ing.sectionId?.let { sectionIdMap[it] },
                         name = ing.name,
@@ -207,7 +209,8 @@ class ImportViewModel(
 
                 val steps = parsed.steps.map { step ->
                     StepEntity(
-                        id = stepIdMap[step.id]!!,
+                        id = stepIdMap[step.id]
+                            ?: throw IllegalArgumentException("No ID mapping for step '${step.id}'"),
                         recipeId = recipeId,
                         sectionId = step.sectionId?.let { sectionIdMap[it] },
                         instruction = step.instruction,

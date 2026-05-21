@@ -56,6 +56,7 @@ class RecipeSyncService(
             }
 
             var count = 0
+            val total = snapshot.documents.size
             for (doc in snapshot.documents) {
                 try {
                     val recipe = parseRecipe(doc.id, doc.data ?: continue)
@@ -72,10 +73,17 @@ class RecipeSyncService(
                 }
             }
 
-            // Update sync timestamp to now
-            val now = System.currentTimeMillis()
-            prefs.edit().putLong(KEY_LAST_SYNC, now).apply()
-            Log.d(TAG, "Synced $count recipes")
+            // Only advance the sync timestamp when every document in this batch
+            // was parsed and inserted successfully. If any failed, leave the
+            // timestamp unchanged so those recipes are re-fetched next sync.
+            // Re-upserting already-synced recipes is harmless (REPLACE strategy).
+            if (count == total) {
+                val now = System.currentTimeMillis()
+                prefs.edit().putLong(KEY_LAST_SYNC, now).apply()
+                Log.d(TAG, "Synced $count/$total recipes — timestamp advanced")
+            } else {
+                Log.w(TAG, "Synced $count/$total recipes — ${total - count} failed, timestamp NOT advanced (will retry next sync)")
+            }
             count
         } catch (e: Exception) {
             Log.e(TAG, "Sync failed", e)

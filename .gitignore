@@ -1,29 +1,40 @@
 *.iml
 .gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
 .DS_Store
-/build
-/captures
 .externalNativeBuild
 .cxx
-local.properties
 
-# App build output
-app/build/
+# Android — local machine config (never commit)
+android/local.properties
+android/.gradle/
+android/.kotlin/
 
-# Firebase config (contains API keys)
-app/google-services.json
+# Android — IDE files
+android/.idea/caches
+android/.idea/libraries
+android/.idea/modules.xml
+android/.idea/workspace.xml
+android/.idea/navEditor.xml
+android/.idea/assetWizardSettings.xml
 
-# Firebase service account key (secret — never commit)
-firestore/serviceAccountKey.json
-firestore/node_modules/
+# Android — build output
+android/app/build/
+android/build/
 
-# Cloud Functions
-functions/node_modules/
-functions/.env
+# Android — Firebase config (contains API keys)
+android/app/google-services.json
+
+# iOS — machine-specific and build output
+ios/.build/
+ios/Pods/
+ios/*.xcworkspace/xcuserdata/
+ios/DerivedData/
+ios/Amrosa/GoogleService-Info.plist
+
+# Backend — Firebase service account key (secret — never commit)
+backend/firestore/serviceAccountKey.json
+backend/firestore/node_modules/
+
+# Backend — Cloud Functions
+backend/functions/node_modules/
+backend/functions/.env

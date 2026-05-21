@@ -44,22 +44,10 @@ class RecipeRepository(
         ingredients: List<IngredientEntity>,
         steps: List<StepEntity>,
         refs: List<StepIngredientRefEntity>
-    ) {
-        recipeDao.insertRecipe(recipe)
-        recipeDao.insertSections(sections)
-        recipeDao.insertIngredients(ingredients)
-        recipeDao.insertSteps(steps)
-        recipeDao.insertStepRefs(refs)
-    }
+    ) = recipeDao.insertFullRecipe(recipe, sections, ingredients, steps, refs)
 
-    suspend fun deleteFullRecipe(recipeId: String) {
-        recipeDao.deleteStepRefsForRecipe(recipeId)
-        recipeDao.deleteNotesForRecipe(recipeId)
-        recipeDao.deleteStepsForRecipe(recipeId)
-        recipeDao.deleteIngredientsForRecipe(recipeId)
-        recipeDao.deleteSectionsForRecipe(recipeId)
-        recipeDao.deleteRecipe(recipeId)
-    }
+    suspend fun deleteFullRecipe(recipeId: String) =
+        recipeDao.deleteFullRecipe(recipeId)
 
     suspend fun addNote(note: RecipeNoteEntity) = noteDao.insertNote(note)
     suspend fun updateNote(note: RecipeNoteEntity) = noteDao.updateNote(note)
