@@ -73,6 +73,54 @@ abstract class RecipeDao {
     @Query("SELECT COUNT(*) FROM recipes")
     abstract suspend fun count(): Int
 
+    // ─── Single-item deletes (used by Recipe Editor) ──────────────────────────
+
+    @Query("DELETE FROM steps WHERE id = :stepId")
+    abstract suspend fun deleteStep(stepId: String)
+
+    @Query("DELETE FROM ingredients WHERE id = :ingredientId")
+    abstract suspend fun deleteIngredient(ingredientId: String)
+
+    @Query("DELETE FROM recipe_sections WHERE id = :sectionId")
+    abstract suspend fun deleteSection(sectionId: String)
+
+    @Query("DELETE FROM step_ingredient_refs WHERE stepId = :stepId")
+    abstract suspend fun deleteStepRefsForStep(stepId: String)
+
+    @Query("DELETE FROM step_ingredient_refs WHERE ingredientId = :ingredientId")
+    abstract suspend fun deleteStepRefsByIngredient(ingredientId: String)
+
+    /**
+     * Atomically applies recipe editor changes:
+     * - Removes deleted steps/ingredients/sections (and orphaned refs)
+     * - Upserts the recipe + all surviving/new entities
+     * - Does NOT touch recipe_notes (notes survive edits)
+     * - Does NOT touch refs for unchanged steps (they stay linked)
+     */
+    @Transaction
+    open suspend fun replaceFullRecipe(
+        recipe: RecipeEntity,
+        sections: List<RecipeSectionEntity>,
+        ingredients: List<IngredientEntity>,
+        steps: List<StepEntity>,
+        deletedSectionIds: List<String>,
+        deletedIngredientIds: List<String>,
+        deletedStepIds: List<String>
+    ) {
+        // Clean up refs first so foreign-key-like integrity is maintained
+        deletedStepIds.forEach { deleteStepRefsForStep(it) }
+        deletedIngredientIds.forEach { deleteStepRefsByIngredient(it) }
+        // Delete removed items (order: steps → ingredients → sections)
+        deletedStepIds.forEach { deleteStep(it) }
+        deletedIngredientIds.forEach { deleteIngredient(it) }
+        deletedSectionIds.forEach { deleteSection(it) }
+        // Upsert everything that remains or is new (REPLACE handles both)
+        insertRecipe(recipe)
+        insertSections(sections)
+        insertIngredients(ingredients)
+        insertSteps(steps)
+    }
+
     /**
      * Inserts a full recipe (all 5 tables) atomically.
      * If any insert fails the entire operation is rolled back — no partial state.

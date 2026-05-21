@@ -38,6 +38,19 @@ class RecipeRepository(
     fun getNotesForRecipe(recipeId: String): Flow<List<RecipeNote>> =
         noteDao.getNotesForRecipe(recipeId).map { list -> list.map { it.toDomain() } }
 
+    suspend fun updateFullRecipe(
+        recipe: RecipeEntity,
+        sections: List<RecipeSectionEntity>,
+        ingredients: List<IngredientEntity>,
+        steps: List<StepEntity>,
+        deletedSectionIds: List<String>,
+        deletedIngredientIds: List<String>,
+        deletedStepIds: List<String>
+    ) = recipeDao.replaceFullRecipe(
+        recipe, sections, ingredients, steps,
+        deletedSectionIds, deletedIngredientIds, deletedStepIds
+    )
+
     suspend fun insertFullRecipe(
         recipe: RecipeEntity,
         sections: List<RecipeSectionEntity>,

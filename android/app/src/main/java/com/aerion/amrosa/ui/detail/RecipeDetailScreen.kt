@@ -32,6 +32,7 @@ import java.util.*
 fun RecipeDetailScreen(
     recipeId: String,
     onBack: () -> Unit,
+    onEditClick: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as AmrosaApplication
     val viewModel: RecipeDetailViewModel = viewModel(
@@ -62,6 +63,9 @@ fun RecipeDetailScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onEditClick) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit Recipe")
+                    }
                     IconButton(onClick = { showCookingMode = true }) {
                         Icon(Icons.Default.MenuBook, contentDescription = "Cooking Mode")
                     }

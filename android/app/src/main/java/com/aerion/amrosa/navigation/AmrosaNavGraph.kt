@@ -16,6 +16,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.aerion.amrosa.ui.detail.RecipeDetailScreen
+import com.aerion.amrosa.ui.edit.RecipeEditorScreen
 import com.aerion.amrosa.ui.home.HomeScreen
 import com.aerion.amrosa.ui.import_recipe.ImportScreen
 import com.aerion.amrosa.ui.settings.SettingsScreen
@@ -88,6 +89,18 @@ fun AmrosaNavGraph() {
             ) { backStackEntry ->
                 val recipeId = backStackEntry.arguments?.getString("recipeId") ?: return@composable
                 RecipeDetailScreen(
+                    recipeId = recipeId,
+                    onBack = { navController.popBackStack() },
+                    onEditClick = { navController.navigate("recipe/edit/$recipeId") }
+                )
+            }
+
+            composable(
+                route = "recipe/edit/{recipeId}",
+                arguments = listOf(navArgument("recipeId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val recipeId = backStackEntry.arguments?.getString("recipeId") ?: return@composable
+                RecipeEditorScreen(
                     recipeId = recipeId,
                     onBack = { navController.popBackStack() }
                 )
