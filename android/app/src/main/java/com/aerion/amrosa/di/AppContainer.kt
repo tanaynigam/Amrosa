@@ -26,5 +26,5 @@ class AppContainer(context: Context) {
 
     val authRepository = AuthRepository()
     val seeder = DatabaseSeeder(context, repository, gson)
-    val syncService = RecipeSyncService(context, repository, gson)
+    val syncService = RecipeSyncService(context, repository, authRepository, gson)
 }

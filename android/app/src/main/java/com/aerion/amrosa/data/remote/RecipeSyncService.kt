@@ -2,6 +2,7 @@ package com.aerion.amrosa.data.remote
 
 import android.content.Context
 import android.util.Log
+import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.entity.*
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.domain.model.Recipe
@@ -11,22 +12,27 @@ import com.google.gson.Gson
 import kotlinx.coroutines.tasks.await
 
 /**
- * Syncs recipes from Firestore → local Room DB.
+ * Syncs recipes between Firestore and the local Room DB.
  *
  * Firestore structure:
- *   recipes/{recipeId}           — recipe metadata + nested arrays
- *     .sections[]                — inline
- *     .ingredients[]             — inline
- *     .steps[]                   — inline
- *     .stepIngredientRefs[]      — inline
- *     .updatedAt: Long           — millis, used for delta sync
  *
- * The app only READS from the shared "recipes" collection.
- * Sync is pull-only: fetch docs where updatedAt > lastSyncTimestamp.
+ *   recipes/{recipeId}                         — shared/seeded recipes (pull-only)
+ *
+ *   personal_recipes/{uid}/recipes/{recipeId}  — per-user personal recipes (push + pull)
+ *       All personal recipe data lives under the user's UID subcollection so
+ *       no other user can ever read or write them.
+ *
+ * Pull sync (shared):
+ *   Fetch docs from `recipes` where updatedAt > lastSyncTimestamp. Upsert into Room.
+ *
+ * Personal sync (named user only):
+ *   pull  — fetch all docs from `personal_recipes/{uid}/recipes` → upsert into Room
+ *   push  — upload all local isImported=false recipes to `personal_recipes/{uid}/recipes`
  */
 class RecipeSyncService(
     private val context: Context,
     private val repository: RecipeRepository,
+    private val authRepository: AuthRepository,
     private val gson: Gson
 ) {
     private val firestore = FirebaseFirestore.getInstance()
@@ -37,15 +43,18 @@ class RecipeSyncService(
         private const val KEY_LAST_SYNC = "last_sync_timestamp"
         private const val COLLECTION_RECIPES = "recipes"
         private const val COLLECTION_PERSONAL = "personal_recipes"
+        private const val SUBCOLLECTION_RECIPES = "recipes"
     }
 
+    // ─── Shared recipes (pull-only) ───────────────────────────────────────────
+
     /**
-     * Pull recipes updated since last sync. Upserts into Room.
+     * Pull shared/seeded recipes updated since last sync. Upserts into Room.
      * Returns number of recipes synced.
      */
     suspend fun sync(): Int {
         val lastSync = prefs.getLong(KEY_LAST_SYNC, 0L)
-        Log.d(TAG, "Syncing recipes updated after $lastSync")
+        Log.d(TAG, "Syncing shared recipes updated after $lastSync")
 
         return try {
             val snapshot = firestore.collection(COLLECTION_RECIPES)
@@ -54,7 +63,7 @@ class RecipeSyncService(
                 .await()
 
             if (snapshot.isEmpty) {
-                Log.d(TAG, "No new recipes to sync")
+                Log.d(TAG, "No new shared recipes to sync")
                 return 0
             }
 
@@ -64,11 +73,7 @@ class RecipeSyncService(
                 try {
                     val recipe = parseRecipe(doc.id, doc.data ?: continue)
                     repository.insertFullRecipe(
-                        recipe.first,
-                        recipe.second,
-                        recipe.third,
-                        recipe.fourth,
-                        recipe.fifth
+                        recipe.first, recipe.second, recipe.third, recipe.fourth, recipe.fifth
                     )
                     count++
                 } catch (e: Exception) {
@@ -76,54 +81,52 @@ class RecipeSyncService(
                 }
             }
 
-            // Only advance the sync timestamp when every document in this batch
-            // was parsed and inserted successfully. If any failed, leave the
-            // timestamp unchanged so those recipes are re-fetched next sync.
-            // Re-upserting already-synced recipes is harmless (REPLACE strategy).
             if (count == total) {
                 val now = System.currentTimeMillis()
                 prefs.edit().putLong(KEY_LAST_SYNC, now).apply()
-                Log.d(TAG, "Synced $count/$total recipes — timestamp advanced")
+                Log.d(TAG, "Synced $count/$total shared recipes — timestamp advanced")
             } else {
-                Log.w(TAG, "Synced $count/$total recipes — ${total - count} failed, timestamp NOT advanced (will retry next sync)")
+                Log.w(TAG, "Synced $count/$total shared recipes — ${total - count} failed, timestamp NOT advanced")
             }
             count
         } catch (e: Exception) {
-            Log.e(TAG, "Sync failed", e)
+            Log.e(TAG, "Shared sync failed", e)
             0
         }
     }
 
-    /**
-     * Force a full re-sync (clear timestamp, pull everything).
-     */
+    /** Force a full re-sync of shared recipes (clears timestamp). */
     suspend fun forceFullSync(): Int {
         prefs.edit().putLong(KEY_LAST_SYNC, 0L).apply()
         return sync()
     }
 
+    // ─── Personal recipes (per-user, push + pull) ─────────────────────────────
+
     /**
-     * Push a personal (non-imported) recipe from Room up to Firestore's
-     * [COLLECTION_PERSONAL] collection so it is backed up in the cloud.
-     *
-     * The document structure mirrors the shared `recipes` collection so the
-     * same [parseRecipe] logic can re-hydrate it if needed in the future.
-     *
-     * @return true if the push succeeded, false on error.
+     * Push a single personal recipe to `personal_recipes/{uid}/recipes/{recipeId}`.
+     * No-ops silently if the user is anonymous (no account to push to).
      */
     suspend fun pushPersonalRecipe(recipeId: String): Boolean {
+        val uid = authRepository.uid
+        if (uid == null || authRepository.currentUser?.isAnonymous == true) {
+            Log.d(TAG, "pushPersonalRecipe: skipped — no signed-in user")
+            return false
+        }
         return try {
             val recipe = repository.getRecipeWithDetails(recipeId)
             if (recipe == null) {
                 Log.w(TAG, "pushPersonalRecipe: recipe $recipeId not found in Room")
                 return false
             }
-            val doc = buildFirestoreDocument(recipe)
+            val doc = buildFirestoreDocument(recipe, authorIdOverride = uid)
             firestore.collection(COLLECTION_PERSONAL)
+                .document(uid)
+                .collection(SUBCOLLECTION_RECIPES)
                 .document(recipeId)
                 .set(doc, SetOptions.merge())
                 .await()
-            Log.d(TAG, "Pushed personal recipe $recipeId to Firestore")
+            Log.d(TAG, "Pushed personal recipe $recipeId")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to push personal recipe $recipeId", e)
@@ -131,14 +134,96 @@ class RecipeSyncService(
         }
     }
 
-    // ─── Firestore serialisation ──────────────────────────────────────────────
+    /**
+     * Pull all personal recipes for the current user from Firestore → Room.
+     * Used after sign-in so cloud recipes appear on this device.
+     */
+    suspend fun pullPersonalRecipes(): Int {
+        val uid = authRepository.uid
+        if (uid == null || authRepository.currentUser?.isAnonymous == true) return 0
+
+        return try {
+            val snapshot = firestore.collection(COLLECTION_PERSONAL)
+                .document(uid)
+                .collection(SUBCOLLECTION_RECIPES)
+                .get()
+                .await()
+
+            if (snapshot.isEmpty) {
+                Log.d(TAG, "No personal recipes in Firestore for $uid")
+                return 0
+            }
+
+            var count = 0
+            for (doc in snapshot.documents) {
+                try {
+                    val recipe = parseRecipe(doc.id, doc.data ?: continue)
+                    repository.insertFullRecipe(
+                        recipe.first, recipe.second, recipe.third, recipe.fourth, recipe.fifth
+                    )
+                    count++
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to parse personal recipe ${doc.id}", e)
+                }
+            }
+            Log.d(TAG, "Pulled $count personal recipes from Firestore")
+            count
+        } catch (e: Exception) {
+            Log.e(TAG, "pullPersonalRecipes failed", e)
+            0
+        }
+    }
 
     /**
-     * Serialise a full [Recipe] domain model into a Firestore-compatible Map.
-     * The structure mirrors what [parseRecipe] expects so the pull path can
-     * re-hydrate documents written here.
+     * Push all local personal (isImported=false) recipes to the user's Firestore subcollection.
+     * Used after sign-in to back up any recipes that existed before the user logged in.
      */
-    private fun buildFirestoreDocument(recipe: Recipe): Map<String, Any?> {
+    suspend fun pushAllPersonalRecipes(): Int {
+        val uid = authRepository.uid
+        if (uid == null || authRepository.currentUser?.isAnonymous == true) return 0
+
+        return try {
+            val recipes = repository.getAllPersonalRecipesWithDetails()
+            var count = 0
+            for (recipe in recipes) {
+                try {
+                    val doc = buildFirestoreDocument(recipe, authorIdOverride = uid)
+                    firestore.collection(COLLECTION_PERSONAL)
+                        .document(uid)
+                        .collection(SUBCOLLECTION_RECIPES)
+                        .document(recipe.id)
+                        .set(doc, SetOptions.merge())
+                        .await()
+                    count++
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to push recipe ${recipe.id}", e)
+                }
+            }
+            Log.d(TAG, "Pushed $count/${recipes.size} personal recipes to Firestore")
+            count
+        } catch (e: Exception) {
+            Log.e(TAG, "pushAllPersonalRecipes failed", e)
+            0
+        }
+    }
+
+    /**
+     * Full personal sync: pull cloud → Room, then push local → cloud.
+     * Call this immediately after the user signs in.
+     * Returns (pulled, pushed).
+     */
+    suspend fun syncPersonalRecipes(): Pair<Int, Int> {
+        val pulled = pullPersonalRecipes()
+        val pushed = pushAllPersonalRecipes()
+        return Pair(pulled, pushed)
+    }
+
+    // ─── Firestore serialisation ──────────────────────────────────────────────
+
+    private fun buildFirestoreDocument(
+        recipe: Recipe,
+        authorIdOverride: String? = null
+    ): Map<String, Any?> {
         val sections = recipe.sections.map { s ->
             mapOf("id" to s.id, "name" to s.name, "orderIndex" to s.orderIndex)
         }
@@ -152,6 +237,12 @@ class RecipeSyncService(
                 "quantityValue" to ing.quantityValue,
                 "quantityUnit" to ing.quantityUnit,
                 "quantityDisplay" to ing.quantityDisplay,
+                "quantityValueMetric" to ing.quantityValueMetric,
+                "quantityUnitMetric" to ing.quantityUnitMetric,
+                "quantityDisplayMetric" to ing.quantityDisplayMetric,
+                "quantityValueImperial" to ing.quantityValueImperial,
+                "quantityUnitImperial" to ing.quantityUnitImperial,
+                "quantityDisplayImperial" to ing.quantityDisplayImperial,
                 "groupLabel" to ing.groupLabel,
                 "isOptional" to ing.isOptional,
                 "substituteGroupId" to ing.substituteGroupId,
@@ -160,7 +251,6 @@ class RecipeSyncService(
             )
         }
 
-        // Flatten step-ingredient refs from all steps
         val stepRefs = recipe.steps.flatMap { step ->
             step.ingredientRefs.map { ref ->
                 mapOf(
@@ -206,6 +296,8 @@ class RecipeSyncService(
             },
             "createdAt" to recipe.createdAt,
             "updatedAt" to recipe.updatedAt,
+            "authorId" to (recipe.authorId ?: authorIdOverride),
+            "authorDisplayName" to recipe.authorDisplayName,
             "sections" to sections,
             "ingredients" to ingredients,
             "steps" to steps,
@@ -234,9 +326,12 @@ class RecipeSyncService(
             cookTimeMinutes = (data["cookTimeMinutes"] as? Number)?.toInt(),
             imageUrl = data["imageUrl"] as? String,
             tags = gson.toJson(data["tags"] as? List<*> ?: emptyList<String>()),
-            isCustomized = false,
+            isCustomized = data["isCustomized"] as? Boolean ?: false,
+            isImported = data["isImported"] as? Boolean ?: false,
             createdAt = (data["createdAt"] as? Number)?.toLong() ?: now,
-            updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: now
+            updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: now,
+            authorId = data["authorId"] as? String,
+            authorDisplayName = data["authorDisplayName"] as? String
         )
 
         val sections = (data["sections"] as? List<Map<String, Any>>)?.map { s ->
@@ -257,6 +352,12 @@ class RecipeSyncService(
                 quantityValue = (ing["quantityValue"] as? Number)?.toDouble(),
                 quantityUnit = ing["quantityUnit"] as? String,
                 quantityDisplay = ing["quantityDisplay"] as? String,
+                quantityValueMetric = (ing["quantityValueMetric"] as? Number)?.toDouble(),
+                quantityUnitMetric = ing["quantityUnitMetric"] as? String,
+                quantityDisplayMetric = ing["quantityDisplayMetric"] as? String,
+                quantityValueImperial = (ing["quantityValueImperial"] as? Number)?.toDouble(),
+                quantityUnitImperial = ing["quantityUnitImperial"] as? String,
+                quantityDisplayImperial = ing["quantityDisplayImperial"] as? String,
                 groupLabel = ing["groupLabel"] as? String,
                 isOptional = ing["isOptional"] as? Boolean ?: false,
                 substituteGroupId = ing["substituteGroupId"] as? String,

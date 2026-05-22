@@ -47,7 +47,10 @@ fun AuthScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
     val viewModel: AuthViewModel = viewModel(
-        factory = AuthViewModel.factory(app.container.authRepository)
+        factory = AuthViewModel.factory(
+            authRepository = app.container.authRepository,
+            syncService = app.container.syncService
+        )
     )
     val state by viewModel.uiState.collectAsState()
     val focusManager = LocalFocusManager.current

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aerion.amrosa.data.auth.AuthRepository
+import com.aerion.amrosa.data.remote.RecipeSyncService
 import com.google.firebase.FirebaseException
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.PhoneAuthCredential
@@ -37,7 +38,8 @@ data class AuthUiState(
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 class AuthViewModel(
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val syncService: RecipeSyncService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AuthUiState())
@@ -59,6 +61,7 @@ class AuthViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             val result = authRepository.signInWithGoogle(idToken)
+            if (result.isSuccess) syncAfterSignIn()
             _uiState.update {
                 it.copy(
                     isLoading = false,
@@ -76,6 +79,7 @@ class AuthViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             val result = authRepository.signInWithEmail(email.trim(), password)
+            if (result.isSuccess) syncAfterSignIn()
             _uiState.update {
                 it.copy(
                     isLoading = false,
@@ -94,6 +98,7 @@ class AuthViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             val result = authRepository.signUpWithEmail(name.trim(), email.trim(), password)
+            if (result.isSuccess) syncAfterSignIn()
             _uiState.update {
                 it.copy(
                     isLoading = false,
@@ -126,6 +131,7 @@ class AuthViewModel(
                 // Auto-verified (e.g. SIM-based on some Android devices)
                 viewModelScope.launch {
                     val result = authRepository.signInWithPhoneCredential(credential)
+                    if (result.isSuccess) syncAfterSignIn()
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -177,6 +183,7 @@ class AuthViewModel(
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             val credential = PhoneAuthProvider.getCredential(verificationId, code.trim())
             val result = authRepository.signInWithPhoneCredential(credential)
+            if (result.isSuccess) syncAfterSignIn()
             _uiState.update {
                 it.copy(
                     isLoading = false,
@@ -185,6 +192,15 @@ class AuthViewModel(
                     errorMessage = result.exceptionOrNull()?.let { e -> friendlyError(e) }
                 )
             }
+        }
+    }
+
+    // ── Post sign-in sync ─────────────────────────────────────────────────────
+
+    /** Fire-and-forget: pull user's cloud recipes → Room, then push local → cloud. */
+    private fun syncAfterSignIn() {
+        viewModelScope.launch {
+            syncService.syncPersonalRecipes()
         }
     }
 
@@ -222,11 +238,14 @@ class AuthViewModel(
     }
 
     companion object {
-        fun factory(authRepository: AuthRepository): ViewModelProvider.Factory =
+        fun factory(
+            authRepository: AuthRepository,
+            syncService: RecipeSyncService
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    AuthViewModel(authRepository) as T
+                    AuthViewModel(authRepository, syncService) as T
             }
     }
 }

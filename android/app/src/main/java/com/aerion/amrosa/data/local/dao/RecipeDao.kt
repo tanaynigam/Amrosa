@@ -79,6 +79,10 @@ abstract class RecipeDao {
     @Query("SELECT COUNT(*) FROM recipes")
     abstract suspend fun count(): Int
 
+    /** One-shot (non-Flow) read of all personal recipes — used for bulk cloud push. */
+    @Query("SELECT * FROM recipes WHERE isImported = 0 ORDER BY title ASC")
+    abstract suspend fun getPersonalRecipesOnce(): List<RecipeEntity>
+
     // ─── Single-item deletes (used by Recipe Editor) ──────────────────────────
 
     @Query("DELETE FROM steps WHERE id = :stepId")

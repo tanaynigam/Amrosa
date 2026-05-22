@@ -74,6 +74,12 @@ class RecipeRepository(
     suspend fun deleteNote(id: String) = noteDao.deleteNote(id)
     suspend fun count() = recipeDao.count()
 
+    /** Returns every personal recipe with full sections/ingredients/steps — for bulk cloud push. */
+    suspend fun getAllPersonalRecipesWithDetails(): List<Recipe> =
+        recipeDao.getPersonalRecipesOnce().mapNotNull { entity ->
+            getRecipeWithDetails(entity.id)
+        }
+
     // ─── Domain mapping ───────────────────────────────────────────────────────
 
     private fun changeLogList(json: String): List<RecipeChange> =

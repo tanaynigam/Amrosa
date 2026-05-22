@@ -21,8 +21,13 @@ class AmrosaApplication : Application() {
             container.authRepository.signInAnonymouslyIfNeeded()
             // Local seed as fallback (runs once, skipped if DB already has data)
             container.seeder.seedIfNeeded()
-            // Pull any new/updated recipes from Firestore
+            // Pull any new/updated shared recipes from Firestore
             container.syncService.sync()
+            // If the user is already signed in with a named account, sync their personal recipes
+            val user = container.authRepository.currentUser
+            if (user != null && !user.isAnonymous) {
+                container.syncService.syncPersonalRecipes()
+            }
         }
     }
 }
