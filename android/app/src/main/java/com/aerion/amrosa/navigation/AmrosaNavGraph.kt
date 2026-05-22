@@ -3,8 +3,9 @@ package com.aerion.amrosa.navigation
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -15,18 +16,28 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import com.aerion.amrosa.ui.account.AccountScreen
+import com.aerion.amrosa.ui.auth.AuthScreen
 import com.aerion.amrosa.ui.detail.RecipeDetailScreen
 import com.aerion.amrosa.ui.edit.RecipeEditorScreen
+import com.aerion.amrosa.ui.freeform.FreeformEntryScreen
 import com.aerion.amrosa.ui.home.HomeScreen
+import com.aerion.amrosa.ui.home.RecipeFilter
 import com.aerion.amrosa.ui.import_recipe.ImportScreen
-import com.aerion.amrosa.ui.settings.SettingsScreen
 
 private sealed class BottomTab(val route: String, val label: String, val icon: ImageVector) {
-    data object Recipes : BottomTab("recipes_tab", "Recipes", Icons.AutoMirrored.Filled.MenuBook)
+    data object All      : BottomTab("all_tab",      "All",      Icons.AutoMirrored.Filled.MenuBook)
+    data object Personal : BottomTab("personal_tab", "Personal", Icons.Default.Bookmarks)
     data object Imported : BottomTab("imported_tab", "Imported", Icons.Default.CloudDownload)
+    data object Account  : BottomTab("account_tab",  "Account",  Icons.Default.Person)
 }
 
-private val bottomTabs = listOf(BottomTab.Recipes, BottomTab.Imported)
+private val bottomTabs = listOf(
+    BottomTab.All,
+    BottomTab.Personal,
+    BottomTab.Imported,
+    BottomTab.Account
+)
 
 @Composable
 fun AmrosaNavGraph() {
@@ -34,8 +45,8 @@ fun AmrosaNavGraph() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
-    // Show bottom bar only on the two main tabs
-    val showBottomBar = currentDestination?.route in bottomTabs.map { it.route }
+    val tabRoutes = bottomTabs.map { it.route }.toSet()
+    val showBottomBar = currentDestination?.route in tabRoutes
 
     Scaffold(
         bottomBar = {
@@ -63,26 +74,74 @@ fun AmrosaNavGraph() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = BottomTab.Recipes.route,
+            startDestination = BottomTab.All.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(BottomTab.Recipes.route) {
+            // ── Tab: All recipes ──────────────────────────────────────────────
+            composable(BottomTab.All.route) {
                 HomeScreen(
+                    filter = RecipeFilter.ALL,
                     onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
-                    onSettingsClick = { navController.navigate("settings") }
+                    // Settings gear now navigates to the Account tab instead of a separate screen
+                    onSettingsClick = {
+                        navController.navigate(BottomTab.Account.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
                 )
             }
 
+            // ── Tab: Personal recipes ─────────────────────────────────────────
+            composable(BottomTab.Personal.route) {
+                HomeScreen(
+                    filter = RecipeFilter.PERSONAL,
+                    onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
+                    onFabFreeformClick = { navController.navigate("freeform") },
+                    onFabImportClick = {
+                        navController.navigate(BottomTab.Imported.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+            }
+
+            // ── Tab: Imported recipes ─────────────────────────────────────────
             composable(BottomTab.Imported.route) {
                 ImportScreen(
-                    onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") }
+                    onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
+                    onEditClick = { recipeId -> navController.navigate("recipe/edit/$recipeId") }
                 )
             }
 
-            composable("settings") {
-                SettingsScreen(onBack = { navController.popBackStack() })
+            // ── Tab: Account ──────────────────────────────────────────────────
+            composable(BottomTab.Account.route) {
+                AccountScreen(
+                    onSignInClick = { navController.navigate("auth") }
+                )
             }
 
+            // ── Auth (sign-in / sign-up) ──────────────────────────────────────
+            composable("auth") {
+                AuthScreen(onBack = { navController.popBackStack() })
+            }
+
+            // ── Freeform recipe entry (F5) ────────────────────────────────────
+            composable("freeform") {
+                FreeformEntryScreen(
+                    onBack = { navController.popBackStack() },
+                    onEditClick = { recipeId -> navController.navigate("recipe/edit/$recipeId") }
+                )
+            }
+
+            // ── Recipe detail ─────────────────────────────────────────────────
             composable(
                 route = "recipe/{recipeId}",
                 arguments = listOf(navArgument("recipeId") { type = NavType.StringType })
@@ -95,6 +154,7 @@ fun AmrosaNavGraph() {
                 )
             }
 
+            // ── Recipe editor ─────────────────────────────────────────────────
             composable(
                 route = "recipe/edit/{recipeId}",
                 arguments = listOf(navArgument("recipeId") { type = NavType.StringType })

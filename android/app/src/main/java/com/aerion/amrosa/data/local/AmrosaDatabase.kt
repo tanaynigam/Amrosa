@@ -25,6 +25,6 @@ abstract class AmrosaDatabase : RoomDatabase() {
     abstract fun recipeNoteDao(): RecipeNoteDao
 
     companion object {
-        const val DB_VERSION = 4
+        const val DB_VERSION = 8
     }
 }

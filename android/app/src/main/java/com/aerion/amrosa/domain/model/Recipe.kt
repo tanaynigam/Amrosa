@@ -18,6 +18,12 @@ data class Recipe(
     val ingredients: List<Ingredient>,
     val steps: List<Step>,
     val isCustomized: Boolean,
+    val isImported: Boolean = false,
+    val needsReview: Boolean = false,
+    val version: Int = 1,
+    val changeLog: List<RecipeChange> = emptyList(),
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val authorId: String? = null,
+    val authorDisplayName: String? = null,
 )

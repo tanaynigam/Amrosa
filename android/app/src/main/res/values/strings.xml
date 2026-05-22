@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Amrosa</string>
+    <!-- Web client ID from Firebase Console (client_type 3 in google-services.json) -->
+    <string name="google_web_client_id" translatable="false">783138326619-ak0mkp0l391d4u0vomkqec22dghcetde.apps.googleusercontent.com</string>
 </resources>

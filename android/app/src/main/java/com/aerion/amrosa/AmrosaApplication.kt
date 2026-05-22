@@ -17,6 +17,8 @@ class AmrosaApplication : Application() {
         super.onCreate()
         container = AppContainer(this)
         appScope.launch {
+            // Ensure there is always a Firebase session (anonymous until the user signs in)
+            container.authRepository.signInAnonymouslyIfNeeded()
             // Local seed as fallback (runs once, skipped if DB already has data)
             container.seeder.seedIfNeeded()
             // Pull any new/updated recipes from Firestore

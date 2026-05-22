@@ -13,16 +13,16 @@ class DatabaseSeeder(
     private val prefs = context.getSharedPreferences("amrosa_prefs", Context.MODE_PRIVATE)
 
     suspend fun seedIfNeeded() {
-        if (prefs.getBoolean("seeded_v6", false)) return
+        if (prefs.getBoolean("seeded_v10", false)) return
         if (repository.count() > 0) {
-            prefs.edit().putBoolean("seeded_v6", true).apply()
+            prefs.edit().putBoolean("seeded_v10", true).apply()
             return
         }
         seedCookieRecipe()
         seedPizzaRecipe()
         seedButterChickenRecipe()
         seedMalaiKoftaRecipe()
-        prefs.edit().putBoolean("seeded_v6", true).apply()
+        prefs.edit().putBoolean("seeded_v10", true).apply()
     }
 
     // ─────────────────────────────────────────────────────────────────────────
