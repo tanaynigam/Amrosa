@@ -75,6 +75,19 @@ fun RecipeDetailScreen(
                     }
                 },
                 actions = {
+                    // Share / visibility toggle — owners only
+                    if (state.isOwner) {
+                        IconButton(
+                            onClick = { showVisibilityDialog = true },
+                            enabled = !state.isVisibilityUpdating
+                        ) {
+                            Icon(
+                                if (state.isPublic) Icons.Default.Public else Icons.Default.Share,
+                                contentDescription = if (state.isPublic) "Shared — tap to make private"
+                                                     else "Share this recipe"
+                            )
+                        }
+                    }
                     IconButton(onClick = onEditClick) {
                         Icon(Icons.Default.Edit, contentDescription = "Edit Recipe")
                     }
