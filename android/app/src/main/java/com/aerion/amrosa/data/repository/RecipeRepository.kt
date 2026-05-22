@@ -17,6 +17,9 @@ class RecipeRepository(
     fun getAllRecipes(): Flow<List<Recipe>> =
         recipeDao.getAllRecipes().map { list -> list.map { it.toBasicDomain() } }
 
+    fun getPersonalRecipes(): Flow<List<Recipe>> =
+        recipeDao.getPersonalRecipes().map { list -> list.map { it.toBasicDomain() } }
+
     fun getImportedRecipes(): Flow<List<Recipe>> =
         recipeDao.getImportedRecipes().map { list -> list.map { it.toBasicDomain() } }
 
@@ -62,13 +65,26 @@ class RecipeRepository(
     suspend fun deleteFullRecipe(recipeId: String) =
         recipeDao.deleteFullRecipe(recipeId)
 
+    /** Clears the needsReview flag — called when the user taps Confirm on the review sheet. */
+    suspend fun confirmImportedRecipe(recipeId: String) =
+        recipeDao.updateNeedsReview(recipeId, false)
+
     suspend fun addNote(note: RecipeNoteEntity) = noteDao.insertNote(note)
     suspend fun updateNote(note: RecipeNoteEntity) = noteDao.updateNote(note)
     suspend fun deleteNote(id: String) = noteDao.deleteNote(id)
     suspend fun count() = recipeDao.count()
 
+    // ─── Domain mapping ───────────────────────────────────────────────────────
+
+    private fun changeLogList(json: String): List<RecipeChange> =
+        try {
+            gson.fromJson(json, object : TypeToken<List<RecipeChange>>() {}.type) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+
     private fun stringList(json: String): List<String> =
-        gson.fromJson(json, object : TypeToken<List<String>>() {}.type)
+        gson.fromJson(json, object : TypeToken<List<String>>() {}.type) ?: emptyList()
 
     private fun RecipeEntity.toBasicDomain() = Recipe(
         id = id, title = title, description = description,
@@ -78,7 +94,11 @@ class RecipeRepository(
         prepTimeMinutes = prepTimeMinutes, cookTimeMinutes = cookTimeMinutes,
         imageUrl = imageUrl, tags = stringList(tags),
         sections = emptyList(), ingredients = emptyList(), steps = emptyList(),
-        isCustomized = isCustomized, createdAt = createdAt, updatedAt = updatedAt
+        isCustomized = isCustomized, isImported = isImported,
+        needsReview = needsReview,
+        version = version, changeLog = changeLogList(changeLog),
+        createdAt = createdAt, updatedAt = updatedAt,
+        authorId = authorId, authorDisplayName = authorDisplayName
     )
 
     private fun RecipeEntity.toDomain(
@@ -93,14 +113,25 @@ class RecipeRepository(
         prepTimeMinutes = prepTimeMinutes, cookTimeMinutes = cookTimeMinutes,
         imageUrl = imageUrl, tags = stringList(tags),
         sections = sections, ingredients = ingredients, steps = steps,
-        isCustomized = isCustomized, createdAt = createdAt, updatedAt = updatedAt
+        isCustomized = isCustomized, isImported = isImported,
+        needsReview = needsReview,
+        version = version, changeLog = changeLogList(changeLog),
+        createdAt = createdAt, updatedAt = updatedAt,
+        authorId = authorId, authorDisplayName = authorDisplayName
     )
 
     private fun RecipeSectionEntity.toDomain() = RecipeSection(id, name, orderIndex)
 
     private fun IngredientEntity.toDomain() = Ingredient(
-        id, sectionId, name, quantityValue, quantityUnit, quantityDisplay,
-        groupLabel, isOptional, substituteGroupId, substituteRatio, orderIndex
+        id = id, sectionId = sectionId, name = name,
+        quantityValue = quantityValue, quantityUnit = quantityUnit, quantityDisplay = quantityDisplay,
+        quantityValueMetric = quantityValueMetric, quantityUnitMetric = quantityUnitMetric,
+        quantityDisplayMetric = quantityDisplayMetric,
+        quantityValueImperial = quantityValueImperial, quantityUnitImperial = quantityUnitImperial,
+        quantityDisplayImperial = quantityDisplayImperial,
+        groupLabel = groupLabel, isOptional = isOptional,
+        substituteGroupId = substituteGroupId, substituteRatio = substituteRatio,
+        orderIndex = orderIndex
     )
 
     private fun StepEntity.toDomain(refs: List<StepIngredientRefEntity>) = Step(

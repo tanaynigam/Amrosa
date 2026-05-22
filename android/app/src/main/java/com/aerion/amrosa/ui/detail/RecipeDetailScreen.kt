@@ -24,6 +24,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.domain.model.*
 import com.aerion.amrosa.ui.util.QuantityScaler
+import com.aerion.amrosa.ui.util.UnitMode
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -44,6 +45,7 @@ fun RecipeDetailScreen(
     var showNoteInput by remember { mutableStateOf(false) }
     var noteText by remember { mutableStateOf("") }
     var showCookingMode by remember { mutableStateOf(false) }
+    var selectedUnit by remember { mutableStateOf(UnitMode.ORIGINAL) }
 
     if (showCookingMode && state.recipe != null) {
         CookingModeScreen(
@@ -265,7 +267,45 @@ fun RecipeDetailScreen(
             }
 
             // ── Ingredient checklist ────────────────────────────────
-            item { SectionHeader("Ingredients") }
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Ingredients", style = MaterialTheme.typography.headlineMedium)
+
+                    // Unit toggle — only shown when at least one ingredient has conversions
+                    val hasConversions = recipe.ingredients.any {
+                        it.quantityValueMetric != null || it.quantityValueImperial != null
+                    }
+                    if (hasConversions) {
+                        SingleChoiceSegmentedButtonRow {
+                            UnitMode.entries.forEachIndexed { index, mode ->
+                                SegmentedButton(
+                                    selected = selectedUnit == mode,
+                                    onClick = { selectedUnit = mode },
+                                    shape = SegmentedButtonDefaults.itemShape(
+                                        index = index, count = UnitMode.entries.size
+                                    ),
+                                    label = {
+                                        Text(
+                                            when (mode) {
+                                                UnitMode.ORIGINAL -> "Orig"
+                                                UnitMode.METRIC   -> "Metric"
+                                                UnitMode.IMPERIAL -> "Imp"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
 
             val grouped = state.visibleIngredients.groupBy { it.groupLabel ?: "" }
             grouped.forEach { (label, ings) ->
@@ -282,9 +322,7 @@ fun RecipeDetailScreen(
                 items(ings, key = { it.id }) { ing ->
                     IngredientRow(
                         ingredient = ing,
-                        scaledQty = QuantityScaler.scale(
-                            ing.quantityValue, ing.quantityUnit, ing.quantityDisplay, state.scaleFactor
-                        ),
+                        scaledQty = QuantityScaler.scale(ing, state.scaleFactor, selectedUnit),
                         isChecked = ing.id in state.checkedIngredients,
                         isOptional = ing.isOptional,
                         isOptionalEnabled = ing.id in state.enabledOptionals,

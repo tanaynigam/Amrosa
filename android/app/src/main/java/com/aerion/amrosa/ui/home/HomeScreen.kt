@@ -7,16 +7,14 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -25,22 +23,50 @@ import com.aerion.amrosa.domain.model.Recipe
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(onRecipeClick: (String) -> Unit, onSettingsClick: () -> Unit = {}) {
+fun HomeScreen(
+    onRecipeClick: (String) -> Unit,
+    onSettingsClick: () -> Unit = {},
+    onFabFreeformClick: () -> Unit = {},
+    onFabImportClick: () -> Unit = {},
+    filter: RecipeFilter = RecipeFilter.ALL
+) {
     val app = LocalContext.current.applicationContext as AmrosaApplication
-    val viewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(app.container.repository))
+    val viewModel: HomeViewModel = viewModel(
+        key = "home-${filter.name}",
+        factory = HomeViewModel.factory(app.container.repository, filter)
+    )
     val state by viewModel.uiState.collectAsState()
+    var showAddSheet by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Amrita & Ambrosia", style = MaterialTheme.typography.titleLarge) },
+                title = {
+                    Text(
+                        if (filter == RecipeFilter.PERSONAL) "My Recipes" else "Amrita & Ambrosia",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                },
                 actions = {
-                    IconButton(onClick = onSettingsClick) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    if (filter == RecipeFilter.ALL) {
+                        IconButton(onClick = onSettingsClick) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
             )
+        },
+        floatingActionButton = {
+            if (filter == RecipeFilter.PERSONAL) {
+                ExtendedFloatingActionButton(
+                    text = { Text("Add Recipe") },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    onClick = { showAddSheet = true }
+                )
+            }
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -88,7 +114,11 @@ fun HomeScreen(onRecipeClick: (String) -> Unit, onSettingsClick: () -> Unit = {}
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 else -> LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(
+                        start = 16.dp, end = 16.dp, top = 16.dp,
+                        // Extra bottom padding so FAB doesn't cover last card
+                        bottom = if (filter == RecipeFilter.PERSONAL) 88.dp else 16.dp
+                    ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(state.filteredRecipes, key = { it.id }) { recipe ->
@@ -98,7 +128,67 @@ fun HomeScreen(onRecipeClick: (String) -> Unit, onSettingsClick: () -> Unit = {}
             }
         }
     }
+
+    // ── Add Recipe bottom sheet ───────────────────────────────────────────────
+    if (showAddSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showAddSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 32.dp)
+            ) {
+                Text(
+                    "Add New Recipe",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                )
+                HorizontalDivider()
+
+                // Option 1 — Type it out
+                ListItem(
+                    headlineContent = { Text("Type it out") },
+                    supportingContent = {
+                        Text("Free-text entry — Gemini will structure it",
+                            style = MaterialTheme.typography.bodySmall)
+                    },
+                    leadingContent = {
+                        Icon(Icons.Default.Edit, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary)
+                    },
+                    modifier = Modifier.clickable {
+                        showAddSheet = false
+                        onFabFreeformClick()
+                    }
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                // Option 2 — Import from URL or file
+                ListItem(
+                    headlineContent = { Text("Import from URL or file") },
+                    supportingContent = {
+                        Text("Paste a URL, Google Sheet, or upload a file",
+                            style = MaterialTheme.typography.bodySmall)
+                    },
+                    leadingContent = {
+                        Icon(Icons.Default.CloudDownload, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary)
+                    },
+                    modifier = Modifier.clickable {
+                        showAddSheet = false
+                        onFabImportClick()
+                    }
+                )
+            }
+        }
+    }
 }
+
+// ── Recipe card ───────────────────────────────────────────────────────────────
 
 @Composable
 private fun RecipeCard(recipe: Recipe, onClick: () -> Unit) {
@@ -111,7 +201,6 @@ private fun RecipeCard(recipe: Recipe, onClick: () -> Unit) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(recipe.title, style = MaterialTheme.typography.titleLarge,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
-
             Spacer(modifier = Modifier.height(6.dp))
 
             val timeLabel = buildString {
@@ -128,9 +217,8 @@ private fun RecipeCard(recipe: Recipe, onClick: () -> Unit) {
             if (recipe.tags.isNotEmpty()) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(recipe.tags) { tag ->
-                        SuggestionChip(onClick = {}, label = {
-                            Text(tag, style = MaterialTheme.typography.labelSmall)
-                        })
+                        SuggestionChip(onClick = {},
+                            label = { Text(tag, style = MaterialTheme.typography.labelSmall) })
                     }
                 }
             }

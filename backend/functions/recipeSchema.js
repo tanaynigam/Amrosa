@@ -1,5 +1,5 @@
 /**
- * Amrosa recipe JSON schema — used in the Claude API prompt so the LLM
+ * Amrosa recipe JSON schema — used in the Gemini prompt so the model
  * returns data that maps directly onto the Firestore / Room data model.
  */
 
@@ -35,8 +35,17 @@ Return a single JSON object with EXACTLY these fields (no markdown, no explanati
       "sectionId": "section-import-001 — must match a section id above",
       "name": "string — ingredient name, e.g. 'All Purpose Flour'",
       "quantityValue": number or null — numeric quantity at base yield (e.g. 2.25 for '2¼ cups'). null for 'to taste', 'a pinch', etc.,
-      "quantityUnit": "string or null — unit like 'cup', 'tablespoon', 'teaspoon', 'oz', 'kg', 'gm', 'whole', 'clove', etc. null if no unit",
+      "quantityUnit": "string or null — unit like 'cup', 'tablespoon', 'teaspoon', 'oz', 'kg', 'g', 'whole', 'clove', etc. null if no unit",
       "quantityDisplay": "string — human-readable display like '2¼ cup', '1 can / 28oz', 'to taste', 'a pinch'",
+
+      "quantityValueMetric": number or null — metric equivalent of quantityValue. Populate for volume (cups→ml, tbsp→ml, tsp→ml) and weight (oz→g, lb→kg). null if already metric, non-convertible count, or 'to taste',
+      "quantityUnitMetric": "string or null — metric unit: 'ml', 'L', 'g', 'kg'. null if not convertible",
+      "quantityDisplayMetric": "string or null — full metric display like '240ml', '15ml', '227g', '1.1kg'. null if not convertible",
+
+      "quantityValueImperial": number or null — imperial equivalent of quantityValue. Populate for metric sources (g→oz, kg→lb, ml→fl oz). null if already imperial, non-convertible count, or 'to taste',
+      "quantityUnitImperial": "string or null — imperial unit: 'fl oz', 'oz', 'lb'. null if not convertible",
+      "quantityDisplayImperial": "string or null — full imperial display like '8 fl oz', '8 oz', '2.2 lb'. null if not convertible",
+
       "groupLabel": "string — logical grouping for display, e.g. 'Wet Ingredients', 'Dry Ingredients', 'Spices', 'Sauce', 'Garnish'",
       "isOptional": boolean — true if the recipe says 'optional',
       "substituteGroupId": null,
@@ -60,7 +69,9 @@ Return a single JSON object with EXACTLY these fields (no markdown, no explanati
       "ingredientId": "ing-import-001 — must match an ingredient id",
       "quantityDisplay": "string — the quantity of this ingredient used in this specific step, e.g. '2 tbsp', '1 cup'"
     }
-  ]
+  ],
+
+  "parseNotes": "string or null — if any important field was genuinely unclear or could not be confidently extracted (e.g. yield not stated, cooking time ambiguous, section structure unclear), include ONE brief sentence describing what was uncertain. Set to null if everything was extracted cleanly."
 }
 
 IMPORTANT RULES:
@@ -71,8 +82,19 @@ IMPORTANT RULES:
 5. If the recipe has distinct sub-recipes or phases (e.g. dough + sauce + assembly), create separate sections. If it's a simple single-phase recipe, use one section.
 6. Group ingredients logically by their role (e.g. "Marinade", "Sauce", "Dry Ingredients", "Garnish").
 7. Mark ingredients as optional (isOptional: true) only if the recipe explicitly says "optional".
-8. For "to taste", "as needed", "for garnish" type quantities, set quantityValue and quantityUnit to null.
+8. For "to taste", "as needed", "for garnish" type quantities, set quantityValue, quantityUnit, and ALL conversion fields to null.
 9. Return ONLY the JSON object. No markdown code fences, no explanation, no preamble.
+
+UNIT CONVERSION RULES (for quantityValueMetric / quantityValueImperial):
+- Volume (cups/tbsp/tsp → ml):  1 cup = 240ml, 1 tbsp = 15ml, 1 tsp = 5ml, 1 fl oz = 30ml
+- Volume (ml/L → fl oz):  1 ml = 0.0338 fl oz, 1 L = 33.8 fl oz
+- Weight (oz/lb → g/kg):  1 oz = 28.35g, 1 lb = 453.6g (or 0.4536kg)
+- Weight (g/kg → oz/lb):  1 g = 0.0353 oz, 1 kg = 2.205 lb
+- If the original unit is already metric (g, kg, ml, L), populate imperial fields and leave metric fields null.
+- If the original unit is already imperial (oz, lb, fl oz), populate metric fields and leave imperial fields null.
+- If the original unit is cups/tbsp/tsp, populate metric (ml/L) and leave imperial as null (cups are already "imperial" enough).
+- Non-convertible quantities (whole items like "2 cloves", "1 can", "3 eggs", "to taste", counts): set all conversion fields to null.
+- Round metric values sensibly: 240ml not 240.00ml, 28g not 28.35g for small amounts.
 `;
 
 module.exports = { RECIPE_SCHEMA_DESCRIPTION };

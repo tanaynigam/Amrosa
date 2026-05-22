@@ -4,7 +4,9 @@ import android.content.Context
 import android.util.Log
 import com.aerion.amrosa.data.local.entity.*
 import com.aerion.amrosa.data.repository.RecipeRepository
+import com.aerion.amrosa.domain.model.Recipe
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import com.google.gson.Gson
 import kotlinx.coroutines.tasks.await
 
@@ -34,6 +36,7 @@ class RecipeSyncService(
         private const val TAG = "RecipeSyncService"
         private const val KEY_LAST_SYNC = "last_sync_timestamp"
         private const val COLLECTION_RECIPES = "recipes"
+        private const val COLLECTION_PERSONAL = "personal_recipes"
     }
 
     /**
@@ -97,6 +100,117 @@ class RecipeSyncService(
     suspend fun forceFullSync(): Int {
         prefs.edit().putLong(KEY_LAST_SYNC, 0L).apply()
         return sync()
+    }
+
+    /**
+     * Push a personal (non-imported) recipe from Room up to Firestore's
+     * [COLLECTION_PERSONAL] collection so it is backed up in the cloud.
+     *
+     * The document structure mirrors the shared `recipes` collection so the
+     * same [parseRecipe] logic can re-hydrate it if needed in the future.
+     *
+     * @return true if the push succeeded, false on error.
+     */
+    suspend fun pushPersonalRecipe(recipeId: String): Boolean {
+        return try {
+            val recipe = repository.getRecipeWithDetails(recipeId)
+            if (recipe == null) {
+                Log.w(TAG, "pushPersonalRecipe: recipe $recipeId not found in Room")
+                return false
+            }
+            val doc = buildFirestoreDocument(recipe)
+            firestore.collection(COLLECTION_PERSONAL)
+                .document(recipeId)
+                .set(doc, SetOptions.merge())
+                .await()
+            Log.d(TAG, "Pushed personal recipe $recipeId to Firestore")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to push personal recipe $recipeId", e)
+            false
+        }
+    }
+
+    // ─── Firestore serialisation ──────────────────────────────────────────────
+
+    /**
+     * Serialise a full [Recipe] domain model into a Firestore-compatible Map.
+     * The structure mirrors what [parseRecipe] expects so the pull path can
+     * re-hydrate documents written here.
+     */
+    private fun buildFirestoreDocument(recipe: Recipe): Map<String, Any?> {
+        val sections = recipe.sections.map { s ->
+            mapOf("id" to s.id, "name" to s.name, "orderIndex" to s.orderIndex)
+        }
+
+        val ingredients = recipe.ingredients.map { ing ->
+            mapOf(
+                "id" to ing.id,
+                "recipeId" to recipe.id,
+                "sectionId" to ing.sectionId,
+                "name" to ing.name,
+                "quantityValue" to ing.quantityValue,
+                "quantityUnit" to ing.quantityUnit,
+                "quantityDisplay" to ing.quantityDisplay,
+                "groupLabel" to ing.groupLabel,
+                "isOptional" to ing.isOptional,
+                "substituteGroupId" to ing.substituteGroupId,
+                "substituteRatio" to ing.substituteRatio,
+                "orderIndex" to ing.orderIndex
+            )
+        }
+
+        // Flatten step-ingredient refs from all steps
+        val stepRefs = recipe.steps.flatMap { step ->
+            step.ingredientRefs.map { ref ->
+                mapOf(
+                    "stepId" to step.id,
+                    "ingredientId" to ref.ingredientId,
+                    "quantityDisplay" to ref.quantityDisplay
+                )
+            }
+        }
+
+        val steps = recipe.steps.map { step ->
+            mapOf(
+                "id" to step.id,
+                "recipeId" to recipe.id,
+                "sectionId" to step.sectionId,
+                "instruction" to step.instruction,
+                "orderIndex" to step.orderIndex
+            )
+        }
+
+        return mapOf(
+            "title" to recipe.title,
+            "description" to recipe.description,
+            "sourceUrls" to recipe.sourceUrls,
+            "baseServings" to recipe.baseServings,
+            "baseServingsMin" to recipe.baseServingsMin,
+            "baseServingsMax" to recipe.baseServingsMax,
+            "scaleIngredientId" to recipe.scaleIngredientId,
+            "scaleStep" to recipe.scaleStep,
+            "prepTimeMinutes" to recipe.prepTimeMinutes,
+            "cookTimeMinutes" to recipe.cookTimeMinutes,
+            "imageUrl" to recipe.imageUrl,
+            "tags" to recipe.tags,
+            "isCustomized" to recipe.isCustomized,
+            "isImported" to recipe.isImported,
+            "version" to recipe.version,
+            "changeLog" to recipe.changeLog.map { change ->
+                mapOf(
+                    "version" to change.version,
+                    "timestamp" to change.timestamp,
+                    "summary" to change.summary
+                )
+            },
+            "createdAt" to recipe.createdAt,
+            "updatedAt" to recipe.updatedAt,
+            "sections" to sections,
+            "ingredients" to ingredients,
+            "steps" to steps,
+            "stepIngredientRefs" to stepRefs
+        )
     }
 
     @Suppress("UNCHECKED_CAST")

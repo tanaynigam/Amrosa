@@ -16,5 +16,14 @@ data class IngredientEntity(
     val isOptional: Boolean = false,
     val substituteGroupId: String?, // shared ID = mutually exclusive alternatives
     val substituteRatio: Float = 1.0f, // qty multiplier vs base ingredient in group
-    val orderIndex: Int
+    val orderIndex: Int,
+
+    // F6: Unit conversions — populated by Gemini on import; null for seeded/manual recipes.
+    // Placed last so existing positional constructor calls in DatabaseSeeder remain valid.
+    val quantityValueMetric: Double? = null,
+    val quantityUnitMetric: String? = null,
+    val quantityDisplayMetric: String? = null,
+    val quantityValueImperial: Double? = null,
+    val quantityUnitImperial: String? = null,
+    val quantityDisplayImperial: String? = null,
 )

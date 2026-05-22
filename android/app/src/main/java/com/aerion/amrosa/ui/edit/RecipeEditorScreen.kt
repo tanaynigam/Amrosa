@@ -26,7 +26,12 @@ fun RecipeEditorScreen(
     val app = LocalContext.current.applicationContext as AmrosaApplication
     val vm: RecipeEditorViewModel = viewModel(
         key = "editor-$recipeId",
-        factory = RecipeEditorViewModel.factory(app.container.repository, recipeId, app.container.gson)
+        factory = RecipeEditorViewModel.factory(
+            app.container.repository,
+            app.container.syncService,
+            recipeId,
+            app.container.gson
+        )
     )
     val state by vm.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }

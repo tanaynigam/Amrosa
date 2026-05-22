@@ -10,8 +10,14 @@ abstract class RecipeDao {
     @Query("SELECT * FROM recipes ORDER BY title ASC")
     abstract fun getAllRecipes(): Flow<List<RecipeEntity>>
 
-    @Query("SELECT * FROM recipes WHERE isCustomized = 1 ORDER BY createdAt DESC")
+    @Query("SELECT * FROM recipes WHERE isImported = 0 ORDER BY title ASC")
+    abstract fun getPersonalRecipes(): Flow<List<RecipeEntity>>
+
+    @Query("SELECT * FROM recipes WHERE isImported = 1 ORDER BY needsReview DESC, createdAt DESC")
     abstract fun getImportedRecipes(): Flow<List<RecipeEntity>>
+
+    @Query("UPDATE recipes SET needsReview = :needsReview WHERE id = :id")
+    abstract suspend fun updateNeedsReview(id: String, needsReview: Boolean)
 
     @Query("SELECT * FROM recipes WHERE id = :id")
     abstract suspend fun getRecipeById(id: String): RecipeEntity?

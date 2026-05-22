@@ -1,5 +1,9 @@
 package com.aerion.amrosa.ui.import_recipe
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.util.Base64
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -15,19 +19,23 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
+// ─── UI state ────────────────────────────────────────────────────────────────
+
 data class ImportUiState(
     val url: String = "",
-    val isImporting: Boolean = false,
+    val isImporting: Boolean = false,       // URL import in flight
+    val isImportingFile: Boolean = false,   // file import in flight
+    val isReimporting: Boolean = false,     // reimport in flight
     val errorMessage: String? = null,
     val importedRecipes: List<Recipe> = emptyList(),
     val isLoading: Boolean = true,
-    // Parsed recipe awaiting review
-    val parsedRecipe: ParsedRecipeData? = null
+    // When non-null the review sheet is open
+    val parsedRecipe: ParsedRecipeData? = null,
+    val reviewingRecipeId: String? = null   // Room ID of the recipe under review
 )
 
-/**
- * Holds the raw parsed data from the Cloud Function, before it's saved to Room.
- */
+// ─── Parsed recipe data models ────────────────────────────────────────────────
+
 data class ParsedRecipeData(
     val title: String,
     val description: String?,
@@ -42,7 +50,9 @@ data class ParsedRecipeData(
     val sections: List<ParsedSection>,
     val ingredients: List<ParsedIngredient>,
     val steps: List<ParsedStep>,
-    val stepIngredientRefs: List<ParsedStepRef>
+    val stepIngredientRefs: List<ParsedStepRef>,
+    /** Gemini's note about anything it couldn't confidently extract. Null if clean. */
+    val parseNotes: String? = null
 )
 
 data class ParsedSection(val id: String, val name: String, val orderIndex: Int)
@@ -50,7 +60,14 @@ data class ParsedIngredient(
     val id: String, val sectionId: String?, val name: String,
     val quantityValue: Double?, val quantityUnit: String?,
     val quantityDisplay: String?, val groupLabel: String?,
-    val isOptional: Boolean, val orderIndex: Int
+    val isOptional: Boolean, val orderIndex: Int,
+    // F6: unit conversions
+    val quantityValueMetric: Double? = null,
+    val quantityUnitMetric: String? = null,
+    val quantityDisplayMetric: String? = null,
+    val quantityValueImperial: Double? = null,
+    val quantityUnitImperial: String? = null,
+    val quantityDisplayImperial: String? = null,
 )
 data class ParsedStep(
     val id: String, val sectionId: String?,
@@ -60,9 +77,12 @@ data class ParsedStepRef(
     val stepId: String, val ingredientId: String, val quantityDisplay: String?
 )
 
+// ─── ViewModel ────────────────────────────────────────────────────────────────
+
 class ImportViewModel(
     private val repository: RecipeRepository,
-    private val gson: Gson
+    private val gson: Gson,
+    private val context: Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ImportUiState())
@@ -78,6 +98,8 @@ class ImportViewModel(
         }
     }
 
+    // ─── URL import ───────────────────────────────────────────────────────────
+
     fun onUrlChange(url: String) {
         _uiState.update { it.copy(url = url, errorMessage = null) }
     }
@@ -88,161 +110,302 @@ class ImportViewModel(
             _uiState.update { it.copy(errorMessage = "Please enter a URL") }
             return
         }
-
         _uiState.update { it.copy(isImporting = true, errorMessage = null) }
 
         viewModelScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    functions
-                        .getHttpsCallable("parseRecipeUrl")
+                    functions.getHttpsCallable("parseRecipeUrl")
                         .call(hashMapOf("url" to url))
                         .await()
                 }
-
-                @Suppress("UNCHECKED_CAST")
-                val data = result.getData() as? Map<String, Any>
-                    ?: throw Exception("Empty response from server")
-
-                @Suppress("UNCHECKED_CAST")
-                val recipeMap = data["recipe"] as? Map<String, Any>
-                    ?: throw Exception("No recipe in response")
-
-                val parsed = mapToParsedRecipe(recipeMap)
-
+                val parsed = extractParsedRecipe(result.getData())
+                val recipeId = savePendingRecipe(parsed)
                 _uiState.update {
-                    it.copy(
-                        isImporting = false,
-                        parsedRecipe = parsed,
-                        errorMessage = null
-                    )
+                    it.copy(isImporting = false, parsedRecipe = parsed,
+                        reviewingRecipeId = recipeId, errorMessage = null)
                 }
             } catch (e: Exception) {
-                val message = when {
-                    e.message?.contains("INVALID_ARGUMENT") == true -> "Invalid URL format"
-                    e.message?.contains("NOT_FOUND") == true -> "Could not reach that URL"
-                    e.message?.contains("FAILED_PRECONDITION") == true ->
-                        e.message?.substringAfter("FAILED_PRECONDITION: ")
-                            ?: "Could not find a recipe on this page"
-                    e.message?.contains("INTERNAL") == true ->
-                        e.message?.substringAfter("INTERNAL: ") ?: "Failed to parse the recipe."
-                    else -> "Import failed: ${e.message}"
-                }
-                _uiState.update { it.copy(isImporting = false, errorMessage = message) }
+                _uiState.update { it.copy(isImporting = false, errorMessage = friendlyError(e)) }
             }
         }
     }
 
-    fun dismissReview() {
-        _uiState.update { it.copy(parsedRecipe = null) }
-    }
+    // ─── File import ──────────────────────────────────────────────────────────
 
-    fun saveImportedRecipe() {
-        val parsed = _uiState.value.parsedRecipe ?: return
-
+    fun importFromFile(uri: Uri) {
+        _uiState.update { it.copy(isImportingFile = true, errorMessage = null) }
         viewModelScope.launch {
             try {
-                val recipeId = "imported-${UUID.randomUUID()}"
-                val now = System.currentTimeMillis()
-
-                // Remap all IDs so they're unique and prefixed with the recipe ID
-                val sectionIdMap = mutableMapOf<String, String>()
-                val ingredientIdMap = mutableMapOf<String, String>()
-                val stepIdMap = mutableMapOf<String, String>()
-
-                parsed.sections.forEachIndexed { i, s ->
-                    sectionIdMap[s.id] = "sec-${recipeId}-${i}"
+                val (content, fileType, fileName) = readFile(uri)
+                val result = withContext(Dispatchers.IO) {
+                    functions.getHttpsCallable("parseRecipeContent")
+                        .call(hashMapOf("content" to content, "type" to fileType, "fileName" to fileName))
+                        .await()
                 }
-                parsed.ingredients.forEachIndexed { i, ing ->
-                    ingredientIdMap[ing.id] = "ing-${recipeId}-${i}"
-                }
-                parsed.steps.forEachIndexed { i, step ->
-                    stepIdMap[step.id] = "step-${recipeId}-${i}"
-                }
-
-                val recipe = RecipeEntity(
-                    id = recipeId,
-                    title = parsed.title,
-                    description = parsed.description,
-                    sourceUrls = gson.toJson(parsed.sourceUrls),
-                    baseServings = parsed.baseServings,
-                    baseServingsMin = parsed.baseServingsMin,
-                    baseServingsMax = parsed.baseServingsMax,
-                    scaleIngredientId = null,
-                    scaleStep = 1.0,
-                    prepTimeMinutes = parsed.prepTimeMinutes,
-                    cookTimeMinutes = parsed.cookTimeMinutes,
-                    imageUrl = parsed.imageUrl,
-                    tags = gson.toJson(parsed.tags),
-                    isCustomized = true,
-                    createdAt = now,
-                    updatedAt = now
-                )
-
-                val sections = parsed.sections.map { s ->
-                    RecipeSectionEntity(
-                        id = sectionIdMap[s.id]
-                            ?: throw IllegalArgumentException("No ID mapping for section '${s.id}'"),
-                        recipeId = recipeId,
-                        name = s.name,
-                        orderIndex = s.orderIndex
-                    )
-                }
-
-                val ingredients = parsed.ingredients.map { ing ->
-                    IngredientEntity(
-                        id = ingredientIdMap[ing.id]
-                            ?: throw IllegalArgumentException("No ID mapping for ingredient '${ing.id}'"),
-                        recipeId = recipeId,
-                        sectionId = ing.sectionId?.let { sectionIdMap[it] },
-                        name = ing.name,
-                        quantityValue = ing.quantityValue,
-                        quantityUnit = ing.quantityUnit,
-                        quantityDisplay = ing.quantityDisplay,
-                        groupLabel = ing.groupLabel,
-                        isOptional = ing.isOptional,
-                        substituteGroupId = null,
-                        substituteRatio = 1.0f,
-                        orderIndex = ing.orderIndex
-                    )
-                }
-
-                val steps = parsed.steps.map { step ->
-                    StepEntity(
-                        id = stepIdMap[step.id]
-                            ?: throw IllegalArgumentException("No ID mapping for step '${step.id}'"),
-                        recipeId = recipeId,
-                        sectionId = step.sectionId?.let { sectionIdMap[it] },
-                        instruction = step.instruction,
-                        orderIndex = step.orderIndex
-                    )
-                }
-
-                val refs = parsed.stepIngredientRefs.mapNotNull { ref ->
-                    val newStepId = stepIdMap[ref.stepId] ?: return@mapNotNull null
-                    val newIngId = ingredientIdMap[ref.ingredientId] ?: return@mapNotNull null
-                    StepIngredientRefEntity(newStepId, newIngId, ref.quantityDisplay)
-                }
-
-                withContext(Dispatchers.IO) {
-                    repository.insertFullRecipe(recipe, sections, ingredients, steps, refs)
-                }
-
+                val parsed = extractParsedRecipe(result.getData())
+                val recipeId = savePendingRecipe(parsed)
                 _uiState.update {
-                    it.copy(parsedRecipe = null, url = "", errorMessage = null)
+                    it.copy(isImportingFile = false, parsedRecipe = parsed,
+                        reviewingRecipeId = recipeId, errorMessage = null)
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(errorMessage = "Failed to save: ${e.message}") }
+                _uiState.update { it.copy(isImportingFile = false, errorMessage = friendlyError(e)) }
+            }
+        }
+    }
+
+    // ─── Review sheet actions ─────────────────────────────────────────────────
+
+    /**
+     * User confirmed the review — clear the needsReview flag so the recipe
+     * graduates from "pending" to a normal imported recipe.
+     */
+    fun confirmRecipe() {
+        val recipeId = _uiState.value.reviewingRecipeId ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { repository.confirmImportedRecipe(recipeId) }
+            _uiState.update { it.copy(parsedRecipe = null, reviewingRecipeId = null, url = "") }
+        }
+    }
+
+    /**
+     * User dismissed the review sheet (back gesture).
+     * The recipe stays in Room with needsReview = true — no data is lost.
+     */
+    fun dismissReview() {
+        _uiState.update { it.copy(parsedRecipe = null, reviewingRecipeId = null) }
+    }
+
+    /**
+     * Re-import from the same URL (for URL / Google Sheets / Google Docs sources).
+     * Replaces the existing pending Room record with the fresh parse result.
+     */
+    fun reimportUrl() {
+        val recipeId = _uiState.value.reviewingRecipeId ?: return
+        val sourceUrl = _uiState.value.parsedRecipe?.sourceUrls?.firstOrNull() ?: return
+
+        _uiState.update { it.copy(isReimporting = true, errorMessage = null) }
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    functions.getHttpsCallable("parseRecipeUrl")
+                        .call(hashMapOf("url" to sourceUrl))
+                        .await()
+                }
+                val parsed = extractParsedRecipe(result.getData())
+                replacePendingRecipe(parsed, recipeId)
+                _uiState.update {
+                    it.copy(isReimporting = false, parsedRecipe = parsed, errorMessage = null)
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isReimporting = false, errorMessage = friendlyError(e)) }
+            }
+        }
+    }
+
+    /**
+     * Re-import from a freshly picked file.
+     * Replaces the existing pending Room record with the fresh parse result.
+     */
+    fun reimportFromFile(uri: Uri) {
+        val recipeId = _uiState.value.reviewingRecipeId ?: return
+        _uiState.update { it.copy(isReimporting = true, errorMessage = null) }
+        viewModelScope.launch {
+            try {
+                val (content, fileType, fileName) = readFile(uri)
+                val result = withContext(Dispatchers.IO) {
+                    functions.getHttpsCallable("parseRecipeContent")
+                        .call(hashMapOf("content" to content, "type" to fileType, "fileName" to fileName))
+                        .await()
+                }
+                val parsed = extractParsedRecipe(result.getData())
+                replacePendingRecipe(parsed, recipeId)
+                _uiState.update {
+                    it.copy(isReimporting = false, parsedRecipe = parsed, errorMessage = null)
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isReimporting = false, errorMessage = friendlyError(e)) }
+            }
+        }
+    }
+
+    /**
+     * Open the review sheet for a recipe that already exists in Room
+     * with needsReview = true (e.g. user taps the card after hitting back).
+     */
+    fun openReviewForRecipe(recipeId: String) {
+        viewModelScope.launch {
+            val recipe = withContext(Dispatchers.IO) {
+                repository.getRecipeWithDetails(recipeId)
+            } ?: return@launch
+            _uiState.update {
+                it.copy(parsedRecipe = recipe.toParsedRecipeData(), reviewingRecipeId = recipeId)
             }
         }
     }
 
     fun deleteImportedRecipe(recipeId: String) {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                repository.deleteFullRecipe(recipeId)
-            }
+            withContext(Dispatchers.IO) { repository.deleteFullRecipe(recipeId) }
         }
+    }
+
+    // ─── Private helpers ──────────────────────────────────────────────────────
+
+    /**
+     * Save a parsed recipe to Room immediately with [needsReview] = true.
+     * Returns the new recipe ID.
+     */
+    private suspend fun savePendingRecipe(parsed: ParsedRecipeData): String {
+        val recipeId = "imported-${UUID.randomUUID()}"
+        val now = System.currentTimeMillis()
+        persistParsed(parsed, recipeId, now)
+        return recipeId
+    }
+
+    /**
+     * Delete an existing pending record and re-insert with fresh parse data,
+     * preserving the same [recipeId] so the card in the list updates in place.
+     */
+    private suspend fun replacePendingRecipe(parsed: ParsedRecipeData, recipeId: String) {
+        val now = System.currentTimeMillis()
+        withContext(Dispatchers.IO) {
+            repository.deleteFullRecipe(recipeId)
+            persistParsed(parsed, recipeId, now)
+        }
+    }
+
+    /** Build Room entities from [parsed] and insert with needsReview = true. */
+    private suspend fun persistParsed(parsed: ParsedRecipeData, recipeId: String, now: Long) {
+        val sectionIdMap = mutableMapOf<String, String>()
+        val ingredientIdMap = mutableMapOf<String, String>()
+        val stepIdMap = mutableMapOf<String, String>()
+
+        parsed.sections.forEachIndexed { i, s -> sectionIdMap[s.id] = "sec-$recipeId-$i" }
+        parsed.ingredients.forEachIndexed { i, ing -> ingredientIdMap[ing.id] = "ing-$recipeId-$i" }
+        parsed.steps.forEachIndexed { i, step -> stepIdMap[step.id] = "step-$recipeId-$i" }
+
+        val recipe = RecipeEntity(
+            id = recipeId,
+            title = parsed.title,
+            description = parsed.description,
+            sourceUrls = gson.toJson(parsed.sourceUrls),
+            baseServings = parsed.baseServings,
+            baseServingsMin = parsed.baseServingsMin,
+            baseServingsMax = parsed.baseServingsMax,
+            scaleIngredientId = null,
+            scaleStep = 1.0,
+            prepTimeMinutes = parsed.prepTimeMinutes,
+            cookTimeMinutes = parsed.cookTimeMinutes,
+            imageUrl = parsed.imageUrl,
+            tags = gson.toJson(parsed.tags),
+            isCustomized = true,
+            isImported = true,
+            needsReview = true,
+            createdAt = now,
+            updatedAt = now
+        )
+
+        val sections = parsed.sections.map { s ->
+            RecipeSectionEntity(
+                id = sectionIdMap[s.id]!!,
+                recipeId = recipeId,
+                name = s.name,
+                orderIndex = s.orderIndex
+            )
+        }
+
+        val ingredients = parsed.ingredients.map { ing ->
+            IngredientEntity(
+                id = ingredientIdMap[ing.id]!!,
+                recipeId = recipeId,
+                sectionId = ing.sectionId?.let { sectionIdMap[it] },
+                name = ing.name,
+                quantityValue = ing.quantityValue,
+                quantityUnit = ing.quantityUnit,
+                quantityDisplay = ing.quantityDisplay,
+                quantityValueMetric = ing.quantityValueMetric,
+                quantityUnitMetric = ing.quantityUnitMetric,
+                quantityDisplayMetric = ing.quantityDisplayMetric,
+                quantityValueImperial = ing.quantityValueImperial,
+                quantityUnitImperial = ing.quantityUnitImperial,
+                quantityDisplayImperial = ing.quantityDisplayImperial,
+                groupLabel = ing.groupLabel,
+                isOptional = ing.isOptional,
+                substituteGroupId = null,
+                substituteRatio = 1.0f,
+                orderIndex = ing.orderIndex
+            )
+        }
+
+        val steps = parsed.steps.map { step ->
+            StepEntity(
+                id = stepIdMap[step.id]!!,
+                recipeId = recipeId,
+                sectionId = step.sectionId?.let { sectionIdMap[it] },
+                instruction = step.instruction,
+                orderIndex = step.orderIndex
+            )
+        }
+
+        val refs = parsed.stepIngredientRefs.mapNotNull { ref ->
+            val newStepId = stepIdMap[ref.stepId] ?: return@mapNotNull null
+            val newIngId = ingredientIdMap[ref.ingredientId] ?: return@mapNotNull null
+            StepIngredientRefEntity(newStepId, newIngId, ref.quantityDisplay)
+        }
+
+        withContext(Dispatchers.IO) {
+            repository.insertFullRecipe(recipe, sections, ingredients, steps, refs)
+        }
+    }
+
+    /** Read a file from [uri] and return (content, fileType, fileName). */
+    private suspend fun readFile(uri: Uri): Triple<String, String, String> {
+        val cr = context.contentResolver
+
+        val (fileName, fileSize) = withContext(Dispatchers.IO) {
+            cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)) to
+                        cursor.getLong(cursor.getColumnIndexOrThrow(OpenableColumns.SIZE))
+                    } else "file" to 0L
+                } ?: ("file" to 0L)
+        }
+
+        if (fileSize > MAX_FILE_BYTES) {
+            throw Exception("File too large. Max size is 5 MB.")
+        }
+
+        val bytes = withContext(Dispatchers.IO) {
+            cr.openInputStream(uri)?.use { it.readBytes() }
+                ?: throw Exception("Could not open file")
+        }
+
+        val mimeType = cr.getType(uri)
+        val ext = fileName.substringAfterLast('.', "").lowercase()
+        val fileType = when {
+            mimeType?.contains("spreadsheet") == true ||
+            mimeType?.contains("excel") == true ||
+            ext == "xlsx" || ext == "xls" -> "xlsx"
+            mimeType == "text/csv" || ext == "csv" -> "csv"
+            else -> "text"
+        }
+
+        val content = when (fileType) {
+            "xlsx" -> Base64.encodeToString(bytes, Base64.NO_WRAP)
+            else   -> bytes.toString(Charsets.UTF_8)
+        }
+
+        return Triple(content, fileType, fileName)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun extractParsedRecipe(raw: Any?): ParsedRecipeData {
+        val data = raw as? Map<String, Any> ?: throw Exception("Empty response from server")
+        val recipeMap = data["recipe"] as? Map<String, Any> ?: throw Exception("No recipe in response")
+        return mapToParsedRecipe(recipeMap)
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -265,7 +428,13 @@ class ImportViewModel(
                 quantityDisplay = ing["quantityDisplay"] as? String,
                 groupLabel = ing["groupLabel"] as? String,
                 isOptional = ing["isOptional"] as? Boolean ?: false,
-                orderIndex = (ing["orderIndex"] as? Number)?.toInt() ?: 0
+                orderIndex = (ing["orderIndex"] as? Number)?.toInt() ?: 0,
+                quantityValueMetric = (ing["quantityValueMetric"] as? Number)?.toDouble(),
+                quantityUnitMetric = ing["quantityUnitMetric"] as? String,
+                quantityDisplayMetric = ing["quantityDisplayMetric"] as? String,
+                quantityValueImperial = (ing["quantityValueImperial"] as? Number)?.toDouble(),
+                quantityUnitImperial = ing["quantityUnitImperial"] as? String,
+                quantityDisplayImperial = ing["quantityDisplayImperial"] as? String,
             )
         } ?: emptyList()
 
@@ -300,16 +469,67 @@ class ImportViewModel(
             sections = sections,
             ingredients = ingredients,
             steps = steps,
-            stepIngredientRefs = refs
+            stepIngredientRefs = refs,
+            parseNotes = map["parseNotes"] as? String
         )
     }
 
+    private fun friendlyError(e: Exception): String = when {
+        e.message?.contains("INVALID_ARGUMENT") == true  -> "Invalid URL format"
+        e.message?.contains("NOT_FOUND") == true         -> "Could not reach that URL"
+        e.message?.contains("FAILED_PRECONDITION") == true ->
+            e.message?.substringAfter("FAILED_PRECONDITION: ")
+                ?: "Could not find a recipe on this page"
+        e.message?.contains("INTERNAL") == true ->
+            e.message?.substringAfter("INTERNAL: ") ?: "Failed to parse the recipe"
+        else -> "Import failed: ${e.message}"
+    }
+
     companion object {
-        fun factory(repository: RecipeRepository, gson: Gson): ViewModelProvider.Factory =
+        private const val MAX_FILE_BYTES = 5 * 1024 * 1024L // 5 MB
+
+        fun factory(repository: RecipeRepository, gson: Gson, context: Context): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    ImportViewModel(repository, gson) as T
+                    ImportViewModel(repository, gson, context) as T
             }
     }
 }
+
+// ─── Extension: Recipe → ParsedRecipeData (for re-opening review) ────────────
+
+/**
+ * Convert a full [Recipe] domain model back into [ParsedRecipeData] so the
+ * review sheet can be re-opened for a recipe that's already in Room.
+ */
+internal fun Recipe.toParsedRecipeData() = ParsedRecipeData(
+    title = title,
+    description = description,
+    sourceUrls = sourceUrls,
+    baseServings = baseServings,
+    baseServingsMin = baseServingsMin,
+    baseServingsMax = baseServingsMax,
+    prepTimeMinutes = prepTimeMinutes,
+    cookTimeMinutes = cookTimeMinutes,
+    imageUrl = imageUrl,
+    tags = tags,
+    sections = sections.map { ParsedSection(it.id, it.name, it.orderIndex) },
+    ingredients = ingredients.map { ing ->
+        ParsedIngredient(
+            id = ing.id, sectionId = ing.sectionId, name = ing.name,
+            quantityValue = ing.quantityValue, quantityUnit = ing.quantityUnit,
+            quantityDisplay = ing.quantityDisplay, groupLabel = ing.groupLabel,
+            isOptional = ing.isOptional, orderIndex = ing.orderIndex
+        )
+    },
+    steps = steps.map { step ->
+        ParsedStep(step.id, step.sectionId, step.instruction, step.orderIndex)
+    },
+    stepIngredientRefs = steps.flatMap { step ->
+        step.ingredientRefs.map { ref ->
+            ParsedStepRef(step.id, ref.ingredientId, ref.quantityDisplay)
+        }
+    },
+    parseNotes = null  // not stored in Room; null when re-opening a saved recipe
+)

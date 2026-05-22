@@ -4,10 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aerion.amrosa.data.local.entity.*
+import com.aerion.amrosa.data.remote.RecipeSyncService
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.domain.model.Ingredient
+import com.aerion.amrosa.domain.model.RecipeChange
 import com.aerion.amrosa.domain.model.Step
 import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -70,6 +73,7 @@ data class EditorUiState(
 
 class RecipeEditorViewModel(
     private val repository: RecipeRepository,
+    private val syncService: RecipeSyncService,
     private val recipeId: String,
     private val gson: Gson
 ) : ViewModel() {
@@ -82,6 +86,10 @@ class RecipeEditorViewModel(
     private var originalScaleStep: Double = 1.0
     private var originalImageUrl: String? = null
     private var originalCreatedAt: Long = 0L
+    private var originalIsImported: Boolean = false
+    private var originalVersion: Int = 1
+    private var originalChangeLog: List<RecipeChange> = emptyList()
+    private var originalSyncedAt: Long? = null
 
     init { loadRecipe() }
 
@@ -101,6 +109,10 @@ class RecipeEditorViewModel(
             originalScaleStep = recipe.scaleStep
             originalImageUrl = recipe.imageUrl
             originalCreatedAt = recipe.createdAt
+            originalIsImported = recipe.isImported
+            originalVersion = recipe.version
+            originalChangeLog = recipe.changeLog
+            originalSyncedAt = null  // will be set after next successful push
 
             val sections = if (recipe.sections.isEmpty()) {
                 // No explicit sections — wrap everything in one implicit section
@@ -267,6 +279,13 @@ class RecipeEditorViewModel(
 
         _uiState.update { it.copy(isSaving = true, error = null) }
         val now = System.currentTimeMillis()
+        val newVersion = originalVersion + 1
+        val changeSummary = buildChangeSummary(state)
+        val newChangeLog = originalChangeLog + RecipeChange(
+            version = newVersion,
+            timestamp = now,
+            summary = changeSummary
+        )
 
         viewModelScope.launch {
             try {
@@ -290,9 +309,13 @@ class RecipeEditorViewModel(
                         state.tagsText.split(",")
                             .map { it.trim() }.filter { it.isNotBlank() }
                     ),
-                    isCustomized = true,  // always true after any edit
+                    isCustomized = true,
+                    isImported = originalIsImported,
+                    version = newVersion,
+                    changeLog = gson.toJson(newChangeLog),
                     createdAt = originalCreatedAt,
-                    updatedAt = now
+                    updatedAt = now,
+                    syncedAt = originalSyncedAt
                 )
 
                 val sectionEntities = state.sections.mapIndexed { idx, section ->
@@ -347,6 +370,14 @@ class RecipeEditorViewModel(
                     )
                 }
 
+                // Push personal (non-imported) recipes to Firestore for cloud backup.
+                // This is fire-and-forget — a push failure does NOT block the save.
+                if (!originalIsImported) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        syncService.pushPersonalRecipe(recipeId)
+                    }
+                }
+
                 _uiState.update { it.copy(isSaving = false, saveComplete = true) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isSaving = false, error = "Save failed: ${e.message}") }
@@ -357,6 +388,29 @@ class RecipeEditorViewModel(
     fun clearError() = _uiState.update { it.copy(error = null) }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
+
+    /**
+     * Builds a human-readable one-line summary of what changed in this edit.
+     * Used as the [RecipeChange.summary] for the version history entry.
+     */
+    private fun buildChangeSummary(state: EditorUiState): String {
+        val parts = mutableListOf<String>()
+        val originalRecipe = _uiState.value  // snapshot at time of save call
+        // Compare title against what was loaded
+        if (state.title.trim() != originalRecipe.title) parts += "title"
+        if (state.description.trim() != originalRecipe.description) parts += "description"
+        if (state.prepTimeMinutes != originalRecipe.prepTimeMinutes ||
+            state.cookTimeMinutes != originalRecipe.cookTimeMinutes) parts += "times"
+        if (state.tagsText != originalRecipe.tagsText) parts += "tags"
+        if (state.sourceUrlsText != originalRecipe.sourceUrlsText) parts += "source URLs"
+        val yieldChanged = state.baseServings != originalRecipe.baseServings ||
+            state.isRangeYield != originalRecipe.isRangeYield ||
+            state.baseServingsMin != originalRecipe.baseServingsMin ||
+            state.baseServingsMax != originalRecipe.baseServingsMax
+        if (yieldChanged) parts += "yield"
+        if (state.sections != originalRecipe.sections) parts += "recipe content"
+        return if (parts.isEmpty()) "Recipe saved" else "Updated: ${parts.joinToString(", ")}"
+    }
 
     private fun transformSection(sectionId: String, transform: (EditorSection) -> EditorSection) =
         _uiState.update { state ->
@@ -389,11 +443,15 @@ class RecipeEditorViewModel(
     private fun Step.toEditor() = EditorStep(id = id, instruction = instruction)
 
     companion object {
-        fun factory(repository: RecipeRepository, recipeId: String, gson: Gson) =
-            object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    RecipeEditorViewModel(repository, recipeId, gson) as T
-            }
+        fun factory(
+            repository: RecipeRepository,
+            syncService: RecipeSyncService,
+            recipeId: String,
+            gson: Gson
+        ) = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                RecipeEditorViewModel(repository, syncService, recipeId, gson) as T
+        }
     }
 }
