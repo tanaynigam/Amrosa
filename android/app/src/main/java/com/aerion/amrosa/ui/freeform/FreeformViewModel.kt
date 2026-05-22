@@ -3,6 +3,7 @@ package com.aerion.amrosa.ui.freeform
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.entity.*
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.ui.import_recipe.*
@@ -26,7 +27,8 @@ data class FreeformUiState(
 
 class FreeformViewModel(
     private val repository: RecipeRepository,
-    private val gson: Gson
+    private val gson: Gson,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FreeformUiState())
@@ -129,7 +131,9 @@ class FreeformViewModel(
             isImported = false,     // freeform = personal recipe
             needsReview = false,    // saved directly after user review
             createdAt = now,
-            updatedAt = now
+            updatedAt = now,
+            authorId = authRepository.uid,
+            authorDisplayName = authRepository.displayName ?: authRepository.email
         )
 
         val sections = parsed.sections.map { s ->
@@ -246,11 +250,15 @@ class FreeformViewModel(
     }
 
     companion object {
-        fun factory(repository: RecipeRepository, gson: Gson): ViewModelProvider.Factory =
+        fun factory(
+            repository: RecipeRepository,
+            gson: Gson,
+            authRepository: AuthRepository
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    FreeformViewModel(repository, gson) as T
+                    FreeformViewModel(repository, gson, authRepository) as T
             }
     }
 }

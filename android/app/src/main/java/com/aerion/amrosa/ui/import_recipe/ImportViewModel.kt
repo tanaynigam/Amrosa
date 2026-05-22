@@ -7,6 +7,7 @@ import android.util.Base64
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.entity.*
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.domain.model.Recipe
@@ -82,7 +83,8 @@ data class ParsedStepRef(
 class ImportViewModel(
     private val repository: RecipeRepository,
     private val gson: Gson,
-    private val context: Context
+    private val context: Context,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ImportUiState())
@@ -304,7 +306,11 @@ class ImportViewModel(
             isImported = true,
             needsReview = true,
             createdAt = now,
-            updatedAt = now
+            updatedAt = now,
+            // Track who imported it (used for ownership/security; display name is
+            // overridden to "Imported" by SharedRecipeService when published)
+            authorId = authRepository.uid,
+            authorDisplayName = authRepository.displayName ?: authRepository.email
         )
 
         val sections = parsed.sections.map { s ->
@@ -488,11 +494,16 @@ class ImportViewModel(
     companion object {
         private const val MAX_FILE_BYTES = 5 * 1024 * 1024L // 5 MB
 
-        fun factory(repository: RecipeRepository, gson: Gson, context: Context): ViewModelProvider.Factory =
+        fun factory(
+            repository: RecipeRepository,
+            gson: Gson,
+            context: Context,
+            authRepository: AuthRepository
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    ImportViewModel(repository, gson, context) as T
+                    ImportViewModel(repository, gson, context, authRepository) as T
             }
     }
 }

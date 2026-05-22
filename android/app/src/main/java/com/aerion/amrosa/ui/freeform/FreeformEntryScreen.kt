@@ -28,7 +28,7 @@ fun FreeformEntryScreen(
 ) {
     val app = LocalContext.current.applicationContext as AmrosaApplication
     val viewModel: FreeformViewModel = viewModel(
-        factory = FreeformViewModel.factory(app.container.repository, app.container.gson)
+        factory = FreeformViewModel.factory(app.container.repository, app.container.gson, app.container.authRepository)
     )
     val state by viewModel.uiState.collectAsState()
 

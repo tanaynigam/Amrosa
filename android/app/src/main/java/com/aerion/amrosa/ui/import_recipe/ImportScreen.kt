@@ -32,7 +32,7 @@ fun ImportScreen(
 ) {
     val app = LocalContext.current.applicationContext as AmrosaApplication
     val viewModel: ImportViewModel = viewModel(
-        factory = ImportViewModel.factory(app.container.repository, app.container.gson, app)
+        factory = ImportViewModel.factory(app.container.repository, app.container.gson, app, app.container.authRepository)
     )
 
     val mimeTypes = arrayOf(

@@ -3,6 +3,7 @@ package com.aerion.amrosa.ui.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.entity.*
 import com.aerion.amrosa.data.remote.RecipeSyncService
 import com.aerion.amrosa.data.repository.RecipeRepository
@@ -74,6 +75,7 @@ data class EditorUiState(
 class RecipeEditorViewModel(
     private val repository: RecipeRepository,
     private val syncService: RecipeSyncService,
+    private val authRepository: AuthRepository,
     private val recipeId: String,
     private val gson: Gson
 ) : ViewModel() {
@@ -90,6 +92,9 @@ class RecipeEditorViewModel(
     private var originalVersion: Int = 1
     private var originalChangeLog: List<RecipeChange> = emptyList()
     private var originalSyncedAt: Long? = null
+    private var originalAuthorId: String? = null
+    private var originalAuthorDisplayName: String? = null
+    private var originalVisibility: String = "private"
 
     init { loadRecipe() }
 
@@ -113,6 +118,11 @@ class RecipeEditorViewModel(
             originalVersion = recipe.version
             originalChangeLog = recipe.changeLog
             originalSyncedAt = null  // will be set after next successful push
+            // Preserve author; if null (forked seeded recipe), stamp the current user
+            originalAuthorId = recipe.authorId ?: authRepository.uid
+            originalAuthorDisplayName = recipe.authorDisplayName
+                ?: authRepository.displayName ?: authRepository.email
+            originalVisibility = recipe.visibility
 
             val sections = if (recipe.sections.isEmpty()) {
                 // No explicit sections — wrap everything in one implicit section
@@ -315,7 +325,10 @@ class RecipeEditorViewModel(
                     changeLog = gson.toJson(newChangeLog),
                     createdAt = originalCreatedAt,
                     updatedAt = now,
-                    syncedAt = originalSyncedAt
+                    syncedAt = originalSyncedAt,
+                    authorId = originalAuthorId,
+                    authorDisplayName = originalAuthorDisplayName,
+                    visibility = originalVisibility
                 )
 
                 val sectionEntities = state.sections.mapIndexed { idx, section ->
@@ -446,12 +459,13 @@ class RecipeEditorViewModel(
         fun factory(
             repository: RecipeRepository,
             syncService: RecipeSyncService,
+            authRepository: AuthRepository,
             recipeId: String,
             gson: Gson
         ) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                RecipeEditorViewModel(repository, syncService, recipeId, gson) as T
+                RecipeEditorViewModel(repository, syncService, authRepository, recipeId, gson) as T
         }
     }
 }

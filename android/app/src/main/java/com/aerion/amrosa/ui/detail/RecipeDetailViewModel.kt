@@ -106,7 +106,10 @@ class RecipeDetailViewModel(
         viewModelScope.launch {
             val recipe = repository.getRecipeWithDetails(recipeId)
             val currentUid = authRepository.uid
-            val isOwner = currentUid != null && recipe?.authorId == currentUid
+            // A recipe is "owned" if its authorId matches the current user,
+            // OR if authorId is null (recipes created before author attribution was added).
+            val isOwner = currentUid != null &&
+                (recipe?.authorId == null || recipe.authorId == currentUid)
 
             val defaultSubs = recipe?.ingredients
                 ?.filter { it.substituteGroupId != null }
