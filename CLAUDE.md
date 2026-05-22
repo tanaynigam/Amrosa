@@ -53,18 +53,18 @@ Amrosa/
 
 ---
 
-## Navigation: 5 Bottom Tabs
+## Navigation: 4 Bottom Tabs
 
 ```
-Tab 1 — All       (📖)  All recipes: personal + seeded + imported + copied shared
-Tab 2 — Personal  (🔖)  Only personal/seeded recipes + "Add New Recipe" FAB
-Tab 3 — Imported  (⬇️)  URL/file/Sheets/Docs-imported recipes + import UI
-Tab 4 — Account   (👤)  Profile, sign-in/out, sync status, app settings   ← LIVE
-Tab 5 — Shared    (🌐)  Community shared recipes; browse, copy, share your own  ← PLANNED (F8)
+Tab 1 — All           (📖)  All recipes: personal + imported + copied shared
+Tab 2 — Your Recipes  (🔖)  All user recipes (personal + imported merged); "Add Recipe" FAB
+Tab 3 — Shared        (🌐)  Community shared recipes; browse, copy, share your own
+Tab 4 — Account       (👤)  Profile, sign-in/out, sync status, app settings
 ```
 
-> **Current state:** 4 tabs (All, Personal, Imported, Account). Shared is planned for F8.
-> When Shared is added it will become Tab 4 and Account shifts to Tab 5.
+> The separate "Imported" tab has been removed. Personal and imported recipes now live in one
+> unified "Your Recipes" tab. The Import screen is a push route (not a tab) accessible via FAB.
+> Pending-review recipes show a "Needs review" badge in the list; tapping opens the review sheet.
 
 ---
 
@@ -172,7 +172,7 @@ All functions use `gemini-2.5-flash` with `thinkingBudget: 0`, `application/json
 2. `RecipeReviewSheet` (shared bottom sheet) opens
 3. Three actions: **Confirm** / **Reimport** / **Edit icon** (pencil in header → navigate to editor)
 4. Back gesture → stays in Room with `needsReview = true`
-5. Imported tab shows pending recipes first with amber "Needs Review" banner
+5. "Your Recipes" tab shows pending recipes first with a "Needs review" banner; tapping navigates to ImportScreen
 
 #### `RecipeReviewSheet` (shared composable — `ui/import_recipe/RecipeReviewSheet.kt`)
 ```kotlin
@@ -185,9 +185,12 @@ internal fun RecipeReviewSheet(
     onPrimary: () -> Unit,
     onSecondary: () -> Unit,
     onDismiss: () -> Unit,
-    onEdit: (() -> Unit)? = null // non-null → pencil icon shown in header
+    onEdit: (() -> Unit)? = null,               // non-null → pencil icon shown in header
+    isOwnRecipe: Boolean = false,               // import flow only
+    onIsOwnRecipeChange: ((Boolean) -> Unit)? = null  // non-null → shows author toggle
 )
 ```
+Author toggle shows "Imported | My Recipe" segmented button; freeform flow omits it (null).
 
 ---
 
@@ -203,9 +206,9 @@ Full inline editor. Entry points: pencil icon on detail screen, **or** Edit butt
 
 ### F5 — Freeform Recipe Entry ✅
 
-FAB on Personal tab → ModalBottomSheet → two options:
-- **"Type it out"** → `FreeformEntryScreen`
-- **"Import from URL or file"** → switches to Imported tab
+FAB on Your Recipes tab → ModalBottomSheet → two options:
+- **"Type it out"** → `FreeformEntryScreen` (pushed)
+- **"Import from URL or file"** → `ImportScreen` (pushed route)
 
 `FreeformEntryScreen`: large OutlinedTextField (minLines=8) → "Format with Gemini" → `formatRecipeText` CF → `RecipeReviewSheet` (Save / Reformat / Edit).
 
@@ -291,24 +294,26 @@ All Recipes Screen
   ├── Search bar, category filter chips, recipe card list
   └── Settings gear → navigates to Account tab
 
-── Bottom Tab 2: Personal ─────────────────────────────────────────────
-Personal Recipes Screen
-  ├── Search + filter, recipe list (isImported = false only)
-  └── FAB "Add New Recipe" → ModalBottomSheet
-        ├── "Type it out" → FreeformEntryScreen
-        └── "Import from URL or file" → Imported tab
+── Bottom Tab 2: Your Recipes ─────────────────────────────────────────
+"Your Recipes" Screen  (RecipeFilter.YOURS — all user recipes, personal + imported)
+  ├── Search + filter, recipe card list sorted: needsReview first → recency
+  ├── needsReview cards show "Needs review — tap to confirm" banner; tap → ImportScreen
+  └── FAB "Add Recipe" → ModalBottomSheet
+        ├── "Type it out" → FreeformEntryScreen (pushed)
+        └── "Import from URL or file" → ImportScreen (pushed)
 
 FreeformEntryScreen  (pushed)
   ├── OutlinedTextField (minLines=8, example placeholder), char count
   ├── "Format with Gemini" button → formatRecipeText CF
   └── RecipeReviewSheet ("Save Recipe" / "Reformat" / Edit icon)
 
-── Bottom Tab 3: Imported ─────────────────────────────────────────────
-ImportScreen
+ImportScreen  (pushed route — NOT a tab)
+  ├── Back button in TopAppBar
   ├── URL import card, file import card (.xlsx/.csv/.txt), Sheets/Docs hint
-  └── Imported recipe list (isImported = true)
-        ├── needsReview recipes first — amber "Needs Review" banner
-        └── RecipeReviewSheet ("Confirm" / "Reimport" / Edit icon)
+  └── RecipeReviewSheet ("Confirm" / "Reimport" / Edit icon)
+        └── Author toggle: [Imported] | [My Recipe]
+              "Imported" → isImported = true  → "Imported" shown when shared
+              "My Recipe" → isImported = false → real user name shown when shared
 
 ── Bottom Tab 4: Account ──────────────────────────────────────────────
 AccountScreen
@@ -443,8 +448,9 @@ Source: `Food Recipes.xlsx` in the project root. DatabaseSeeder must match the x
 - **`RecipeReviewSheet`** — extracted shared composable (`ui/import_recipe/RecipeReviewSheet.kt`); `onEdit` callback shows pencil icon in header
 - **F5** — Freeform recipe entry: FAB bottom sheet, FreeformEntryScreen, formatRecipeText CF, save/saveAndEdit actions
 - **F6** — Unit conversions: 6 fields on IngredientEntity, UnitMode enum, QuantityScaler, unit toggle in RecipeDetailScreen
-- **4-tab navigation**: All · Personal · Imported · Account
+- **4-tab navigation**: All · Your Recipes · Shared · Account (Imported tab removed; Import is now a push route)
 - **F7 (core)** — AuthRepository (anonymous/Google/email/phone), AuthScreen with all 3 methods + sign-up, AccountScreen, anonymous sign-in on launch, authorId/authorDisplayName on RecipeEntity
+- **Author attribution** — Personal recipes stamp real user name; imported recipes always show "Imported" when shared; author choice toggle on review sheet lets user mark an import as their own recipe
 
 ### Planned — In Priority Order
 
@@ -491,7 +497,9 @@ Source: `Food Recipes.xlsx` in the project root. DatabaseSeeder must match the x
 - **Scaling math**: servings-based: `baseQty × selectedServings / baseServings`; anchor-based: `baseQty × anchorQty / baseAnchorQty`; unit conversions scale in parallel
 - **DB versioning**: bump `AmrosaDatabase.DB_VERSION` and `DatabaseSeeder` seeder key (`seeded_vN`) together. **Current: DB v8, seeder `seeded_v10`.**
 - **IngredientEntity field order**: F6 conversion fields are LAST (after `orderIndex`). Do not insert new fields before `orderIndex` — it will break positional DatabaseSeeder calls.
-- **isImported**: `false` → Personal tab; `true` → Imported tab; both → All tab
+- **isImported**: controls author display when sharing: `false` → real user name; `true` → "Imported".
+  Both `isImported = true` and `false` appear in All tab and Your Recipes tab.
+  The separate Imported tab has been removed.
 - **needsReview flow**: recipes saved to Room immediately with `needsReview = true`. Review sheet is a confirmation step, not a save step. `confirmImportedRecipe(recipeId)` clears flag. `dismissReview()` clears UI only. `reimportUrl()`/`reimportFromFile()` delete-and-reinsert same recipeId. `openReviewForRecipe(recipeId)` loads from Room via `getRecipeWithDetails` → `toParsedRecipeData()`.
 - **RecipeChange**: `data class RecipeChange(val version: Int, val timestamp: Long, val summary: String)` — auto-generated summary from changed fields
 - **Auth upgrade pattern**: all sign-in methods check `auth.currentUser?.isAnonymous == true` → `linkWithCredential` instead of new sign-in (preserves local data)

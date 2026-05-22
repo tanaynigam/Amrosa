@@ -23,6 +23,10 @@ class RecipeRepository(
     fun getImportedRecipes(): Flow<List<Recipe>> =
         recipeDao.getImportedRecipes().map { list -> list.map { it.toBasicDomain() } }
 
+    /** All user recipes (personal + imported), pending review first. */
+    fun getYoursRecipes(): Flow<List<Recipe>> =
+        recipeDao.getYoursRecipes().map { list -> list.map { it.toBasicDomain() } }
+
     suspend fun getRecipeWithDetails(id: String): Recipe? {
         val entity = recipeDao.getRecipeById(id) ?: return null
         val sections = recipeDao.getSectionsForRecipe(id)
@@ -68,6 +72,10 @@ class RecipeRepository(
     /** Clears the needsReview flag — called when the user taps Confirm on the review sheet. */
     suspend fun confirmImportedRecipe(recipeId: String) =
         recipeDao.updateNeedsReview(recipeId, false)
+
+    /** Updates the isImported flag — called when the user changes author choice on the review sheet. */
+    suspend fun updateIsImported(recipeId: String, isImported: Boolean) =
+        recipeDao.updateIsImported(recipeId, isImported)
 
     suspend fun addNote(note: RecipeNoteEntity) = noteDao.insertNote(note)
     suspend fun updateNote(note: RecipeNoteEntity) = noteDao.updateNote(note)

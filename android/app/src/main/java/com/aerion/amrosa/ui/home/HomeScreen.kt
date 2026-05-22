@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,6 +29,7 @@ fun HomeScreen(
     onSettingsClick: () -> Unit = {},
     onFabFreeformClick: () -> Unit = {},
     onFabImportClick: () -> Unit = {},
+    onNeedsReviewClick: (String) -> Unit = {},
     filter: RecipeFilter = RecipeFilter.ALL
 ) {
     val app = LocalContext.current.applicationContext as AmrosaApplication
@@ -43,7 +45,11 @@ fun HomeScreen(
             TopAppBar(
                 title = {
                     Text(
-                        if (filter == RecipeFilter.PERSONAL) "My Recipes" else "Amrita & Ambrosia",
+                        when (filter) {
+                            RecipeFilter.YOURS -> "Your Recipes"
+                            RecipeFilter.PERSONAL -> "My Recipes"
+                            else -> "Amrita & Ambrosia"
+                        },
                         style = MaterialTheme.typography.titleLarge
                     )
                 },
@@ -60,7 +66,7 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            if (filter == RecipeFilter.PERSONAL) {
+            if (filter == RecipeFilter.YOURS || filter == RecipeFilter.PERSONAL) {
                 ExtendedFloatingActionButton(
                     text = { Text("Add Recipe") },
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
@@ -117,12 +123,18 @@ fun HomeScreen(
                     contentPadding = PaddingValues(
                         start = 16.dp, end = 16.dp, top = 16.dp,
                         // Extra bottom padding so FAB doesn't cover last card
-                        bottom = if (filter == RecipeFilter.PERSONAL) 88.dp else 16.dp
+                        bottom = if (filter == RecipeFilter.YOURS || filter == RecipeFilter.PERSONAL) 88.dp else 16.dp
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(state.filteredRecipes, key = { it.id }) { recipe ->
-                        RecipeCard(recipe = recipe, onClick = { onRecipeClick(recipe.id) })
+                        RecipeCard(
+                            recipe = recipe,
+                            onClick = {
+                                if (recipe.needsReview) onNeedsReviewClick(recipe.id)
+                                else onRecipeClick(recipe.id)
+                            }
+                        )
                     }
                 }
             }
@@ -219,6 +231,34 @@ private fun RecipeCard(recipe: Recipe, onClick: () -> Unit) {
                     items(recipe.tags) { tag ->
                         SuggestionChip(onClick = {},
                             label = { Text(tag, style = MaterialTheme.typography.labelSmall) })
+                    }
+                }
+            }
+
+            // Pending-review banner
+            if (recipe.needsReview) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.RateReview,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Text(
+                            "Needs review — tap to confirm",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
                     }
                 }
             }

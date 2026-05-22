@@ -16,8 +16,15 @@ abstract class RecipeDao {
     @Query("SELECT * FROM recipes WHERE isImported = 1 ORDER BY needsReview DESC, createdAt DESC")
     abstract fun getImportedRecipes(): Flow<List<RecipeEntity>>
 
+    /** All user recipes (personal + imported), pending review shown first then by recency. */
+    @Query("SELECT * FROM recipes ORDER BY needsReview DESC, updatedAt DESC")
+    abstract fun getYoursRecipes(): Flow<List<RecipeEntity>>
+
     @Query("UPDATE recipes SET needsReview = :needsReview WHERE id = :id")
     abstract suspend fun updateNeedsReview(id: String, needsReview: Boolean)
+
+    @Query("UPDATE recipes SET isImported = :isImported WHERE id = :id")
+    abstract suspend fun updateIsImported(id: String, isImported: Boolean)
 
     @Query("SELECT * FROM recipes WHERE id = :id")
     abstract suspend fun getRecipeById(id: String): RecipeEntity?

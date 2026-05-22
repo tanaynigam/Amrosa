@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Bookmarks
-import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.*
@@ -29,17 +28,15 @@ import com.aerion.amrosa.ui.shared.SharedRecipeDetailScreen
 import com.aerion.amrosa.ui.shared.SharedScreen
 
 private sealed class BottomTab(val route: String, val label: String, val icon: ImageVector) {
-    data object All      : BottomTab("all_tab",      "All",      Icons.AutoMirrored.Filled.MenuBook)
-    data object Personal : BottomTab("personal_tab", "Personal", Icons.Default.Bookmarks)
-    data object Imported : BottomTab("imported_tab", "Imported", Icons.Default.CloudDownload)
-    data object Shared   : BottomTab("shared_tab",   "Shared",   Icons.Default.Public)
-    data object Account  : BottomTab("account_tab",  "Account",  Icons.Default.Person)
+    data object All     : BottomTab("all_tab",    "All",           Icons.AutoMirrored.Filled.MenuBook)
+    data object Yours   : BottomTab("yours_tab",  "Your Recipes",  Icons.Default.Bookmarks)
+    data object Shared  : BottomTab("shared_tab", "Shared",        Icons.Default.Public)
+    data object Account : BottomTab("account_tab","Account",       Icons.Default.Person)
 }
 
 private val bottomTabs = listOf(
     BottomTab.All,
-    BottomTab.Personal,
-    BottomTab.Imported,
+    BottomTab.Yours,
     BottomTab.Shared,
     BottomTab.Account
 )
@@ -87,6 +84,7 @@ fun AmrosaNavGraph() {
                 HomeScreen(
                     filter = RecipeFilter.ALL,
                     onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
+                    onNeedsReviewClick = { recipeId -> navController.navigate("import?reviewId=$recipeId") },
                     onSettingsClick = {
                         navController.navigate(BottomTab.Account.route) {
                             popUpTo(navController.graph.findStartDestination().id) {
@@ -99,29 +97,14 @@ fun AmrosaNavGraph() {
                 )
             }
 
-            // ── Tab: Personal recipes ─────────────────────────────────────────
-            composable(BottomTab.Personal.route) {
+            // ── Tab: Your Recipes (personal + imported merged) ────────────────
+            composable(BottomTab.Yours.route) {
                 HomeScreen(
-                    filter = RecipeFilter.PERSONAL,
+                    filter = RecipeFilter.YOURS,
                     onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
+                    onNeedsReviewClick = { recipeId -> navController.navigate("import?reviewId=$recipeId") },
                     onFabFreeformClick = { navController.navigate("freeform") },
-                    onFabImportClick = {
-                        navController.navigate(BottomTab.Imported.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    }
-                )
-            }
-
-            // ── Tab: Imported recipes ─────────────────────────────────────────
-            composable(BottomTab.Imported.route) {
-                ImportScreen(
-                    onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
-                    onEditClick = { recipeId -> navController.navigate("recipe/edit/$recipeId") }
+                    onFabImportClick = { navController.navigate("import") }
                 )
             }
 
@@ -148,6 +131,26 @@ fun AmrosaNavGraph() {
                 FreeformEntryScreen(
                     onBack = { navController.popBackStack() },
                     onEditClick = { recipeId -> navController.navigate("recipe/edit/$recipeId") }
+                )
+            }
+
+            // ── Import (push route — no longer a tab) ─────────────────────────
+            // Optional reviewId query param: when present, auto-opens review sheet for that recipe
+            composable(
+                route = "import?reviewId={reviewId}",
+                arguments = listOf(
+                    navArgument("reviewId") {
+                        type = NavType.StringType
+                        defaultValue = ""
+                    }
+                )
+            ) { backStackEntry ->
+                val reviewId = backStackEntry.arguments?.getString("reviewId")?.ifBlank { null }
+                ImportScreen(
+                    onBack = { navController.popBackStack() },
+                    onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
+                    onEditClick = { recipeId -> navController.navigate("recipe/edit/$recipeId") },
+                    reviewRecipeId = reviewId
                 )
             }
 

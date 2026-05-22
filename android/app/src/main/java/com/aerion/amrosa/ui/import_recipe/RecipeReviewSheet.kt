@@ -2,6 +2,9 @@ package com.aerion.amrosa.ui.import_recipe
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -41,7 +44,10 @@ internal fun RecipeReviewSheet(
     onPrimary: () -> Unit,
     onSecondary: () -> Unit,
     onDismiss: () -> Unit,
-    onEdit: (() -> Unit)? = null
+    onEdit: (() -> Unit)? = null,
+    // Author attribution toggle — only shown for imports (null = hide)
+    isOwnRecipe: Boolean = false,
+    onIsOwnRecipeChange: ((Boolean) -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var parseNotesDismissed by remember { mutableStateOf(false) }
@@ -226,6 +232,38 @@ internal fun RecipeReviewSheet(
                         Text(step.instruction, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
+            }
+
+            // ── Author attribution toggle (imports only) ──────────────────────
+            if (onIsOwnRecipeChange != null) {
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    "Who wrote this recipe?",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = !isOwnRecipe,
+                        onClick = { onIsOwnRecipeChange(false) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                        icon = { SegmentedButtonDefaults.Icon(active = !isOwnRecipe) }
+                    ) { Text("Imported") }
+                    SegmentedButton(
+                        selected = isOwnRecipe,
+                        onClick = { onIsOwnRecipeChange(true) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                        icon = { SegmentedButtonDefaults.Icon(active = isOwnRecipe) }
+                    ) { Text("My Recipe") }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    if (isOwnRecipe) "Your name will appear as the author if you share this."
+                    else "\"Imported\" will appear as the author if you share this.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
             }
 
             Spacer(modifier = Modifier.height(24.dp))

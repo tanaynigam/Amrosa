@@ -8,7 +8,7 @@ import com.aerion.amrosa.domain.model.Recipe
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-enum class RecipeFilter { ALL, PERSONAL }
+enum class RecipeFilter { ALL, PERSONAL, YOURS }
 
 data class HomeUiState(
     val allRecipes: List<Recipe> = emptyList(),
@@ -47,6 +47,7 @@ class HomeViewModel(
             val flow = when (filter) {
                 RecipeFilter.ALL      -> repository.getAllRecipes()
                 RecipeFilter.PERSONAL -> repository.getPersonalRecipes()
+                RecipeFilter.YOURS    -> repository.getYoursRecipes()
             }
             flow.collect { recipes ->
                 _uiState.update { it.copy(allRecipes = recipes, isLoading = false) }

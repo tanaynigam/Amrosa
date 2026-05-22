@@ -28,11 +28,13 @@ data class ImportUiState(
     val isImportingFile: Boolean = false,   // file import in flight
     val isReimporting: Boolean = false,     // reimport in flight
     val errorMessage: String? = null,
-    val importedRecipes: List<Recipe> = emptyList(),
-    val isLoading: Boolean = true,
     // When non-null the review sheet is open
     val parsedRecipe: ParsedRecipeData? = null,
-    val reviewingRecipeId: String? = null   // Room ID of the recipe under review
+    val reviewingRecipeId: String? = null,  // Room ID of the recipe under review
+    // Author choice on review sheet:
+    //   false (default) = "Imported" — external recipe, shows "Imported" when shared
+    //   true            = "My Recipe" — user's own recipe, shows real name when shared
+    val isOwnRecipe: Boolean = false
 )
 
 // ─── Parsed recipe data models ────────────────────────────────────────────────
@@ -92,13 +94,6 @@ class ImportViewModel(
 
     private val functions = FirebaseFunctions.getInstance("us-central1")
 
-    init {
-        viewModelScope.launch {
-            repository.getImportedRecipes().collect { recipes ->
-                _uiState.update { it.copy(importedRecipes = recipes, isLoading = false) }
-            }
-        }
-    }
 
     // ─── URL import ───────────────────────────────────────────────────────────
 
@@ -159,15 +154,25 @@ class ImportViewModel(
 
     // ─── Review sheet actions ─────────────────────────────────────────────────
 
+    /** Toggle whether the recipe being reviewed is the user's own or an external import. */
+    fun setIsOwnRecipe(isOwn: Boolean) {
+        _uiState.update { it.copy(isOwnRecipe = isOwn) }
+    }
+
     /**
-     * User confirmed the review — clear the needsReview flag so the recipe
-     * graduates from "pending" to a normal imported recipe.
+     * User confirmed the review — clears needsReview and applies the author choice:
+     *   isOwnRecipe = true  → isImported = false (personal recipe, real name shown when shared)
+     *   isOwnRecipe = false → isImported = true  (external import, "Imported" shown when shared)
      */
     fun confirmRecipe() {
-        val recipeId = _uiState.value.reviewingRecipeId ?: return
+        val state = _uiState.value
+        val recipeId = state.reviewingRecipeId ?: return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { repository.confirmImportedRecipe(recipeId) }
-            _uiState.update { it.copy(parsedRecipe = null, reviewingRecipeId = null, url = "") }
+            withContext(Dispatchers.IO) {
+                repository.confirmImportedRecipe(recipeId)
+                repository.updateIsImported(recipeId, !state.isOwnRecipe)
+            }
+            _uiState.update { it.copy(parsedRecipe = null, reviewingRecipeId = null, url = "", isOwnRecipe = false) }
         }
     }
 
@@ -176,7 +181,7 @@ class ImportViewModel(
      * The recipe stays in Room with needsReview = true — no data is lost.
      */
     fun dismissReview() {
-        _uiState.update { it.copy(parsedRecipe = null, reviewingRecipeId = null) }
+        _uiState.update { it.copy(parsedRecipe = null, reviewingRecipeId = null, isOwnRecipe = false) }
     }
 
     /**
@@ -242,7 +247,11 @@ class ImportViewModel(
                 repository.getRecipeWithDetails(recipeId)
             } ?: return@launch
             _uiState.update {
-                it.copy(parsedRecipe = recipe.toParsedRecipeData(), reviewingRecipeId = recipeId)
+                it.copy(
+                    parsedRecipe = recipe.toParsedRecipeData(),
+                    reviewingRecipeId = recipeId,
+                    isOwnRecipe = !recipe.isImported  // reflect what was last saved
+                )
             }
         }
     }
