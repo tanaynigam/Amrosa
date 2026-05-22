@@ -8,15 +8,19 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
+import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.ui.account.AccountScreen
 import com.aerion.amrosa.ui.auth.AuthScreen
 import com.aerion.amrosa.ui.detail.RecipeDetailScreen
@@ -44,11 +48,32 @@ private val bottomTabs = listOf(
 
 @Composable
 fun AmrosaNavGraph() {
+    val app = LocalContext.current.applicationContext as AmrosaApplication
+
+    // Observe auth state — drives the auth gate
+    val currentUser by app.container.authRepository.authStateFlow()
+        .collectAsState(initial = app.container.authRepository.currentUser)
+
+    val isSignedIn = currentUser?.isAnonymous == false
+
+    if (!isSignedIn) {
+        // ── Auth gate ─────────────────────────────────────────────────────────
+        // Shown as root — no back button, no top bar.
+        // Auth state change automatically recomposes this to the main app.
+        AuthScreen()
+    } else {
+        // ── Main app ──────────────────────────────────────────────────────────
+        MainAppScaffold()
+    }
+}
+
+@Composable
+private fun MainAppScaffold() {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
-    val tabRoutes = bottomTabs.map { it.route }.toSet()
+    val tabRoutes = remember { bottomTabs.map { it.route }.toSet() }
     val showBottomBar = currentDestination?.route in tabRoutes
 
     Scaffold(
@@ -119,12 +144,8 @@ fun AmrosaNavGraph() {
 
             // ── Tab: Account ──────────────────────────────────────────────────
             composable(BottomTab.Account.route) {
-                AccountScreen(onSignInClick = { navController.navigate("auth") })
-            }
-
-            // ── Auth ──────────────────────────────────────────────────────────
-            composable("auth") {
-                AuthScreen(onBack = { navController.popBackStack() })
+                // onSignInClick not needed — user is always signed in when this tab is visible
+                AccountScreen()
             }
 
             // ── Freeform recipe entry ─────────────────────────────────────────
@@ -135,8 +156,8 @@ fun AmrosaNavGraph() {
                 )
             }
 
-            // ── Import (push route — no longer a tab) ─────────────────────────
-            // Optional reviewId query param: when present, auto-opens review sheet for that recipe
+            // ── Import (push route) ───────────────────────────────────────────
+            // Optional reviewId: when present, auto-opens review sheet for that recipe
             composable(
                 route = "import?reviewId={reviewId}",
                 arguments = listOf(

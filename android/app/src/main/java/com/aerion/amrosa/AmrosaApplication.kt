@@ -17,16 +17,14 @@ class AmrosaApplication : Application() {
         super.onCreate()
         container = AppContainer(this)
         appScope.launch {
-            // Ensure there is always a Firebase session (anonymous until the user signs in)
-            container.authRepository.signInAnonymouslyIfNeeded()
-            // Local seed as fallback (runs once, skipped if DB already has data)
-            container.seeder.seedIfNeeded()
-            // Pull any new/updated shared recipes from Firestore
-            container.syncService.sync()
-            // If the user is already signed in with a named account, sync their personal recipes
-            val user = container.authRepository.currentUser
-            if (user != null && !user.isAnonymous) {
-                container.syncService.syncPersonalRecipes()
+            // Whenever the user is signed in with a real account (on app start or after sign-in),
+            // seed local data and pull from Firestore.
+            container.authRepository.authStateFlow().collect { user ->
+                if (user != null && !user.isAnonymous) {
+                    container.seeder.seedIfNeeded()
+                    container.syncService.sync()
+                    container.syncService.syncPersonalRecipes()
+                }
             }
         }
     }

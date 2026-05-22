@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.google.firebase.auth.FirebaseUser
@@ -61,7 +62,15 @@ class AccountViewModel(
     }
 
     fun signOut() {
-        viewModelScope.launch { authRepository.signOut() }
+        viewModelScope.launch {
+            // Wipe all local data first so the next user starts clean
+            val app = context.applicationContext as AmrosaApplication
+            withContext(Dispatchers.IO) {
+                app.container.clearAllLocalData(context)
+            }
+            authRepository.signOut()
+            // Auth state change triggers AmrosaNavGraph to show AuthScreen automatically
+        }
     }
 
     fun clearError() {

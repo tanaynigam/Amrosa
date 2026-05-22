@@ -207,7 +207,7 @@ fun AccountScreen(onSignInClick: () -> Unit = {}) {
             icon = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null) },
             title = { Text("Sign Out") },
             text = {
-                Text("Your recipes will stay on this device. Sign back in any time to re-sync.")
+                Text("All recipes will be removed from this device. They'll sync back automatically when you sign in again.")
             },
             confirmButton = {
                 TextButton(onClick = { viewModel.signOut(); showSignOutDialog = false }) {

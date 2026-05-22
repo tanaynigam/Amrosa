@@ -43,7 +43,7 @@ import com.google.android.gms.common.api.ApiException
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AuthScreen(onBack: () -> Unit) {
+fun AuthScreen(onBack: (() -> Unit)? = null) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
     val viewModel: AuthViewModel = viewModel(
@@ -56,9 +56,9 @@ fun AuthScreen(onBack: () -> Unit) {
     val focusManager = LocalFocusManager.current
     val activity = context as Activity
 
-    // ── Navigate away once authenticated ─────────────────────────────────────
+    // ── Navigate away once authenticated (only when shown as a push route) ──────
     LaunchedEffect(state.authenticatedUserId) {
-        if (state.authenticatedUserId != null) onBack()
+        if (state.authenticatedUserId != null) onBack?.invoke()
     }
 
     // ── Google Sign-In client ─────────────────────────────────────────────────
@@ -100,20 +100,23 @@ fun AuthScreen(onBack: () -> Unit) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {},
-                navigationIcon = {
-                    IconButton(onClick = {
-                        if (state.phoneStep != PhoneStep.NONE) viewModel.cancelPhone()
-                        else onBack()
-                    }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+            // Only show the top bar (with back arrow) when shown as a push route, not as root gate
+            if (onBack != null) {
+                TopAppBar(
+                    title = {},
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            if (state.phoneStep != PhoneStep.NONE) viewModel.cancelPhone()
+                            else onBack()
+                        }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
                 )
-            )
+            }
         }
     ) { padding ->
         Column(
