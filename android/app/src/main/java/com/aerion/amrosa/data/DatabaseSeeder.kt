@@ -13,8 +13,8 @@ class DatabaseSeeder(
     private val prefs = context.getSharedPreferences("amrosa_prefs", Context.MODE_PRIVATE)
 
     suspend fun seedIfNeeded() {
-        // Seeding disabled — recipes are private to the owner's account.
-        // Fresh installs start with an empty DB; recipes restore via personal cloud sync.
+        // seeded_v11 — seeding disabled. Fresh installs start empty;
+        // recipes restore via personal cloud sync on login.
     }
 
     // ─────────────────────────────────────────────────────────────────────────

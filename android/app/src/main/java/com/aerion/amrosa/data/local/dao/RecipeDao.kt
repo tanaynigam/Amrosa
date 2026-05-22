@@ -83,6 +83,9 @@ abstract class RecipeDao {
     @Query("SELECT * FROM recipes WHERE isImported = 0 ORDER BY title ASC")
     abstract suspend fun getPersonalRecipesOnce(): List<RecipeEntity>
 
+    @Query("UPDATE recipes SET visibility = :visibility WHERE id = :id")
+    abstract suspend fun updateVisibility(id: String, visibility: String)
+
     // ─── Single-item deletes (used by Recipe Editor) ──────────────────────────
 
     @Query("DELETE FROM steps WHERE id = :stepId")

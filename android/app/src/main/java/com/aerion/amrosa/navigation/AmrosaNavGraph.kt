@@ -6,6 +6,7 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,11 +25,14 @@ import com.aerion.amrosa.ui.freeform.FreeformEntryScreen
 import com.aerion.amrosa.ui.home.HomeScreen
 import com.aerion.amrosa.ui.home.RecipeFilter
 import com.aerion.amrosa.ui.import_recipe.ImportScreen
+import com.aerion.amrosa.ui.shared.SharedRecipeDetailScreen
+import com.aerion.amrosa.ui.shared.SharedScreen
 
 private sealed class BottomTab(val route: String, val label: String, val icon: ImageVector) {
     data object All      : BottomTab("all_tab",      "All",      Icons.AutoMirrored.Filled.MenuBook)
     data object Personal : BottomTab("personal_tab", "Personal", Icons.Default.Bookmarks)
     data object Imported : BottomTab("imported_tab", "Imported", Icons.Default.CloudDownload)
+    data object Shared   : BottomTab("shared_tab",   "Shared",   Icons.Default.Public)
     data object Account  : BottomTab("account_tab",  "Account",  Icons.Default.Person)
 }
 
@@ -36,6 +40,7 @@ private val bottomTabs = listOf(
     BottomTab.All,
     BottomTab.Personal,
     BottomTab.Imported,
+    BottomTab.Shared,
     BottomTab.Account
 )
 
@@ -82,7 +87,6 @@ fun AmrosaNavGraph() {
                 HomeScreen(
                     filter = RecipeFilter.ALL,
                     onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
-                    // Settings gear now navigates to the Account tab instead of a separate screen
                     onSettingsClick = {
                         navController.navigate(BottomTab.Account.route) {
                             popUpTo(navController.graph.findStartDestination().id) {
@@ -121,19 +125,25 @@ fun AmrosaNavGraph() {
                 )
             }
 
-            // ── Tab: Account ──────────────────────────────────────────────────
-            composable(BottomTab.Account.route) {
-                AccountScreen(
-                    onSignInClick = { navController.navigate("auth") }
+            // ── Tab: Shared recipes ───────────────────────────────────────────
+            composable(BottomTab.Shared.route) {
+                SharedScreen(
+                    onOwnRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
+                    onSharedRecipeClick = { recipeId -> navController.navigate("shared/$recipeId") }
                 )
             }
 
-            // ── Auth (sign-in / sign-up) ──────────────────────────────────────
+            // ── Tab: Account ──────────────────────────────────────────────────
+            composable(BottomTab.Account.route) {
+                AccountScreen(onSignInClick = { navController.navigate("auth") })
+            }
+
+            // ── Auth ──────────────────────────────────────────────────────────
             composable("auth") {
                 AuthScreen(onBack = { navController.popBackStack() })
             }
 
-            // ── Freeform recipe entry (F5) ────────────────────────────────────
+            // ── Freeform recipe entry ─────────────────────────────────────────
             composable("freeform") {
                 FreeformEntryScreen(
                     onBack = { navController.popBackStack() },
@@ -141,7 +151,7 @@ fun AmrosaNavGraph() {
                 )
             }
 
-            // ── Recipe detail ─────────────────────────────────────────────────
+            // ── Recipe detail (owner / Room-based) ────────────────────────────
             composable(
                 route = "recipe/{recipeId}",
                 arguments = listOf(navArgument("recipeId") { type = NavType.StringType })
@@ -151,6 +161,18 @@ fun AmrosaNavGraph() {
                     recipeId = recipeId,
                     onBack = { navController.popBackStack() },
                     onEditClick = { navController.navigate("recipe/edit/$recipeId") }
+                )
+            }
+
+            // ── Shared recipe detail (visitor / Firestore-based) ──────────────
+            composable(
+                route = "shared/{recipeId}",
+                arguments = listOf(navArgument("recipeId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val recipeId = backStackEntry.arguments?.getString("recipeId") ?: return@composable
+                SharedRecipeDetailScreen(
+                    recipeId = recipeId,
+                    onBack = { navController.popBackStack() }
                 )
             }
 

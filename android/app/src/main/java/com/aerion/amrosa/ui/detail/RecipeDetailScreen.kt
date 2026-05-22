@@ -8,9 +8,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -39,13 +41,20 @@ fun RecipeDetailScreen(
     val app = LocalContext.current.applicationContext as AmrosaApplication
     val viewModel: RecipeDetailViewModel = viewModel(
         key = recipeId,
-        factory = RecipeDetailViewModel.factory(app.container.repository, recipeId)
+        factory = RecipeDetailViewModel.factory(
+            repository = app.container.repository,
+            authRepository = app.container.authRepository,
+            sharedRecipeService = app.container.sharedRecipeService,
+            recipeId = recipeId
+        )
     )
     val state by viewModel.uiState.collectAsState()
     var showNoteInput by remember { mutableStateOf(false) }
     var noteText by remember { mutableStateOf("") }
     var showCookingMode by remember { mutableStateOf(false) }
     var selectedUnit by remember { mutableStateOf(UnitMode.ORIGINAL) }
+    var showVisibilityDialog by remember { mutableStateOf(false) }
+    var commentText by remember { mutableStateOf("") }
 
     if (showCookingMode && state.recipe != null) {
         CookingModeScreen(
@@ -147,6 +156,29 @@ fun RecipeDetailScreen(
                         Spacer(Modifier.height(6.dp))
                         Text(it, style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    // Visibility chip — only shown to the recipe owner
+                    if (state.isOwner) {
+                        Spacer(Modifier.height(10.dp))
+                        val isPublic = state.isPublic
+                        FilterChip(
+                            selected = isPublic,
+                            onClick = { showVisibilityDialog = true },
+                            enabled = !state.isVisibilityUpdating,
+                            leadingIcon = {
+                                Icon(
+                                    if (isPublic) Icons.Default.Public else Icons.Default.Lock,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    if (isPublic) "Public" else "Private",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+                        )
                     }
                 }
             }
@@ -428,7 +460,121 @@ fun RecipeDetailScreen(
                     )
                 }
             }
+
+            // ── Comments (shown when recipe is public) ──────────────
+            if (state.isPublic) {
+                item {
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Forum, contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Comments", style = MaterialTheme.typography.headlineMedium)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "${state.comments.size}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Comment input
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = commentText,
+                            onValueChange = { commentText = it },
+                            placeholder = { Text("Add a comment…") },
+                            modifier = Modifier.weight(1f),
+                            maxLines = 3,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        IconButton(
+                            onClick = {
+                                viewModel.addComment(commentText)
+                                commentText = ""
+                            },
+                            enabled = commentText.isNotBlank()
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Post comment",
+                                tint = if (commentText.isNotBlank())
+                                    MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+
+                if (state.comments.isEmpty()) {
+                    item {
+                        Text(
+                            "No comments yet. Be the first!",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+
+                items(state.comments, key = { "comment-${it.id}" }) { comment ->
+                    val currentUid = (LocalContext.current.applicationContext as AmrosaApplication)
+                        .container.authRepository.uid
+                    CommentRow(
+                        comment = comment,
+                        canDelete = currentUid == comment.authorId || state.isOwner,
+                        onDelete = { viewModel.deleteComment(comment.id) }
+                    )
+                }
+
+                item { Spacer(Modifier.height(16.dp)) }
+            }
         }
+    }
+
+    // ── Visibility change dialog ──────────────────────────────────────────────
+    if (showVisibilityDialog) {
+        val isPublic = state.isPublic
+        AlertDialog(
+            onDismissRequest = { showVisibilityDialog = false },
+            icon = {
+                Icon(
+                    if (isPublic) Icons.Default.Lock else Icons.Default.Public,
+                    contentDescription = null
+                )
+            },
+            title = { Text(if (isPublic) "Make Private?" else "Make Public?") },
+            text = {
+                Text(
+                    if (isPublic)
+                        "This recipe will be removed from the Shared tab. Existing comments will be preserved if you make it public again."
+                    else
+                        "This recipe will appear in the Shared tab. Anyone can view and comment on it."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.setVisibility(if (isPublic) "private" else "public")
+                    showVisibilityDialog = false
+                }) {
+                    Text(if (isPublic) "Make Private" else "Make Public")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showVisibilityDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -684,6 +830,62 @@ private fun StepRow(
                         modifier = Modifier.padding(vertical = 1.dp)
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CommentRow(
+    comment: Comment,
+    canDelete: Boolean,
+    onDelete: () -> Unit
+) {
+    val dateStr = remember(comment.createdAt) {
+        SimpleDateFormat("MMM d  h:mm a", Locale.getDefault()).format(Date(comment.createdAt))
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        // Avatar circle
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                comment.authorDisplayName.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    comment.authorDisplayName,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    dateStr,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(comment.content, style = MaterialTheme.typography.bodyMedium)
+        }
+        if (canDelete) {
+            IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.DeleteOutline, contentDescription = "Delete comment",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

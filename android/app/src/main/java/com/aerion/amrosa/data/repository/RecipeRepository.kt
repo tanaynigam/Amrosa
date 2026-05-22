@@ -75,6 +75,9 @@ class RecipeRepository(
     suspend fun count() = recipeDao.count()
 
     /** Returns every personal recipe with full sections/ingredients/steps — for bulk cloud push. */
+    suspend fun setVisibility(recipeId: String, visibility: String) =
+        recipeDao.updateVisibility(recipeId, visibility)
+
     suspend fun getAllPersonalRecipesWithDetails(): List<Recipe> =
         recipeDao.getPersonalRecipesOnce().mapNotNull { entity ->
             getRecipeWithDetails(entity.id)
@@ -104,7 +107,8 @@ class RecipeRepository(
         needsReview = needsReview,
         version = version, changeLog = changeLogList(changeLog),
         createdAt = createdAt, updatedAt = updatedAt,
-        authorId = authorId, authorDisplayName = authorDisplayName
+        authorId = authorId, authorDisplayName = authorDisplayName,
+        visibility = visibility
     )
 
     private fun RecipeEntity.toDomain(
@@ -123,7 +127,8 @@ class RecipeRepository(
         needsReview = needsReview,
         version = version, changeLog = changeLogList(changeLog),
         createdAt = createdAt, updatedAt = updatedAt,
-        authorId = authorId, authorDisplayName = authorDisplayName
+        authorId = authorId, authorDisplayName = authorDisplayName,
+        visibility = visibility
     )
 
     private fun RecipeSectionEntity.toDomain() = RecipeSection(id, name, orderIndex)

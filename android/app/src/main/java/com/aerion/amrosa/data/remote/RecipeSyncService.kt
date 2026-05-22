@@ -298,6 +298,7 @@ class RecipeSyncService(
             "updatedAt" to recipe.updatedAt,
             "authorId" to (recipe.authorId ?: authorIdOverride),
             "authorDisplayName" to recipe.authorDisplayName,
+            "visibility" to recipe.visibility,
             "sections" to sections,
             "ingredients" to ingredients,
             "steps" to steps,
@@ -331,7 +332,8 @@ class RecipeSyncService(
             createdAt = (data["createdAt"] as? Number)?.toLong() ?: now,
             updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: now,
             authorId = data["authorId"] as? String,
-            authorDisplayName = data["authorDisplayName"] as? String
+            authorDisplayName = data["authorDisplayName"] as? String,
+            visibility = data["visibility"] as? String ?: "private"
         )
 
         val sections = (data["sections"] as? List<Map<String, Any>>)?.map { s ->

@@ -3,9 +3,12 @@ package com.aerion.amrosa.ui.detail
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.entity.RecipeNoteEntity
+import com.aerion.amrosa.data.remote.SharedRecipeService
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.domain.model.*
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -13,14 +16,20 @@ import java.util.UUID
 data class RecipeDetailUiState(
     val recipe: Recipe? = null,
     val selectedServings: Int = 0,
-    /** Current quantity of the scale-anchor ingredient (e.g. flour cups). */
     val scaleAnchorQty: Double? = null,
     val selectedSubstitutes: Map<String, String> = emptyMap(),
     val enabledOptionals: Set<String> = emptySet(),
     val checkedIngredients: Set<String> = emptySet(),
     val notes: List<RecipeNote> = emptyList(),
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    // Ownership + visibility
+    val isOwner: Boolean = false,
+    // Comments (populated when recipe is public)
+    val comments: List<Comment> = emptyList(),
+    val isVisibilityUpdating: Boolean = false,
 ) {
+    val isPublic: Boolean get() = recipe?.visibility == "public"
+
     val visibleIngredients: List<Ingredient> get() {
         val recipe = recipe ?: return emptyList()
         return recipe.ingredients.filter { ing ->
@@ -34,26 +43,20 @@ data class RecipeDetailUiState(
         }
     }
 
-    /** Scale factor derived from anchor ingredient qty when available, else from servings. */
     val scaleFactor: Double get() {
         val recipe = recipe ?: return 1.0
-        // Anchor-based scaling: ratio of current anchor qty to base anchor qty
         if (scaleAnchorQty != null && recipe.scaleIngredientId != null) {
             val baseQty = recipe.ingredients
                 .find { it.id == recipe.scaleIngredientId }?.quantityValue ?: return 1.0
             if (baseQty == 0.0) return 1.0
             return scaleAnchorQty / baseQty
         }
-        // Fallback: servings-based
         if (recipe.baseServings == 0) return 1.0
         return selectedServings.toDouble() / recipe.baseServings
     }
 
-    /** Whether this recipe uses ingredient-based scaling. */
-    val usesAnchorScaling: Boolean get() =
-        recipe?.scaleIngredientId != null
+    val usesAnchorScaling: Boolean get() = recipe?.scaleIngredientId != null
 
-    /** Yield display string: range or single number, scaled. */
     val yieldDisplay: String get() {
         val recipe = recipe ?: return "$selectedServings"
         val min = recipe.baseServingsMin
@@ -66,7 +69,6 @@ data class RecipeDetailUiState(
         return "${(recipe.baseServings * scaleFactor).toInt()}"
     }
 
-    /** Whether the current scaling is at the default (1×). */
     val isDefaultScale: Boolean get() = scaleFactor == 1.0
 
     fun resolvedIngredientName(ingredientId: String): String {
@@ -85,11 +87,15 @@ data class RecipeDetailUiState(
 
 class RecipeDetailViewModel(
     private val repository: RecipeRepository,
+    private val authRepository: AuthRepository,
+    private val sharedRecipeService: SharedRecipeService,
     private val recipeId: String
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RecipeDetailUiState())
     val uiState: StateFlow<RecipeDetailUiState> = _uiState.asStateFlow()
+
+    private var commentsJob: Job? = null
 
     init {
         loadRecipe()
@@ -99,13 +105,15 @@ class RecipeDetailViewModel(
     private fun loadRecipe() {
         viewModelScope.launch {
             val recipe = repository.getRecipeWithDetails(recipeId)
+            val currentUid = authRepository.uid
+            val isOwner = currentUid != null && recipe?.authorId == currentUid
+
             val defaultSubs = recipe?.ingredients
                 ?.filter { it.substituteGroupId != null }
                 ?.groupBy { it.substituteGroupId!! }
                 ?.mapValues { (_, ings) -> ings.first().id }
                 ?: emptyMap()
 
-            // If recipe has an anchor ingredient, initialise anchor qty
             val anchorQty = recipe?.scaleIngredientId?.let { anchorId ->
                 recipe.ingredients.find { it.id == anchorId }?.quantityValue
             }
@@ -116,9 +124,13 @@ class RecipeDetailViewModel(
                     selectedServings = recipe?.baseServings ?: 1,
                     scaleAnchorQty = anchorQty,
                     selectedSubstitutes = defaultSubs,
-                    isLoading = false
+                    isLoading = false,
+                    isOwner = isOwner
                 )
             }
+
+            // Start listening to comments if the recipe is already public
+            if (recipe?.visibility == "public") startObservingComments()
         }
     }
 
@@ -130,16 +142,67 @@ class RecipeDetailViewModel(
         }
     }
 
+    private fun startObservingComments() {
+        commentsJob?.cancel()
+        commentsJob = viewModelScope.launch {
+            sharedRecipeService.getCommentsFlow(recipeId).collect { comments ->
+                _uiState.update { it.copy(comments = comments) }
+            }
+        }
+    }
+
+    private fun stopObservingComments() {
+        commentsJob?.cancel()
+        commentsJob = null
+        _uiState.update { it.copy(comments = emptyList()) }
+    }
+
+    // ── Visibility toggle ─────────────────────────────────────────────────────
+
+    fun setVisibility(visibility: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isVisibilityUpdating = true) }
+
+            // 1. Persist to Room
+            repository.setVisibility(recipeId, visibility)
+
+            // 2. Update in-memory state immediately
+            val updatedRecipe = _uiState.value.recipe?.copy(visibility = visibility)
+            _uiState.update { it.copy(recipe = updatedRecipe, isVisibilityUpdating = false) }
+
+            // 3. Mirror to / remove from shared_recipes
+            val recipe = updatedRecipe ?: return@launch
+            if (visibility == "public") {
+                sharedRecipeService.publish(recipe)
+                startObservingComments()
+            } else {
+                sharedRecipeService.unpublish(recipeId)
+                stopObservingComments()
+            }
+        }
+    }
+
+    // ── Comments ──────────────────────────────────────────────────────────────
+
+    fun addComment(content: String) {
+        if (content.isBlank()) return
+        viewModelScope.launch { sharedRecipeService.addComment(recipeId, content) }
+    }
+
+    fun deleteComment(commentId: String) {
+        viewModelScope.launch { sharedRecipeService.deleteComment(recipeId, commentId) }
+    }
+
+    // ── Scale ─────────────────────────────────────────────────────────────────
+
     fun adjustScale(delta: Int) {
         _uiState.update { state ->
             val recipe = state.recipe ?: return@update state
             if (recipe.scaleIngredientId != null && state.scaleAnchorQty != null) {
-                // Anchor-based: adjust the anchor ingredient qty by scaleStep
                 val newQty = (state.scaleAnchorQty + delta * recipe.scaleStep)
-                    .coerceAtLeast(recipe.scaleStep) // minimum one step
+                    .coerceAtLeast(recipe.scaleStep)
                 state.copy(scaleAnchorQty = newQty)
             } else {
-                // Fallback: adjust servings count by 1
                 state.copy(selectedServings = (state.selectedServings + delta).coerceAtLeast(1))
             }
         }
@@ -151,10 +214,7 @@ class RecipeDetailViewModel(
             val baseAnchorQty = recipe.scaleIngredientId?.let { anchorId ->
                 recipe.ingredients.find { it.id == anchorId }?.quantityValue
             }
-            state.copy(
-                selectedServings = recipe.baseServings,
-                scaleAnchorQty = baseAnchorQty
-            )
+            state.copy(selectedServings = recipe.baseServings, scaleAnchorQty = baseAnchorQty)
         }
     }
 
@@ -178,6 +238,8 @@ class RecipeDetailViewModel(
         }
     }
 
+    // ── Notes ─────────────────────────────────────────────────────────────────
+
     fun addNote(content: String) {
         if (content.isBlank()) return
         val now = System.currentTimeMillis()
@@ -199,11 +261,16 @@ class RecipeDetailViewModel(
     }
 
     companion object {
-        fun factory(repository: RecipeRepository, recipeId: String): ViewModelProvider.Factory =
+        fun factory(
+            repository: RecipeRepository,
+            authRepository: AuthRepository,
+            sharedRecipeService: SharedRecipeService,
+            recipeId: String
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    RecipeDetailViewModel(repository, recipeId) as T
+                    RecipeDetailViewModel(repository, authRepository, sharedRecipeService, recipeId) as T
             }
     }
 }

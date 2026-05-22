@@ -26,4 +26,5 @@ data class Recipe(
     val updatedAt: Long,
     val authorId: String? = null,
     val authorDisplayName: String? = null,
+    val visibility: String = "private",     // "private" or "public"
 )

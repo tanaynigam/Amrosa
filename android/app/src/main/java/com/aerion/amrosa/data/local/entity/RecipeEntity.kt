@@ -28,4 +28,5 @@ data class RecipeEntity(
     val syncedAt: Long? = null,
     val authorId: String? = null,           // Firebase UID of creator; null for seeded
     val authorDisplayName: String? = null,  // e.g. "Tanay", "Imported", "Amrosa"
+    val visibility: String = "private",     // "private" or "public"
 )
