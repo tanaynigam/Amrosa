@@ -16,6 +16,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import androidx.navigation.navDeepLink
 import com.aerion.amrosa.ui.account.AccountScreen
 import com.aerion.amrosa.ui.auth.AuthScreen
 import com.aerion.amrosa.ui.detail.RecipeDetailScreen
@@ -170,7 +171,8 @@ fun AmrosaNavGraph() {
             // ── Shared recipe detail (visitor / Firestore-based) ──────────────
             composable(
                 route = "shared/{recipeId}",
-                arguments = listOf(navArgument("recipeId") { type = NavType.StringType })
+                arguments = listOf(navArgument("recipeId") { type = NavType.StringType }),
+                deepLinks = listOf(navDeepLink { uriPattern = "amrosa://shared/{recipeId}" })
             ) { backStackEntry ->
                 val recipeId = backStackEntry.arguments?.getString("recipeId") ?: return@composable
                 SharedRecipeDetailScreen(

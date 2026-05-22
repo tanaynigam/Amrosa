@@ -10,10 +10,14 @@ import kotlinx.coroutines.launch
 
 enum class RecipeFilter { ALL, PERSONAL, YOURS }
 
+/** Secondary filter shown as chips on the Your Recipes tab. */
+enum class YourRecipesFilter { ALL, PERSONAL, IMPORTED }
+
 data class HomeUiState(
     val allRecipes: List<Recipe> = emptyList(),
     val searchQuery: String = "",
     val selectedCategory: String? = null,
+    val yourRecipesFilter: YourRecipesFilter = YourRecipesFilter.ALL,
     val isLoading: Boolean = true
 ) {
     val categories: List<String> get() =
@@ -21,6 +25,12 @@ data class HomeUiState(
 
     val filteredRecipes: List<Recipe> get() {
         var list = allRecipes
+        // Secondary filter — only active on the Your Recipes tab
+        list = when (yourRecipesFilter) {
+            YourRecipesFilter.PERSONAL -> list.filter { !it.isImported }
+            YourRecipesFilter.IMPORTED -> list.filter { it.isImported }
+            YourRecipesFilter.ALL      -> list
+        }
         if (searchQuery.isNotBlank()) {
             list = list.filter { r ->
                 r.title.contains(searchQuery, ignoreCase = true) ||
@@ -61,6 +71,10 @@ class HomeViewModel(
 
     fun onCategorySelect(category: String?) {
         _uiState.update { it.copy(selectedCategory = category) }
+    }
+
+    fun onYourRecipesFilterChange(filter: YourRecipesFilter) {
+        _uiState.update { it.copy(yourRecipesFilter = filter) }
     }
 
     companion object {

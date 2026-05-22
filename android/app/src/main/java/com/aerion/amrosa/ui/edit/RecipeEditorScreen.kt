@@ -179,6 +179,19 @@ private fun MetadataCard(state: EditorUiState, vm: RecipeEditorViewModel) {
                 maxLines = 4
             )
 
+            OutlinedTextField(
+                value = state.authorDisplayName,
+                onValueChange = vm::updateAuthorDisplayName,
+                label = { Text("Author") },
+                placeholder = { Text("Your name") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                leadingIcon = {
+                    Icon(Icons.Default.Person, contentDescription = null,
+                        modifier = Modifier.size(20.dp))
+                }
+            )
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = state.prepTimeMinutes,

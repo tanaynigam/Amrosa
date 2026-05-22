@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.domain.model.Recipe
+import com.aerion.amrosa.ui.home.YourRecipesFilter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,6 +86,37 @@ fun HomeScreen(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
             )
+
+            // ── Personal / Imported chips (Your Recipes tab only) ─────────────
+            if (filter == RecipeFilter.YOURS) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    item {
+                        FilterChip(
+                            selected = state.yourRecipesFilter == YourRecipesFilter.ALL,
+                            onClick = { viewModel.onYourRecipesFilterChange(YourRecipesFilter.ALL) },
+                            label = { Text("All") }
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = state.yourRecipesFilter == YourRecipesFilter.PERSONAL,
+                            onClick = { viewModel.onYourRecipesFilterChange(YourRecipesFilter.PERSONAL) },
+                            label = { Text("Personal") }
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = state.yourRecipesFilter == YourRecipesFilter.IMPORTED,
+                            onClick = { viewModel.onYourRecipesFilterChange(YourRecipesFilter.IMPORTED) },
+                            label = { Text("Imported") }
+                        )
+                    }
+                }
+            }
 
             if (state.categories.isNotEmpty()) {
                 LazyRow(

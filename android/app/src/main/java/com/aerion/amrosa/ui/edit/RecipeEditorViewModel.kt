@@ -62,6 +62,8 @@ data class EditorUiState(
     val baseServingsMax: String = "",
     val tagsText: String = "",         // comma-separated
     val sourceUrlsText: String = "",   // newline-separated
+    // Author (editable by the owner)
+    val authorDisplayName: String = "",
     // Content
     val sections: List<EditorSection> = emptyList(),
     // Deleted IDs — used to clean up DB rows on save
@@ -161,6 +163,7 @@ class RecipeEditorViewModel(
                     showForkDialog = !recipe.isCustomized,
                     title = recipe.title,
                     description = recipe.description ?: "",
+                    authorDisplayName = originalAuthorDisplayName ?: "",
                     prepTimeMinutes = recipe.prepTimeMinutes?.toString() ?: "",
                     cookTimeMinutes = recipe.cookTimeMinutes?.toString() ?: "",
                     baseServings = recipe.baseServings.toString(),
@@ -195,6 +198,7 @@ class RecipeEditorViewModel(
     fun updateBaseServingsMax(v: String) = _uiState.update { it.copy(baseServingsMax = v.filter(Char::isDigit)) }
     fun updateTags(v: String) = _uiState.update { it.copy(tagsText = v) }
     fun updateSourceUrls(v: String) = _uiState.update { it.copy(sourceUrlsText = v) }
+    fun updateAuthorDisplayName(v: String) = _uiState.update { it.copy(authorDisplayName = v) }
 
     // ─── Section operations ───────────────────────────────────────────────────
 
@@ -327,7 +331,7 @@ class RecipeEditorViewModel(
                     updatedAt = now,
                     syncedAt = originalSyncedAt,
                     authorId = originalAuthorId,
-                    authorDisplayName = originalAuthorDisplayName,
+                    authorDisplayName = state.authorDisplayName.trim().ifBlank { null },
                     visibility = originalVisibility
                 )
 
@@ -412,6 +416,7 @@ class RecipeEditorViewModel(
         // Compare title against what was loaded
         if (state.title.trim() != originalRecipe.title) parts += "title"
         if (state.description.trim() != originalRecipe.description) parts += "description"
+        if (state.authorDisplayName.trim() != originalRecipe.authorDisplayName) parts += "author"
         if (state.prepTimeMinutes != originalRecipe.prepTimeMinutes ||
             state.cookTimeMinutes != originalRecipe.cookTimeMinutes) parts += "times"
         if (state.tagsText != originalRecipe.tagsText) parts += "tags"
