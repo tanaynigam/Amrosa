@@ -62,8 +62,8 @@ data class EditorUiState(
     val baseServingsMax: String = "",
     val tagsText: String = "",         // comma-separated
     val sourceUrlsText: String = "",   // newline-separated
-    // Author (editable by the owner)
-    val authorDisplayName: String = "",
+    // Author attribution: true = Personal (user's own recipe), false = Imported
+    val isPersonalAuthor: Boolean = false,
     // Content
     val sections: List<EditorSection> = emptyList(),
     // Deleted IDs — used to clean up DB rows on save
@@ -84,6 +84,10 @@ class RecipeEditorViewModel(
 
     private val _uiState = MutableStateFlow(EditorUiState())
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
+
+    /** The signed-in user's real display name — shown in the "Personal" dropdown option. */
+    val personalAuthorName: String
+        get() = authRepository.displayName ?: authRepository.email ?: "Me"
 
     // Original fields not exposed in the editor UI — preserved on save
     private var originalScaleIngredientId: String? = null
@@ -163,7 +167,7 @@ class RecipeEditorViewModel(
                     showForkDialog = !recipe.isCustomized,
                     title = recipe.title,
                     description = recipe.description ?: "",
-                    authorDisplayName = originalAuthorDisplayName ?: "",
+                    isPersonalAuthor = !recipe.isImported,
                     prepTimeMinutes = recipe.prepTimeMinutes?.toString() ?: "",
                     cookTimeMinutes = recipe.cookTimeMinutes?.toString() ?: "",
                     baseServings = recipe.baseServings.toString(),
@@ -198,7 +202,7 @@ class RecipeEditorViewModel(
     fun updateBaseServingsMax(v: String) = _uiState.update { it.copy(baseServingsMax = v.filter(Char::isDigit)) }
     fun updateTags(v: String) = _uiState.update { it.copy(tagsText = v) }
     fun updateSourceUrls(v: String) = _uiState.update { it.copy(sourceUrlsText = v) }
-    fun updateAuthorDisplayName(v: String) = _uiState.update { it.copy(authorDisplayName = v) }
+    fun updateIsPersonalAuthor(v: Boolean) = _uiState.update { it.copy(isPersonalAuthor = v) }
 
     // ─── Section operations ───────────────────────────────────────────────────
 
@@ -324,14 +328,16 @@ class RecipeEditorViewModel(
                             .map { it.trim() }.filter { it.isNotBlank() }
                     ),
                     isCustomized = true,
-                    isImported = originalIsImported,
+                    isImported = !state.isPersonalAuthor,
                     version = newVersion,
                     changeLog = gson.toJson(newChangeLog),
                     createdAt = originalCreatedAt,
                     updatedAt = now,
                     syncedAt = originalSyncedAt,
                     authorId = originalAuthorId,
-                    authorDisplayName = state.authorDisplayName.trim().ifBlank { null },
+                    authorDisplayName = if (state.isPersonalAuthor)
+                        (authRepository.displayName ?: authRepository.email)
+                    else "Imported",
                     visibility = originalVisibility
                 )
 
@@ -416,7 +422,7 @@ class RecipeEditorViewModel(
         // Compare title against what was loaded
         if (state.title.trim() != originalRecipe.title) parts += "title"
         if (state.description.trim() != originalRecipe.description) parts += "description"
-        if (state.authorDisplayName.trim() != originalRecipe.authorDisplayName) parts += "author"
+        if (state.isPersonalAuthor != originalRecipe.isPersonalAuthor) parts += "author"
         if (state.prepTimeMinutes != originalRecipe.prepTimeMinutes ||
             state.cookTimeMinutes != originalRecipe.cookTimeMinutes) parts += "times"
         if (state.tagsText != originalRecipe.tagsText) parts += "tags"

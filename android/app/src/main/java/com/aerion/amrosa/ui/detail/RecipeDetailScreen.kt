@@ -18,9 +18,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import android.content.Intent
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
@@ -38,7 +40,8 @@ fun RecipeDetailScreen(
     onBack: () -> Unit,
     onEditClick: () -> Unit = {},
 ) {
-    val app = LocalContext.current.applicationContext as AmrosaApplication
+    val context = LocalContext.current
+    val app = context.applicationContext as AmrosaApplication
     val viewModel: RecipeDetailViewModel = viewModel(
         key = recipeId,
         factory = RecipeDetailViewModel.factory(
@@ -55,6 +58,26 @@ fun RecipeDetailScreen(
     var selectedUnit by remember { mutableStateOf(UnitMode.ORIGINAL) }
     var showVisibilityDialog by remember { mutableStateOf(false) }
     var commentText by remember { mutableStateOf("") }
+    // Set to true after "make public" is confirmed — opens share sheet once publish completes
+    var pendingShareAfterPublish by remember { mutableStateOf(false) }
+
+    // Helper: fire the Android share sheet for this recipe's deep link
+    val openShareSheet: () -> Unit = {
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "amrosa://shared/$recipeId")
+            putExtra(Intent.EXTRA_SUBJECT, state.recipe?.title ?: "Recipe")
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Share recipe"))
+    }
+
+    // Once the recipe becomes public and we have a pending share, fire the share sheet
+    LaunchedEffect(state.isPublic, pendingShareAfterPublish) {
+        if (pendingShareAfterPublish && state.isPublic) {
+            pendingShareAfterPublish = false
+            openShareSheet()
+        }
+    }
 
     if (showCookingMode && state.recipe != null) {
         CookingModeScreen(
@@ -75,16 +98,25 @@ fun RecipeDetailScreen(
                     }
                 },
                 actions = {
-                    // Share / visibility toggle — owners only
+                    // Share button — owners only
                     if (state.isOwner) {
                         IconButton(
-                            onClick = { showVisibilityDialog = true },
+                            onClick = {
+                                if (state.isPublic) {
+                                    // Already public — just open share sheet
+                                    openShareSheet()
+                                } else {
+                                    // Private — show "make public" dialog first
+                                    showVisibilityDialog = true
+                                }
+                            },
                             enabled = !state.isVisibilityUpdating
                         ) {
                             Icon(
-                                if (state.isPublic) Icons.Default.Public else Icons.Default.Share,
-                                contentDescription = if (state.isPublic) "Shared — tap to make private"
-                                                     else "Share this recipe"
+                                if (state.isPublic) Icons.Default.Share else Icons.Default.Share,
+                                contentDescription = "Share recipe",
+                                tint = if (state.isPublic) MaterialTheme.colorScheme.primary
+                                       else LocalContentColor.current
                             )
                         }
                     }
@@ -556,32 +588,38 @@ fun RecipeDetailScreen(
         }
     }
 
-    // ── Visibility change dialog ──────────────────────────────────────────────
+    // ── Visibility / Share dialog ─────────────────────────────────────────────
     if (showVisibilityDialog) {
         val isPublic = state.isPublic
         AlertDialog(
             onDismissRequest = { showVisibilityDialog = false },
             icon = {
                 Icon(
-                    if (isPublic) Icons.Default.Lock else Icons.Default.Public,
+                    if (isPublic) Icons.Default.Lock else Icons.Default.Share,
                     contentDescription = null
                 )
             },
-            title = { Text(if (isPublic) "Make Private?" else "Make Public?") },
+            title = { Text(if (isPublic) "Make Private?" else "Share Recipe?") },
             text = {
                 Text(
                     if (isPublic)
                         "This recipe will be removed from the Shared tab. Existing comments will be preserved if you make it public again."
                     else
-                        "This recipe will appear in the Shared tab. Anyone can view and comment on it."
+                        "This recipe will be visible to anyone with the link. You can make it private again at any time."
                 )
             },
             confirmButton = {
                 Button(onClick = {
-                    viewModel.setVisibility(if (isPublic) "private" else "public")
+                    if (isPublic) {
+                        viewModel.setVisibility("private")
+                    } else {
+                        // Publish first, then open share sheet once it's live
+                        viewModel.setVisibility("public")
+                        pendingShareAfterPublish = true
+                    }
                     showVisibilityDialog = false
                 }) {
-                    Text(if (isPublic) "Make Private" else "Make Public")
+                    Text(if (isPublic) "Make Private" else "Share")
                 }
             },
             dismissButton = {

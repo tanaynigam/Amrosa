@@ -8,6 +8,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -153,6 +157,7 @@ fun RecipeEditorScreen(
 
 // ─── Metadata Card ────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MetadataCard(state: EditorUiState, vm: RecipeEditorViewModel) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -179,18 +184,43 @@ private fun MetadataCard(state: EditorUiState, vm: RecipeEditorViewModel) {
                 maxLines = 4
             )
 
-            OutlinedTextField(
-                value = state.authorDisplayName,
-                onValueChange = vm::updateAuthorDisplayName,
-                label = { Text("Author") },
-                placeholder = { Text("Your name") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                leadingIcon = {
-                    Icon(Icons.Default.Person, contentDescription = null,
-                        modifier = Modifier.size(20.dp))
+            // Author dropdown
+            var authorExpanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(
+                expanded = authorExpanded,
+                onExpandedChange = { authorExpanded = it }
+            ) {
+                OutlinedTextField(
+                    value = if (state.isPersonalAuthor) "Personal — ${vm.personalAuthorName}" else "Imported",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Author") },
+                    leadingIcon = {
+                        Icon(
+                            if (state.isPersonalAuthor) Icons.Default.Person else Icons.Default.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = authorExpanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                )
+                ExposedDropdownMenu(
+                    expanded = authorExpanded,
+                    onDismissRequest = { authorExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Imported") },
+                        onClick = { vm.updateIsPersonalAuthor(false); authorExpanded = false },
+                        leadingIcon = { Icon(Icons.Default.Download, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Personal — ${vm.personalAuthorName}") },
+                        onClick = { vm.updateIsPersonalAuthor(true); authorExpanded = false },
+                        leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) }
+                    )
                 }
-            )
+            }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
