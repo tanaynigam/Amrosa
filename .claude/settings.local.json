@@ -13,7 +13,21 @@
       "PowerShell(adb devices)",
       "PowerShell(& \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\\\\bin\\\\keytool.exe\" -list -v -keystore \"$env:USERPROFILE\\\\.android\\\\debug.keystore\" -alias androiddebugkey -storepass android -keypass android 2>&1 | Select-String \"SHA1\")",
       "PowerShell(cd \"C:\\\\Users\\\\tanay\\\\Desktop\\\\Projects\\\\WhenDiagram\"; $env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; .\\\\gradlew.bat assembleDebug 2>&1 | Select-Object -Last 60)",
-      "PowerShell($adb = \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\"; & $adb install -r \"C:\\\\Users\\\\tanay\\\\Desktop\\\\Projects\\\\WhenDiagram\\\\app\\\\build\\\\outputs\\\\apk\\\\debug\\\\app-debug.apk\" 2>&1)"
+      "PowerShell($adb = \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\"; & $adb install -r \"C:\\\\Users\\\\tanay\\\\Desktop\\\\Projects\\\\WhenDiagram\\\\app\\\\build\\\\outputs\\\\apk\\\\debug\\\\app-debug.apk\" 2>&1)",
+      "Bash(xcodegen version *)",
+      "Bash(xcodebuild -version)",
+      "Bash(swift --version)",
+      "Bash(xcode-select -p)",
+      "Bash(sudo xcode-select -s /Applications/Xcode.app/Contents/Developer)",
+      "Bash(/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -version)",
+      "Bash(brew --version)",
+      "Bash(brew install *)",
+      "Bash(xcodegen generate *)",
+      "Bash(open /Users/tanay/Desktop/Projects/Amrosa/ios/Amrosa/Amrosa.xcodeproj)",
+      "Bash(/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild build *)",
+      "Bash(/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project /Users/tanay/Desktop/Projects/Amrosa/ios/Amrosa/Amrosa.xcodeproj -scheme Amrosa -destination 'generic/platform=iOS' build)",
+      "Bash(grep -v \"^$\")",
+      "Bash(git add *)"
     ]
   }
 }

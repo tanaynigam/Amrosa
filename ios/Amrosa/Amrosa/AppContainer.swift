@@ -9,6 +9,7 @@ final class AppContainer {
     let authRepository: AuthRepository
     let syncService: RecipeSyncService
     let cloudFunctions: CloudFunctionsService
+    let sharedRecipeService: SharedRecipeService
 
     init() {
         let schema = Schema([
@@ -28,15 +29,27 @@ final class AppContainer {
         let auth = AuthRepository()
         let functions = CloudFunctionsService()
         let sync = RecipeSyncService(repository: repo, authRepository: auth)
+        let shared = SharedRecipeService(authRepository: auth, repository: repo)
 
         self.recipeRepository = repo
         self.authRepository = auth
         self.cloudFunctions = functions
         self.syncService = sync
+        self.sharedRecipeService = shared
     }
 
-    func onLaunch() async {
-        await authRepository.signInAnonymouslyIfNeeded()
+    /// Called after Firebase is configured and user is signed in.
+    /// Syncs personal recipes from Firestore.
+    func onSignIn() async {
         await syncService.sync()
+    }
+
+    /// Wipe all local SwiftData records and clear sync preferences.
+    /// Called before sign-out so the next user starts clean.
+    func clearAllLocalData() {
+        // Delete all SwiftData records
+        try? recipeRepository.deleteAllRecipes()
+        // Clear sync timestamp
+        UserDefaults.standard.removeObject(forKey: "amrosa_last_sync")
     }
 }

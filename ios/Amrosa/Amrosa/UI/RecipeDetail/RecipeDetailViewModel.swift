@@ -16,13 +16,26 @@ final class RecipeDetailViewModel {
     var isEditingNote: RecipeNoteModel? = nil
     var editingNoteText = ""
 
+    // Sharing / visibility
+    var showShareSheet = false
+    var shareURL: URL? = nil
+    var showShareConfirmDialog = false
+    var isPublishing = false
+
+    // Comments (shown when recipe is public)
+    var comments: [SharedComment] = []
+    var newCommentText = ""
+    var commentListenerTask: Task<Void, Never>? = nil
+
     private let repository: RecipeRepository
     private let authRepository: AuthRepository
+    private let sharedRecipeService: SharedRecipeService
 
-    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository) {
+    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService) {
         self.recipe = recipe
         self.repository = repository
         self.authRepository = authRepository
+        self.sharedRecipeService = sharedRecipeService
         self.selectedServings = recipe.baseServings
         // Seed anchor quantity from the anchor ingredient's base value
         if let anchorId = recipe.scaleIngredientId,
@@ -171,5 +184,82 @@ final class RecipeDetailViewModel {
 
     var sortedNotes: [RecipeNoteModel] {
         recipe.notes.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    // MARK: - Visibility & Sharing
+
+    var isPublic: Bool { recipe.visibility == "public" }
+
+    func handleShareTap() {
+        if isPublic {
+            openShareSheet()
+        } else {
+            showShareConfirmDialog = true
+        }
+    }
+
+    func publishAndShare() {
+        isPublishing = true
+        Task {
+            _ = await sharedRecipeService.publish(recipe)
+            try? repository.updateVisibility(recipeId: recipe.id, visibility: "public")
+            isPublishing = false
+            startCommentListener()
+            openShareSheet()
+        }
+    }
+
+    func setVisibility(_ visibility: String) {
+        Task {
+            try? repository.updateVisibility(recipeId: recipe.id, visibility: visibility)
+            if visibility == "public" {
+                _ = await sharedRecipeService.publish(recipe)
+                startCommentListener()
+            } else {
+                _ = await sharedRecipeService.unpublish(recipe.id)
+                stopCommentListener()
+                comments = []
+            }
+        }
+    }
+
+    private func openShareSheet() {
+        let urlString = "https://amrosa-2ec82.web.app/shared/\(recipe.id)"
+        shareURL = URL(string: urlString)
+        showShareSheet = true
+    }
+
+    // MARK: - Comments
+
+    func startCommentListener() {
+        guard isPublic else { return }
+        commentListenerTask?.cancel()
+        commentListenerTask = Task {
+            for await batch in sharedRecipeService.commentsStream(recipeId: recipe.id) {
+                guard !Task.isCancelled else { break }
+                comments = batch
+            }
+        }
+    }
+
+    func stopCommentListener() {
+        commentListenerTask?.cancel()
+        commentListenerTask = nil
+    }
+
+    func postComment() {
+        guard !newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let text = newCommentText
+        newCommentText = ""
+        Task { await sharedRecipeService.addComment(recipeId: recipe.id, content: text) }
+    }
+
+    func deleteComment(_ comment: SharedComment) {
+        Task { await sharedRecipeService.deleteComment(recipeId: recipe.id, commentId: comment.id) }
+    }
+
+    func canDeleteComment(_ comment: SharedComment) -> Bool {
+        guard let uid = authRepository.uid else { return false }
+        return comment.authorId == uid || recipe.authorId == uid
     }
 }

@@ -24,7 +24,16 @@ struct RecipeDetailView: View {
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                // Share button — owners only
+                if viewModel?.isOwner == true {
+                    Button {
+                        viewModel?.handleShareTap()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+                // Edit button
                 Button {
                     if recipe.authorId == nil && !recipe.isCustomized {
                         showForkAlert = true
@@ -44,6 +53,23 @@ struct RecipeDetailView: View {
                 CookingModeView(viewModel: vm)
             }
         }
+        .sheet(isPresented: Binding(
+            get: { viewModel?.showShareSheet ?? false },
+            set: { viewModel?.showShareSheet = $0 }
+        )) {
+            if let url = viewModel?.shareURL {
+                ShareSheet(items: [url])
+            }
+        }
+        .alert("Share Recipe?", isPresented: Binding(
+            get: { viewModel?.showShareConfirmDialog ?? false },
+            set: { viewModel?.showShareConfirmDialog = $0 }
+        )) {
+            Button("Share") { viewModel?.publishAndShare() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This recipe will be visible to anyone with the link. You can make it private again at any time.")
+        }
         .alert("Fork Recipe?", isPresented: $showForkAlert) {
             Button("Fork") { isForkMode = true; navigateToEditor = true }
             Button("Cancel", role: .cancel) {}
@@ -55,11 +81,24 @@ struct RecipeDetailView: View {
                 viewModel = RecipeDetailViewModel(
                     recipe: recipe,
                     repository: container.recipeRepository,
-                    authRepository: container.authRepository
+                    authRepository: container.authRepository,
+                    sharedRecipeService: container.sharedRecipeService
                 )
+                // Start comment listener if recipe is already public
+                viewModel?.startCommentListener()
             }
         }
     }
+}
+
+// MARK: - iOS share sheet wrapper
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - Content
@@ -129,8 +168,19 @@ private struct RecipeDetailContent: View {
                             .id(section.id)
                     }
 
+                    // Visibility toggle (owner only)
+                    if viewModel.isOwner {
+                        VisibilityChip(viewModel: viewModel)
+                            .padding(.horizontal)
+                    }
+
                     // Notes
                     NotesSection(viewModel: viewModel)
+
+                    // Comments (when public)
+                    if viewModel.isPublic {
+                        RecipeCommentsSection(viewModel: viewModel)
+                    }
 
                     // Cooking mode button
                     Button {
@@ -418,6 +468,99 @@ private struct NotesSection: View {
                     Button("Save Note") { viewModel.addNote() }
                         .font(.subheadline)
                         .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+}
+
+// MARK: - Visibility chip
+
+private struct VisibilityChip: View {
+    @Bindable var viewModel: RecipeDetailViewModel
+    @State private var showConfirm = false
+
+    var body: some View {
+        Button {
+            showConfirm = true
+        } label: {
+            Label(
+                viewModel.isPublic ? "Public" : "Private",
+                systemImage: viewModel.isPublic ? "globe" : "lock"
+            )
+            .font(.subheadline)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(viewModel.isPublic ? Color.accentColor.opacity(0.12) : Color(.secondarySystemBackground))
+            .foregroundStyle(viewModel.isPublic ? Color.accentColor : Color.secondary)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .confirmationDialog(
+            viewModel.isPublic ? "Make Private?" : "Make Public?",
+            isPresented: $showConfirm,
+            titleVisibility: .visible
+        ) {
+            if viewModel.isPublic {
+                Button("Make Private", role: .destructive) {
+                    viewModel.setVisibility("private")
+                }
+            } else {
+                Button("Make Public") { viewModel.setVisibility("public") }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(viewModel.isPublic
+                ? "This recipe will no longer be visible to others."
+                : "This recipe will be visible to anyone with the link.")
+        }
+    }
+}
+
+// MARK: - Comments (owner view, public recipes)
+
+private struct RecipeCommentsSection: View {
+    @Bindable var viewModel: RecipeDetailViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Comments")
+                .font(.title3).fontWeight(.semibold)
+                .padding(.horizontal)
+
+            ForEach(viewModel.comments) { comment in
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(comment.authorDisplayName).font(.caption).fontWeight(.semibold)
+                            Text(comment.createdAt.relativeString()).font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        Text(comment.content).font(.body)
+                    }
+                    Spacer()
+                    if viewModel.canDeleteComment(comment) {
+                        Button {
+                            viewModel.deleteComment(comment)
+                        } label: {
+                            Image(systemName: "trash").font(.caption).foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Add a comment…", text: Binding(
+                    get: { viewModel.newCommentText },
+                    set: { viewModel.newCommentText = $0 }
+                ), axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(2...5)
+                if !viewModel.newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button("Post Comment") { viewModel.postComment() }
+                        .font(.subheadline).buttonStyle(.borderedProminent)
                 }
             }
             .padding(.horizontal)

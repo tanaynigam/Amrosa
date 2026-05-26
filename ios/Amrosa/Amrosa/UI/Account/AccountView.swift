@@ -3,57 +3,36 @@ import SwiftUI
 struct AccountView: View {
     @Environment(AppContainer.self) private var container
     @State private var viewModel: AccountViewModel?
-    @State private var navigateToAuth = false
     @State private var showSignOutConfirm = false
 
     var body: some View {
         List {
             if let vm = viewModel {
-                // Profile section
-                Section {
-                    if vm.isSignedIn {
-                        VStack(alignment: .leading, spacing: 4) {
-                            if let name = vm.displayName {
-                                Text(name)
-                                    .font(.headline)
-                            }
-                            if let email = vm.email {
-                                Text(email)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let phone = vm.phoneNumber {
-                                Text(phone)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
+                // Profile section — always signed in (auth is mandatory)
+                Section("Profile") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let name = vm.displayName {
+                            Text(name).font(.headline)
                         }
-                        .padding(.vertical, 4)
-                    } else {
-                        Text("Not signed in")
-                            .foregroundStyle(.secondary)
+                        if let email = vm.email {
+                            Text(email).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        if let phone = vm.phoneNumber {
+                            Text(phone).font(.subheadline).foregroundStyle(.secondary)
+                        }
                     }
-                } header: {
-                    Text("Profile")
+                    .padding(.vertical, 4)
                 }
 
-                // Auth action
+                // Sign Out
                 Section {
-                    if vm.isSignedIn {
-                        Button(role: .destructive) {
-                            showSignOutConfirm = true
-                        } label: {
-                            if vm.isSigningOut {
-                                ProgressView()
-                            } else {
-                                Text("Sign Out")
-                            }
-                        }
-                    } else {
-                        Button {
-                            navigateToAuth = true
-                        } label: {
-                            Label("Sign In / Create Account", systemImage: "person.badge.plus")
+                    Button(role: .destructive) {
+                        showSignOutConfirm = true
+                    } label: {
+                        if vm.isSigningOut {
+                            ProgressView()
+                        } else {
+                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                         }
                     }
                 }
@@ -74,27 +53,31 @@ struct AccountView: View {
                     LabeledContent("Version", value: "1.0")
                     LabeledContent("By", value: "Aerion")
                 }
+
+                if let error = vm.errorMessage {
+                    Section {
+                        Text(error).foregroundStyle(.red).font(.caption)
+                    }
+                }
             } else {
                 ProgressView()
             }
         }
         .navigationTitle("Account")
-        .navigationDestination(isPresented: $navigateToAuth) {
-            AuthView()
-        }
-        .confirmationDialog("Sign Out", isPresented: $showSignOutConfirm) {
+        .confirmationDialog("Sign Out?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) {
                 Task { await viewModel?.signOut() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Are you sure you want to sign out?")
+            Text("All recipes will be removed from this device. They'll sync back automatically when you sign in again.")
         }
         .onAppear {
             if viewModel == nil {
                 viewModel = AccountViewModel(
                     authRepository: container.authRepository,
-                    repository: container.recipeRepository
+                    repository: container.recipeRepository,
+                    container: container
                 )
             }
             viewModel?.loadStats()

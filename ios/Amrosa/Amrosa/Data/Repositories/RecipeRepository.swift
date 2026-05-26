@@ -382,6 +382,12 @@ final class RecipeRepository {
         try context.save()
     }
 
+    func deleteAllRecipes() throws {
+        let all = try fetchAllRecipes()
+        for recipe in all { context.delete(recipe) }
+        try context.save()
+    }
+
     func saveRecipe(_ recipe: RecipeModel) throws {
         recipe.updatedAt = Date()
         try context.save()
