@@ -22,7 +22,21 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Deep link: amrosa://shared/{recipeId} -->
+            <!-- App Links: https://amrosa-2ec82.web.app/shared/{recipeId} -->
+            <!-- android:autoVerify="true" lets Android verify domain ownership via assetlinks.json -->
+            <!-- When verified, tapping the link opens the app directly with no chooser dialog -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="amrosa-2ec82.web.app"
+                    android:pathPrefix="/shared/" />
+            </intent-filter>
+
+            <!-- Custom scheme fallback: amrosa://shared/{recipeId} -->
+            <!-- Works immediately without domain verification — used as a legacy fallback -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Amrosa — Recipe</title>
+  <style>
+    :root {
+      --bg:       #1a1612;
+      --surface:  #241e18;
+      --border:   #3a2e24;
+      --primary:  #c97d4a;
+      --text:     #f0e8df;
+      --muted:    #9c8878;
+      --chip-bg:  #2e2318;
+      --chip-txt: #c97d4a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Header bar ── */
+    .topbar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .topbar .logo {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--primary);
+    }
+    .topbar .sep { color: var(--border); }
+    .topbar .tagline { font-size: 13px; color: var(--muted); }
+
+    /* ── Content wrapper ── */
+    .container {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 28px 20px 60px;
+    }
+
+    /* ── Loading / error ── */
+    .state {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Recipe card ── */
+    .recipe { display: none; }
+
+    h1.title {
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1.25;
+      margin-bottom: 10px;
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      margin-bottom: 12px;
+      align-items: center;
+    }
+    .meta-item {
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .meta-item svg { opacity: 0.7; }
+
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 20px;
+    }
+    .tag {
+      background: var(--chip-bg);
+      color: var(--chip-txt);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3px 10px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    /* ── Open in app CTA ── */
+    .open-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--primary);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      padding: 12px 22px;
+      border-radius: 12px;
+      border: none;
+      cursor: pointer;
+      text-decoration: none;
+      margin-bottom: 28px;
+      transition: opacity 0.15s;
+    }
+    .open-btn:hover { opacity: 0.88; }
+
+    /* ── Divider ── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 22px 0;
+    }
+
+    /* ── Section header ── */
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--primary);
+      margin-bottom: 10px;
+    }
+    .block-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 14px;
+      color: var(--text);
+    }
+
+    /* ── Ingredients ── */
+    .ingredient-list { list-style: none; }
+    .ingredient-list li {
+      display: flex;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 15px;
+      line-height: 1.4;
+    }
+    .ingredient-list li:last-child { border-bottom: none; }
+    .qty {
+      min-width: 80px;
+      color: var(--primary);
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .ing-name { color: var(--text); }
+    .optional {
+      font-size: 11px;
+      color: var(--muted);
+      margin-left: 4px;
+    }
+
+    /* ── Steps ── */
+    .step-list { list-style: none; counter-reset: steps; }
+    .step-list li {
+      display: flex;
+      gap: 14px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .step-list li:last-child { border-bottom: none; }
+    .step-num {
+      counter-increment: steps;
+      min-width: 28px;
+      height: 28px;
+      background: var(--primary);
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .step-text {
+      font-size: 16px;
+      line-height: 1.6;
+      color: var(--text);
+      padding-top: 2px;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 40px;
+    }
+    .footer a { color: var(--primary); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="logo">AMROSA</span>
+  <span class="sep">·</span>
+  <span class="tagline">Amrita &amp; Ambrosia</span>
+</div>
+
+<div class="container">
+  <div class="state" id="loading">
+    <div class="spinner"></div>
+    Loading recipe…
+  </div>
+
+  <div class="state" id="error" style="display:none">
+    <p style="font-size:22px; margin-bottom:8px;">Recipe not found</p>
+    <p>This recipe may have been removed or made private.</p>
+  </div>
+
+  <div class="recipe" id="recipe">
+    <h1 class="title" id="r-title"></h1>
+    <div class="meta-row" id="r-meta"></div>
+    <div class="tags" id="r-tags"></div>
+
+    <a class="open-btn" id="open-btn" href="#">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+      </svg>
+      Open in Amrosa
+    </a>
+
+    <hr class="divider" />
+    <div class="block-title">Ingredients</div>
+    <div id="r-ingredients"></div>
+
+    <hr class="divider" />
+    <div class="block-title">Steps</div>
+    <div id="r-steps"></div>
+
+    <div class="footer">
+      <p>Shared via <a href="https://amrosa-2ec82.web.app">Amrosa</a> · by Aerion</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  const PROJECT = "amrosa-2ec82";
+  const API_KEY = "AIzaSyAUM2L4PIO-C91r8XIOCZhabsbArbVHVOw";
+
+  // Extract recipeId from path: /shared/recipe-001 → recipe-001
+  const recipeId = location.pathname.replace(/^\/shared\//, "").replace(/\/$/, "");
+
+  // ── Firestore REST value parser ──────────────────────────────────────────────
+  function parseValue(v) {
+    if (!v) return null;
+    if ("stringValue"  in v) return v.stringValue;
+    if ("integerValue" in v) return parseInt(v.integerValue, 10);
+    if ("doubleValue"  in v) return v.doubleValue;
+    if ("booleanValue" in v) return v.booleanValue;
+    if ("nullValue"    in v) return null;
+    if ("arrayValue"   in v) return (v.arrayValue.values || []).map(parseValue);
+    if ("mapValue"     in v) return parseFields(v.mapValue.fields || {});
+    return null;
+  }
+  function parseFields(fields) {
+    const out = {};
+    for (const [k, v] of Object.entries(fields)) out[k] = parseValue(v);
+    return out;
+  }
+
+  // ── Fetch recipe ──────────────────────────────────────────────────────────────
+  async function load() {
+    if (!recipeId) { showError(); return; }
+
+    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents/shared_recipes/${encodeURIComponent(recipeId)}?key=${API_KEY}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) { showError(); return; }
+      const json = await res.json();
+      const data = parseFields(json.fields || {});
+      render(data);
+    } catch (e) {
+      showError();
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────────
+  function render(d) {
+    document.title = `${d.title || "Recipe"} — Amrosa`;
+
+    document.getElementById("r-title").textContent = d.title || "";
+
+    // Meta row
+    const meta = document.getElementById("r-meta");
+    if (d.prepTimeMinutes) meta.innerHTML += metaChip(clockSvg(), `Prep ${d.prepTimeMinutes} min`);
+    if (d.cookTimeMinutes) meta.innerHTML += metaChip(clockSvg(), `Cook ${d.cookTimeMinutes} min`);
+    const yield_ = yieldLabel(d);
+    if (yield_) meta.innerHTML += metaChip(servingsSvg(), yield_);
+    if (d.authorDisplayName) meta.innerHTML += metaChip(personSvg(), d.authorDisplayName);
+
+    // Tags
+    const tags = document.getElementById("r-tags");
+    (d.tags || []).forEach(t => {
+      const span = document.createElement("span");
+      span.className = "tag";
+      span.textContent = t;
+      tags.appendChild(span);
+    });
+
+    // Ingredients — grouped by section
+    const sections = d.sections || [];
+    const ingredients = (d.ingredients || []).slice().sort((a, b) => a.orderIndex - b.orderIndex);
+    renderIngredients(sections, ingredients);
+
+    // Steps — grouped by section
+    const steps = (d.steps || []).slice().sort((a, b) => a.orderIndex - b.orderIndex);
+    renderSteps(sections, steps);
+
+    // Open in app button
+    document.getElementById("open-btn").href = `amrosa://shared/${recipeId}`;
+
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("recipe").style.display = "block";
+  }
+
+  function renderIngredients(sections, ingredients) {
+    const container = document.getElementById("r-ingredients");
+
+    // Group by sectionId
+    const bySectionId = {};
+    for (const ing of ingredients) {
+      const key = ing.sectionId || "__none__";
+      (bySectionId[key] = bySectionId[key] || []).push(ing);
+    }
+
+    const sectionIds = sections.map(s => s.id);
+    const allKeys = [...new Set([...sectionIds, ...Object.keys(bySectionId)])];
+
+    for (const key of allKeys) {
+      const ings = bySectionId[key];
+      if (!ings || ings.length === 0) continue;
+      const section = sections.find(s => s.id === key);
+      if (section) {
+        const label = document.createElement("div");
+        label.className = "section-label";
+        label.textContent = section.name;
+        container.appendChild(label);
+      }
+      const ul = document.createElement("ul");
+      ul.className = "ingredient-list";
+      for (const ing of ings) {
+        const li = document.createElement("li");
+        const qty = ing.quantityDisplay || "";
+        li.innerHTML = `<span class="qty">${escHtml(qty)}</span><span class="ing-name">${escHtml(ing.name)}${ing.isOptional ? '<span class="optional">(optional)</span>' : ""}</span>`;
+        ul.appendChild(li);
+      }
+      container.appendChild(ul);
+    }
+  }
+
+  function renderSteps(sections, steps) {
+    const container = document.getElementById("r-steps");
+
+    const bySectionId = {};
+    for (const step of steps) {
+      const key = step.sectionId || "__none__";
+      (bySectionId[key] = bySectionId[key] || []).push(step);
+    }
+
+    const sectionIds = sections.map(s => s.id);
+    const allKeys = [...new Set([...sectionIds, ...Object.keys(bySectionId)])];
+
+    for (const key of allKeys) {
+      const sSteps = bySectionId[key];
+      if (!sSteps || sSteps.length === 0) continue;
+      const section = sections.find(s => s.id === key);
+      if (section) {
+        const label = document.createElement("div");
+        label.className = "section-label";
+        label.style.marginTop = "18px";
+        label.textContent = section.name;
+        container.appendChild(label);
+      }
+      const ol = document.createElement("ol");
+      ol.className = "step-list";
+      for (const step of sSteps) {
+        const li = document.createElement("li");
+        li.innerHTML = `<span class="step-num"></span><span class="step-text">${escHtml(step.instruction)}</span>`;
+        ol.appendChild(li);
+      }
+      container.appendChild(ol);
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+  function showError() {
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("error").style.display   = "block";
+  }
+  function escHtml(s) {
+    return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+  function metaChip(icon, text) {
+    return `<span class="meta-item">${icon}${escHtml(text)}</span>`;
+  }
+  function yieldLabel(d) {
+    if (d.baseServingsMin && d.baseServingsMax)
+      return `Makes ${d.baseServingsMin}–${d.baseServingsMax}`;
+    if (d.baseServings > 1) return `Serves ${d.baseServings}`;
+    return "";
+  }
+  function clockSvg() {
+    return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+  }
+  function servingsSvg() {
+    return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
+  }
+  function personSvg() {
+    return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+  }
+
+  // ── Auto-redirect on Android if app is installed ──────────────────────────────
+  // Try opening the app via custom scheme; if the app is installed, it takes over.
+  // This is only useful for direct browser visits — App Links handles it at OS level.
+  function tryOpenApp() {
+    const start = Date.now();
+    window.location.href = `amrosa://shared/${recipeId}`;
+    setTimeout(() => {
+      // If we're still here after 1.5s, the app isn't installed — stay on page
+      if (Date.now() - start < 2000) { /* still on page, do nothing */ }
+    }, 1500);
+  }
+
+  document.getElementById("open-btn").addEventListener("click", e => {
+    e.preventDefault();
+    tryOpenApp();
+  });
+
+  load();
+</script>
+</body>
+</html>

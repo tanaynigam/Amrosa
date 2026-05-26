@@ -65,7 +65,7 @@ fun RecipeDetailScreen(
     val openShareSheet: () -> Unit = {
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, "amrosa://shared/$recipeId")
+            putExtra(Intent.EXTRA_TEXT, "https://amrosa-2ec82.web.app/shared/$recipeId")
             putExtra(Intent.EXTRA_SUBJECT, state.recipe?.title ?: "Recipe")
         }
         context.startActivity(Intent.createChooser(shareIntent, "Share recipe"))

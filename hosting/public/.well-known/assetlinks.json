@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.aerion.amrosa",
+      "sha256_cert_fingerprints": [
+        "7C:9B:C0:9C:C2:D3:C1:3A:B5:2B:2C:FD:C9:EC:03:1F:96:33:24:3B:4D:F3:FC:C8:61:D4:90:1D:B3:5E:24:1E"
+      ]
+    }
+  }
+]

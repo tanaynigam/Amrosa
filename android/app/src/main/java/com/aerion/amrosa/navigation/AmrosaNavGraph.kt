@@ -193,7 +193,10 @@ private fun MainAppScaffold() {
             composable(
                 route = "shared/{recipeId}",
                 arguments = listOf(navArgument("recipeId") { type = NavType.StringType }),
-                deepLinks = listOf(navDeepLink { uriPattern = "amrosa://shared/{recipeId}" })
+                deepLinks = listOf(
+                    navDeepLink { uriPattern = "https://amrosa-2ec82.web.app/shared/{recipeId}" },
+                    navDeepLink { uriPattern = "amrosa://shared/{recipeId}" }
+                )
             ) { backStackEntry ->
                 val recipeId = backStackEntry.arguments?.getString("recipeId") ?: return@composable
                 SharedRecipeDetailScreen(

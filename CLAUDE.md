@@ -15,10 +15,10 @@
 | **Language** | Kotlin |
 | **Min SDK** | API 26 (Android 8.0+) |
 | **Architecture** | MVVM + Repository Pattern |
-| **Database (local)** | Room (SQLite) |
-| **Database (cloud)** | Firebase Firestore |
-| **Cloud Storage** | Firebase Storage (for images) |
-| **Auth** | Firebase Authentication (Google Sign-In + email/password + phone OTP) |
+| **Database (local)** | Room (SQLite) — **current: DB v9, seeder key `seeded_v11`** |
+| **Database (cloud)** | Firebase Firestore (`amrosa-2ec82`) |
+| **Cloud Storage** | Firebase Storage (planned — images) |
+| **Auth** | Firebase Authentication — **mandatory** (Google Sign-In + email/password + phone OTP) |
 | **AI / Recipe Parsing** | Gemini 2.5 Flash via Firebase Cloud Functions v2 (Node.js 24) |
 
 ---
@@ -32,12 +32,11 @@ Amrosa/
 ├── backend/
 │   ├── functions/    # Firebase Cloud Functions (Node.js 24)
 │   │   ├── index.js           # Function entry points
-│   │   ├── parseRecipe.js     # URL/file/Sheets/Docs/freeform → Gemini → recipe JSON
+│   │   ├── parseRecipe.js     # URL/file/Sheets/Docs → Gemini → recipe JSON
 │   │   ├── recipeSchema.js    # Amrosa JSON schema for Gemini prompt
 │   │   └── package.json       # firebase-functions, axios, @google/generative-ai, xlsx
 │   └── firestore/
-│       ├── seed-recipes.json  # All seeded recipes as Firestore-ready JSON
-│       └── upload-recipes.js  # Node.js upload script (firebase-admin)
+│       └── upload-recipes.js  # Node.js admin upload script (reference only)
 └── shared/           # Shared assets, design tokens, documentation
 ```
 
@@ -46,25 +45,31 @@ Amrosa/
 ## Design Philosophy
 
 - **Lightweight first.** No bloat. No unnecessary screens, animations, or dependencies.
-- **Offline-capable.** The app must be fully functional without an internet connection. Cloud sync is secondary, not required. Auth is optional — the app works without signing in.
-- **Cooking-mode friendly.** Large text, clear layout, minimal taps. Think: hands covered in flour, glancing at the screen.
-- **Reliable over flashy.** Smooth, consistent, crash-free. Every interaction should feel instant.
-- **Auth is optional at launch.** Anonymous use is fully supported. Signing in unlocks cloud backup, personal recipe sync, and sharing. No forced login.
+- **Account required.** All recipes are locked behind an account. No anonymous use.
+- **Offline-capable.** Once signed in, fully functional without internet. Cloud sync is secondary.
+- **Cooking-mode friendly.** Large text, clear layout, minimal taps.
+- **Reliable over flashy.** Smooth, consistent, crash-free. Every interaction feels instant.
 
 ---
 
-## Navigation: 4 Bottom Tabs
+## Navigation: 4 Bottom Tabs + Auth Gate
 
 ```
-Tab 1 — All           (📖)  All recipes: personal + imported + copied shared
-Tab 2 — Your Recipes  (🔖)  All user recipes (personal + imported merged); "Add Recipe" FAB
+Auth Gate   (🔐)  Full-screen login wall — shown when not signed in; no back button
+Tab 1 — All           (📖)  Browse all recipes (personal + imported + shared copies)
+Tab 2 — Your Recipes  (🔖)  All your recipes merged (personal + imported); Add Recipe FAB
 Tab 3 — Shared        (🌐)  Community shared recipes; browse, copy, share your own
-Tab 4 — Account       (👤)  Profile, sign-in/out, sync status, app settings
+Tab 4 — Account       (👤)  Profile, sign-out, sync status, settings
 ```
 
-> The separate "Imported" tab has been removed. Personal and imported recipes now live in one
-> unified "Your Recipes" tab. The Import screen is a push route (not a tab) accessible via FAB.
-> Pending-review recipes show a "Needs review" badge in the list; tapping opens the review sheet.
+**Design decisions:**
+- **Auth is mandatory.** `AmrosaNavGraph` observes `authStateFlow()`. When `currentUser == null` or anonymous, the full-screen `AuthScreen` is shown (no back button, no bottom bar). The main `Scaffold` + `NavHost` don't render until sign-in.
+- **Sign-out deletes all local data.** `AccountViewModel.signOut()` calls `container.clearAllLocalData(context)` (Room `clearAllTables()` + sync prefs cleared) before `authRepository.signOut()`. Auth state change recomposes the nav graph back to the auth gate automatically.
+- **Sign-in triggers seed + sync.** `AmrosaApplication` observes `authStateFlow()` and calls `seeder.seedIfNeeded()` + `syncService.sync()` + `syncService.syncPersonalRecipes()` whenever a real (non-anonymous) user is detected.
+- The old "Personal" and "Imported" tabs are **merged** into one "Your Recipes" tab. Filter chips (`All | Personal | Imported`) on that tab provide in-tab filtering.
+- `isImported` controls **author display when sharing** (`false` = real name, `true` = "Imported"), not which tab a recipe appears in.
+- **Import** is a push route (`"import?reviewId=..."`) accessible from the Add Recipe FAB, not a tab.
+- Pending-review recipes float to the top of Your Recipes with a "Needs review — tap to confirm" badge; tapping opens the import screen with the review sheet pre-loaded.
 
 ---
 
@@ -72,7 +77,7 @@ Tab 4 — Account       (👤)  Profile, sign-in/out, sync status, app settings
 
 ### F1 — Recipe Storage
 
-Every recipe in Room has:
+**Room DB v9** — all entities below are current.
 
 ```kotlin
 @Entity(tableName = "recipes")
@@ -82,8 +87,8 @@ data class RecipeEntity(
     val description: String?,
     val sourceUrls: String,              // JSON List<String>
     val baseServings: Int,
-    val baseServingsMin: Int? = null,    // yield range low end (e.g. 15 for cookies)
-    val baseServingsMax: Int? = null,    // yield range high end (e.g. 20 for cookies)
+    val baseServingsMin: Int? = null,    // yield range low (e.g. 15 for cookies)
+    val baseServingsMax: Int? = null,    // yield range high (e.g. 20 for cookies)
     val scaleIngredientId: String? = null, // anchor ingredient for scaling
     val scaleStep: Double = 1.0,         // increment per +/− tap on anchor
     val prepTimeMinutes: Int?,
@@ -91,19 +96,28 @@ data class RecipeEntity(
     val imageUrl: String?,
     val tags: String,                    // JSON List<String>
     val isCustomized: Boolean = false,
-    val isImported: Boolean = false,
-    val needsReview: Boolean = false,    // true = imported but not yet confirmed
+    val isImported: Boolean = false,     // controls author display when shared (see Author Attribution)
+    val needsReview: Boolean = false,    // true = imported but not yet confirmed by user
     val version: Int = 1,
     val changeLog: String = "[]",        // JSON List<RecipeChange>
     val createdAt: Long,
     val updatedAt: Long,
     val syncedAt: Long? = null,
-    val authorId: String? = null,        // Firebase UID; null for seeded
-    val authorDisplayName: String? = null // e.g. "Tanay", "Imported", "Amrosa"
+    val authorId: String? = null,        // Firebase UID of creator; null for pre-auth recipes
+    val authorDisplayName: String? = null, // real display name at creation time
+    val visibility: String = "private"   // "private" | "public" (public = mirrored to shared_recipes)
 )
 ```
 
-**Ingredient model** (F6 unit conversions implemented):
+```kotlin
+@Entity(tableName = "recipe_sections")
+data class RecipeSectionEntity(
+    @PrimaryKey val id: String,
+    val recipeId: String,
+    val name: String,
+    val orderIndex: Int
+)
+```
 
 ```kotlin
 @Entity(tableName = "ingredients")
@@ -112,6 +126,7 @@ data class IngredientEntity(
     val recipeId: String,
     val sectionId: String?,
     val name: String,
+    // Original quantity (preserved exactly from source)
     val quantityValue: Double?,
     val quantityUnit: String?,
     val quantityDisplay: String?,
@@ -120,7 +135,7 @@ data class IngredientEntity(
     val substituteGroupId: String?,
     val substituteRatio: Float = 1.0f,
     val orderIndex: Int,
-    // F6 — placed at END so DatabaseSeeder positional calls stay valid
+    // F6 — unit conversions. MUST remain at end of field list (positional seeder calls).
     val quantityValueMetric: Double? = null,
     val quantityUnitMetric: String? = null,
     val quantityDisplayMetric: String? = null,
@@ -130,26 +145,66 @@ data class IngredientEntity(
 )
 ```
 
+```kotlin
+@Entity(tableName = "steps")
+data class StepEntity(
+    @PrimaryKey val id: String,
+    val recipeId: String, val sectionId: String?,
+    val instruction: String, val orderIndex: Int
+)
+
+@Entity(tableName = "step_ingredient_refs", primaryKeys = ["stepId", "ingredientId"])
+data class StepIngredientRefEntity(val stepId: String, val ingredientId: String, val quantityDisplay: String?)
+
+@Entity(tableName = "recipe_notes")
+data class RecipeNoteEntity(
+    @PrimaryKey val id: String,
+    val recipeId: String,
+    val content: String,
+    val createdAt: Long, val updatedAt: Long
+)
+```
+
+**Domain model** (mapped from entities, used by ViewModels and UI):
+```kotlin
+data class Comment(
+    val id: String,
+    val recipeId: String,
+    val authorId: String,
+    val authorDisplayName: String,
+    val content: String,
+    val createdAt: Long
+)
+```
+Comments are stored in Firestore only (`shared_recipes/{recipeId}/comments/{commentId}`), not in Room.
+
 #### Scaling modes
 - **Servings-based** (default): `baseQuantity × selectedServings / baseServings`
-- **Anchor-ingredient-based**: +/− adjusts the anchor by `scaleStep`; all others scale proportionally.
+- **Anchor-ingredient-based**: +/− adjusts anchor by `scaleStep`; all others scale proportionally.
 
 ---
 
 ### F2 — Personal Recipes & Cloud Sync
 
-- **Pull sync** on app launch: fetch Firestore `recipes` where `updatedAt > lastSyncTimestamp`, upsert into Room.
-- **Push sync** on save: `RecipeSyncService.pushPersonalRecipe()` → `personal_recipes/{recipeId}` (fire-and-forget).
-- **Version control**: every editor save increments `version` and appends `RecipeChange(version, timestamp, summary)`.
-- **Seeder key**: bump `DatabaseSeeder` seed key AND `AmrosaDatabase.DB_VERSION` together on every schema change.
+**Firestore collections (current):**
 
-**Current Firestore collections:**
-
-| Collection | Contents |
+| Collection path | Contents |
 |---|---|
-| `recipes` | Seeded/shared recipes — pull-only |
-| `personal_recipes` | Personal recipes — push+pull (will scope to `/{uid}/` with remaining F7 work) |
-| `shared_recipes` | Community-shared recipes — planned (F8) |
+| `recipes/` | Was seeded recipes (pull-only). Now **empty** — seeded docs deleted, seeder disabled. |
+| `personal_recipes/{uid}/recipes/{recipeId}` | User's personal recipes — push on save, pull on sign-in |
+| `shared_recipes/{recipeId}` | Community-shared recipes (visibility = "public") |
+| `shared_recipes/{recipeId}/comments/{commentId}` | Comments on shared recipes |
+
+**Sync behaviour:**
+- **Pull sync** on app launch (if signed in): fetches `personal_recipes/{uid}/recipes/` where `updatedAt > lastSyncTimestamp`, upserts into Room.
+- **Push sync** on personal recipe save: `RecipeSyncService.pushPersonalRecipe(recipeId)` → `personal_recipes/{uid}/recipes/{recipeId}`. Fire-and-forget — push failure does not block local save.
+- **Sync on sign-in**: `AmrosaApplication.authStateFlow` observer calls `syncService.sync()` + `syncPersonalRecipes()` whenever a real user is detected.
+
+**Seeder:** `DatabaseSeeder.seedIfNeeded()` is a **complete no-op**. Fresh installs start blank. Bump seed key together with DB version if schema changes, but no seeding logic runs.
+
+**DB versioning:** `fallbackToDestructiveMigration()`. Current: **DB v9, seeder key `seeded_v11`**. Always bump both together.
+
+**Version control:** Every editor save increments `version` and appends `RecipeChange(version, timestamp, summary)` to `changeLog`. Summary is auto-generated from what fields changed.
 
 ---
 
@@ -157,24 +212,40 @@ data class IngredientEntity(
 
 All paths: Cloud Functions → Gemini 2.5 Flash → JSON → review sheet → Room.
 
-#### Cloud Functions
+#### Cloud Functions (all deployed)
 
 | Function | Input | Description |
 |---|---|---|
-| `parseRecipeUrl` | `{ url }` | Regular URLs, Google Sheets, Google Docs |
-| `parseRecipeContent` | `{ content, type, fileName }` | XLSX, CSV, plain text |
-| `formatRecipeText` | `{ text }` | Freeform natural language (F5) |
+| `parseRecipeUrl` | `{ url }` | Regular URLs, Google Sheets, Google Docs (auto-detected) |
+| `parseRecipeContent` | `{ content, type, fileName }` | XLSX (base64), CSV, plain text |
+| `formatRecipeText` | `{ text }` | Freeform natural language → structured recipe (F5) |
 
-All functions use `gemini-2.5-flash` with `thinkingBudget: 0`, `application/json` response MIME, `parseNotes` field.
+All functions: `gemini-2.5-flash`, `thinkingBudget: 0`, `application/json` response MIME, `parseNotes` field for Gemini uncertainty notes.
+
+#### Import screen (push route — not a tab)
+
+`ImportScreen` is a **push route** accessed from the Add Recipe FAB in Your Recipes. Route: `"import?reviewId={reviewId}"`. Optional `reviewId` param auto-opens the review sheet for a specific recipe.
+
+The screen contains:
+- URL import card + Import button
+- File import card (`.xlsx`, `.csv`, `.txt`; 5 MB max)
+- Google Sheets / Docs hint card
+- Back button in TopAppBar (it's a push route, not a tab)
 
 #### Review flow (pending-review model)
-1. Parse result → recipe immediately saved to Room with `needsReview = true` (data never lost)
-2. `RecipeReviewSheet` (shared bottom sheet) opens
-3. Three actions: **Confirm** / **Reimport** / **Edit icon** (pencil in header → navigate to editor)
-4. Back gesture → stays in Room with `needsReview = true`
-5. "Your Recipes" tab shows pending recipes first with a "Needs review" banner; tapping navigates to ImportScreen
+
+1. Parse result → recipe immediately saved to Room with `needsReview = true, isImported = true`
+2. `RecipeReviewSheet` opens
+3. User reviews: **Author toggle** → **Confirm** / **Reimport** / **Edit icon**
+4. **Author toggle** (segmented: `[Imported] | [My Recipe]`):
+   - `Imported` (default) → on confirm, `isImported = true` → "Imported" shown as author when shared
+   - `My Recipe` → on confirm, `isImported = false` → real user name shown as author when shared
+5. **Confirm** → clears `needsReview`, applies `isImported` from author toggle
+6. Back gesture → recipe stays in Room with `needsReview = true` — no data lost
+7. Your Recipes tab shows pending recipes first with "Needs review" badge; tapping re-opens the review sheet
 
 #### `RecipeReviewSheet` (shared composable — `ui/import_recipe/RecipeReviewSheet.kt`)
+
 ```kotlin
 @Composable
 internal fun RecipeReviewSheet(
@@ -185,22 +256,37 @@ internal fun RecipeReviewSheet(
     onPrimary: () -> Unit,
     onSecondary: () -> Unit,
     onDismiss: () -> Unit,
-    onEdit: (() -> Unit)? = null,               // non-null → pencil icon shown in header
+    onEdit: (() -> Unit)? = null,               // non-null → pencil icon in header
     isOwnRecipe: Boolean = false,               // import flow only
     onIsOwnRecipeChange: ((Boolean) -> Unit)? = null  // non-null → shows author toggle
 )
 ```
-Author toggle shows "Imported | My Recipe" segmented button; freeform flow omits it (null).
+
+Freeform flow passes `null` for `onIsOwnRecipeChange` — author toggle is hidden (freeform always saves as personal).
 
 ---
 
 ### F4 — Recipe Editor
 
-Full inline editor. Entry points: pencil icon on detail screen, **or** Edit button on review sheet.
+Full inline editor. Entry points: pencil icon on detail screen; Edit button on review sheet.
 
-- **Fork dialog** for seeded recipes (becomes a personal copy)
-- Editable: title, description, times, yield, tags, URLs, sections, ingredients, steps
-- Every save increments `version`, appends `RecipeChange`, pushes to `personal_recipes`
+- **Fork dialog** when editing a seeded or shared-copied recipe (becomes a personal copy)
+- Editable fields: title, description, prep/cook times, yield (single or range), tags, source URLs, **author (dropdown)**, sections, ingredients (name, quantity display, unit, group label, optional flag), steps
+- Every save increments `version`, appends `RecipeChange`, pushes to `personal_recipes/{uid}/recipes/`
+
+#### Author dropdown (editor)
+
+The author field is an **`ExposedDropdownMenuBox`** with two options:
+- **Imported** — saves `isImported = true`, `authorDisplayName = "Imported"`. Default for any recipe opened from an URL/file import.
+- **Personal — [User's Name]** — saves `isImported = false`, `authorDisplayName = authRepository.displayName ?: email`. Default for freeform-typed recipes.
+
+Changing the dropdown on save also updates `isImported` in Room, keeping the Your Recipes filter chips in sync.
+
+`RecipeEditorViewModel` exposes:
+- `val personalAuthorName: String` — the signed-in user's display name (used for the "Personal" option label)
+- `updateIsPersonalAuthor(Boolean)` — updates `EditorUiState.isPersonalAuthor`
+
+**Preserved on save (not exposed in UI):** `originalAuthorId`, `originalVisibility`. When forking a seeded recipe (`authorId == null`), stamps the current user's UID as `authorId`.
 
 ---
 
@@ -210,11 +296,11 @@ FAB on Your Recipes tab → ModalBottomSheet → two options:
 - **"Type it out"** → `FreeformEntryScreen` (pushed)
 - **"Import from URL or file"** → `ImportScreen` (pushed route)
 
-`FreeformEntryScreen`: large OutlinedTextField (minLines=8) → "Format with Gemini" → `formatRecipeText` CF → `RecipeReviewSheet` (Save / Reformat / Edit).
+`FreeformEntryScreen`: large `OutlinedTextField` (minLines=8) → "Format with Gemini" button → `formatRecipeText` CF → `RecipeReviewSheet` (Save Recipe / Reformat / Edit).
 
 **`FreeformViewModel` key methods:**
 - `formatWithGemini()` — calls CF, sets `parsedRecipe`
-- `saveRecipe()` — saves to Room (`isImported=false, isCustomized=true, needsReview=false`), sets `savedRecipeId` → `onBack()`
+- `saveRecipe()` — saves to Room (`isImported=false, isCustomized=true, needsReview=false, authorId=currentUid, authorDisplayName=displayName`), sets `savedRecipeId` → `onBack()`
 - `saveAndEdit()` — saves same way, sets `editRecipeId` → `onEditClick(id)`
 - `reformat()` / `dismissReview()` — UI-only state resets
 
@@ -223,7 +309,7 @@ FAB on Your Recipes tab → ModalBottomSheet → two options:
 ### F6 — Ingredient Unit Conversions ✅
 
 #### Storage
-6 fields at end of `IngredientEntity`: `quantityValue/Unit/DisplayMetric` and `Imperial`. Gemini populates on import/freeform; seeded recipes have all null.
+Six fields at the **end** of `IngredientEntity` (must stay last — `DatabaseSeeder` uses positional calls): `quantityValue/Unit/DisplayMetric` and `Imperial`. Gemini populates all on import/freeform. Non-convertible quantities → all null.
 
 #### `QuantityScaler` (`ui/util/QuantityScaler.kt`)
 ```kotlin
@@ -236,110 +322,278 @@ object QuantityScaler {
 ```
 
 #### Detail screen
-Unit toggle (SingleChoiceSegmentedButtonRow) shown only when ≥1 ingredient has conversion data. Session-level — not persisted. Scaling and unit conversion computed together.
+Unit toggle (`SingleChoiceSegmentedButtonRow`: Original | Metric | Imperial) shown only when ≥1 ingredient has conversion data. Session-level — not persisted. Scaling and unit conversion computed together in parallel.
 
-#### Gemini conversion rules
-1 cup=240ml, 1 tbsp=15ml, 1 tsp=5ml, 1 oz=28.35g, 1 lb=453.6g. Non-convertible → all null.
+#### Gemini conversion constants
+1 cup=240ml, 1 tbsp=15ml, 1 tsp=5ml, 1 fl oz=30ml, 1 oz=28.35g, 1 lb=453.6g, 1 kg=2.205lb. Non-convertible (counts, "to taste") → null.
 
 ---
 
-### F7 — Authentication ✅ (core done)
+### F7 — Authentication ✅
 
-#### Auth providers implemented
-- **Google Sign-In** via `play-services-auth`
-- **Email / Password** (sign-in + sign-up with display name)
+#### Auth is mandatory
+
+The app **requires** a signed-in account. `AmrosaNavGraph` observes `authStateFlow()` at the outermost level:
+- `currentUser == null` or anonymous → renders full-screen `AuthScreen()` with no back button and no bottom bar (the main Scaffold/NavHost do not exist)
+- Real signed-in user → renders `MainAppScaffold()` with all 4 tabs
+
+Anonymous auth has been **removed** — `signInAnonymouslyIfNeeded()` is no longer called on launch.
+
+#### Sign-out clears local data
+
+`AccountViewModel.signOut()`:
+1. Calls `app.container.clearAllLocalData(context)` — runs Room `database.clearAllTables()` + clears `amrosa_sync` SharedPreferences
+2. Calls `authRepository.signOut()`
+3. `authStateFlow` emits null → `AmrosaNavGraph` recomposes to auth gate automatically
+
+**Sign-out dialog** warns the user: *"All recipes will be removed from this device. They'll sync back automatically when you sign in again."*
+
+#### Auth providers
+- **Google Sign-In** via `play-services-auth` (one-tap)
+- **Email / Password** — sign-in and sign-up (with display name)
 - **Phone OTP** via `PhoneAuthProvider` (60s timeout, auto-verification supported)
-- **Anonymous** — silent sign-in on every first launch
 
-All methods call `linkWithCredential` when upgrading an anonymous session (preserves local data).
+All methods: if current user is anonymous → `linkWithCredential`. Otherwise fresh sign-in. (Anonymous linking kept for forward compat but anonymous sessions are no longer created on launch.)
 
 #### `AuthRepository` (`data/auth/AuthRepository.kt`)
-`signInAnonymouslyIfNeeded()` · `signInWithGoogle(idToken)` · `signInWithEmail(email, pw)` · `signUpWithEmail(name, email, pw)` · `signInWithPhoneCredential(credential)` · `signOut()` · `authStateFlow(): Flow<FirebaseUser?>`
+```kotlin
+val uid: String?             // current user UID (null if not signed in)
+val displayName: String?     // display name from Firebase profile
+val email: String?
+val isSignedIn: Boolean      // true for non-anonymous users only
+authStateFlow(): Flow<FirebaseUser?>
+signInWithGoogle(idToken: String)
+signInWithEmail(email, password)
+signUpWithEmail(name, email, password)
+signInWithPhoneCredential(credential: PhoneAuthCredential)
+signOut()
+```
 
-#### `AuthScreen` + `AuthViewModel` (`ui/auth/`)
-Pushed route (`"auth"`), not a tab. Segmented toggle Sign In | Create Account. Google button, email form, phone flow (number → OTP → verify). `LaunchedEffect(state.authenticatedUserId)` pops back on success.
+#### `AuthScreen` (`ui/auth/AuthScreen.kt`)
+Signature: `AuthScreen(onBack: (() -> Unit)? = null)`
+- `onBack = null` (auth gate) → no TopAppBar, no back button. Full-screen wall.
+- `onBack != null` (push route, if needed) → shows TopAppBar with back arrow; pops on successful auth.
+
+Contains: "Amrita & Ambrosia" heading, Sign In | Create Account segmented button, Google button, email/password form, phone OTP flow.
 
 #### `AccountScreen` + `AccountViewModel` (`ui/account/`)
-Profile card · "Sign In / Create Account" button (anonymous) → AuthScreen · "Sign Out" (signed in) · Sync stats · DB info · About.
+Tab 4. Always shows a signed-in user (auth is mandatory). Profile card · "Sign Out" button · Sync stats · DB version · About.
 
-#### Anonymous auth on launch (`AmrosaApplication`)
+#### Launch sequence (`AmrosaApplication.onCreate()`)
 ```kotlin
-container.authRepository.signInAnonymouslyIfNeeded()  // always first
-container.seeder.seedIfNeeded()
-container.syncService.sync()
+container = AppContainer(this)
+appScope.launch {
+    // Seed + sync whenever a real user is signed in (on start or after sign-in)
+    container.authRepository.authStateFlow().collect { user ->
+        if (user != null && !user.isAnonymous) {
+            container.seeder.seedIfNeeded()       // no-op currently
+            container.syncService.sync()
+            container.syncService.syncPersonalRecipes()
+        }
+    }
+}
 ```
 
 #### Firebase config
-- Project: `amrosa-2ec82`
-- Web client ID stored in `res/values/strings.xml` as `google_web_client_id`
-
-#### Remaining F7 work
-- Populate `authorId`/`authorDisplayName` when saving freeform/imported recipes
-- Scope push sync path to `personal_recipes/{uid}/recipes/{recipeId}`
-- Deprecate old `SettingsScreen`
+Project: `amrosa-2ec82`. Web client ID in `res/values/strings.xml` as `google_web_client_id`. SHA-1 debug fingerprint registered in Firebase Console for Google Sign-In.
 
 ---
 
-### F8 — Shared Recipes — PLANNED
+### F8 — Shared Recipes & Visibility ✅
 
-Tab 5 (will shift Account from Tab 4). Browse `shared_recipes` Firestore collection, copy to personal, share own recipes. Full Firestore structure planned under `personal_recipes/{uid}/recipes/` and `shared_recipes/{recipeId}`.
+#### Recipe visibility
+
+Every recipe has `visibility: String = "private"` in Room.
+- **`"private"`** (default) — visible only to the owner
+- **`"public"`** — mirrored to `shared_recipes/{recipeId}` in Firestore
+
+#### Share button (detail screen top bar)
+
+The **Share icon** appears in the `RecipeDetailScreen` top bar for owners only (`state.isOwner == true`):
+
+- **Recipe is already public** → tap Share → Android system share sheet opens immediately with link `amrosa://shared/{recipeId}` and recipe title as subject
+- **Recipe is private** → tap Share → dialog: *"This recipe will be visible to anyone with the link. You can make it private again at any time."* → tap **Share** → `setVisibility("public")` runs; once `state.isPublic` becomes true, share sheet opens automatically via `LaunchedEffect(state.isPublic, pendingShareAfterPublish)`
+
+Making private: the `FilterChip` (lock / globe icon) in the recipe body still toggles visibility for owners — it's the secondary way to make a public recipe private again.
+
+`RecipeDetailViewModel.setVisibility(visibility)`:
+1. Updates Room via `repository.setVisibility(recipeId, visibility)`
+2. Updates in-memory state
+3. `"public"` → `sharedRecipeService.publish(recipe)` + starts comment observer
+4. `"private"` → `sharedRecipeService.unpublish(recipeId)` + stops comment observer
+
+#### Deep links
+
+Scheme: **`amrosa://shared/{recipeId}`**
+
+Registered in `AndroidManifest.xml` with `BROWSABLE` intent filter. `NavGraph` composable for `"shared/{recipeId}"` has:
+```kotlin
+deepLinks = listOf(navDeepLink { uriPattern = "amrosa://shared/{recipeId}" })
+```
+Any device with the app installed opens `SharedRecipeDetailScreen` directly when the link is tapped. Works with sideloaded APKs — no store release required.
+
+Test via ADB: `adb shell am start -W -a android.intent.action.VIEW -d "amrosa://shared/RECIPE_ID" com.aerion.amrosa`
+
+#### Author attribution when sharing
+
+`SharedRecipeService.buildDocument()` applies this rule at publish time:
+- `recipe.isImported == false` → `authorDisplayName = recipe.authorDisplayName` (real name, e.g. "Tanay")
+- `recipe.isImported == true` → `authorDisplayName = "Imported"` (blanket override)
+
+`authorId` (Firebase UID) is always the real owner's UID — used for Firestore security rules.
+
+Author is stamped when a recipe is first created:
+- **Personal / freeform**: `authorId = currentUid`, `authorDisplayName = displayName ?: email`
+- **Imported**: same UID/name saved in Room; overridden to "Imported" only at publish time
+- **Editor fork** (seeded recipe with `authorId == null`): stamped with current user on first save
+
+#### Shared tab (Tab 3)
+
+`SharedScreen` reads from Firestore `shared_recipes` live (callbackFlow). Shows all public recipes with search.
+
+Card routing:
+- Tap own recipe (`recipe.authorId == currentUid`) → `"recipe/$id"` (owner / Room-based detail)
+- Tap others' recipe → `"shared/$id"` (visitor / Firestore-based detail)
+
+Cards show a "Yours" badge for the owner's recipes.
+
+#### `SharedRecipeDetailScreen` (visitor view — Firestore-based)
+
+Route: `"shared/{recipeId}"`. Also handles deep links (`amrosa://shared/{recipeId}`). Reads from Firestore, not Room. Features:
+- Yield adjuster, unit toggle (Original/Metric/Imperial)
+- Read-only ingredients + steps
+- **"Copy to My Recipes"** button: saves full copy to Room with new UUIDs, `visibility = "private"`, `isImported = false`, author set to current user
+- Comments section (if signed in)
+
+#### Comments
+
+Stored in `shared_recipes/{recipeId}/comments/{commentId}`. Live stream via `callbackFlow`.
+
+- **Post**: any authenticated user; max 1000 chars
+- **Delete**: commenter (own comment) or recipe owner (any comment on their recipe)
+- Comments are immutable once posted (no edit)
+- Comment input shown in both `RecipeDetailScreen` (owner view, when recipe is public) and `SharedRecipeDetailScreen` (visitor view)
+
+#### Firestore security rules (`firestore.rules` — deployed)
+
+```
+recipes/{recipeId}:             read = auth != null; write = false (admin SDK only)
+personal_recipes/{uid}/recipes: read+write = auth.uid == uid
+shared_recipes/{recipeId}:      read = auth != null
+                                create = auth.uid == resource.data.authorId
+                                update/delete = auth.uid == resource.data.authorId
+shared_recipes/{recipeId}/comments:
+                                read = auth != null
+                                create = non-anonymous + content 1–1000 chars
+                                delete = commenter OR recipe author (via get())
+                                update = false (immutable)
+```
 
 ---
 
 ## Screen Map
 
 ```
+── Auth Gate (shown when not signed in) ───────────────────────────────
+AuthScreen  (full-screen, no back button, no bottom bar)
+  ├── "Amrita & Ambrosia" heading
+  ├── Segmented: Sign In | Create Account
+  ├── Google button
+  ├── Email + password form (+ name in Create Account mode)
+  └── "Use phone number" → phone entry → OTP entry → verify
+
 ── Bottom Tab 1: All ──────────────────────────────────────────────────
-All Recipes Screen
-  ├── Search bar, category filter chips, recipe card list
-  └── Settings gear → navigates to Account tab
+HomeScreen (RecipeFilter.ALL)
+  ├── Search bar + category filter chips
+  ├── Recipe card list (all local recipes)
+  │     Each card: title · time · tags · Author row (person icon + name) · Shared pill (if public)
+  │     needsReview badge on pending cards
+  ├── needsReview cards → "import?reviewId=$id" (review sheet)
+  └── Settings gear icon → Account tab
 
 ── Bottom Tab 2: Your Recipes ─────────────────────────────────────────
-"Your Recipes" Screen  (RecipeFilter.YOURS — all user recipes, personal + imported)
-  ├── Search + filter, recipe card list sorted: needsReview first → recency
-  ├── needsReview cards show "Needs review — tap to confirm" banner; tap → ImportScreen
+HomeScreen (RecipeFilter.YOURS — all user recipes: personal + imported)
+  ├── Search bar
+  ├── Author filter chips: [ All ] [ Personal ] [ Imported ]
+  │     Personal = isImported:false; Imported = isImported:true
+  ├── Category filter chips
+  ├── Recipe list sorted: needsReview DESC → updatedAt DESC
+  │     Each card: same as All tab (author row + shared pill)
+  ├── needsReview cards → ImportScreen (review sheet)
   └── FAB "Add Recipe" → ModalBottomSheet
-        ├── "Type it out" → FreeformEntryScreen (pushed)
+        ├── "Type it out"            → FreeformEntryScreen (pushed)
         └── "Import from URL or file" → ImportScreen (pushed)
 
-FreeformEntryScreen  (pushed)
-  ├── OutlinedTextField (minLines=8, example placeholder), char count
+FreeformEntryScreen  (pushed route "freeform")
+  ├── Large unstructured text area (minLines=8)
   ├── "Format with Gemini" button → formatRecipeText CF
   └── RecipeReviewSheet ("Save Recipe" / "Reformat" / Edit icon)
+        └── No author toggle (freeform = always personal recipe, isImported=false)
 
-ImportScreen  (pushed route — NOT a tab)
+ImportScreen  (pushed route "import?reviewId=...")
   ├── Back button in TopAppBar
-  ├── URL import card, file import card (.xlsx/.csv/.txt), Sheets/Docs hint
+  ├── URL import card + "Import Recipe" button
+  ├── File import card (.xlsx / .csv / .txt, max 5 MB) + "Choose File" button
+  ├── Google Sheets & Docs hint card
   └── RecipeReviewSheet ("Confirm" / "Reimport" / Edit icon)
+        ├── Parse notes banner (tertiaryContainer, dismissible) if parseNotes != null
         └── Author toggle: [Imported] | [My Recipe]
-              "Imported" → isImported = true  → "Imported" shown when shared
-              "My Recipe" → isImported = false → real user name shown when shared
+              on confirm → updateIsImported() in Room
+
+── Bottom Tab 3: Shared ───────────────────────────────────────────────
+SharedScreen  (live Firestore stream)
+  ├── Search bar
+  ├── Shared recipe cards (title, author, time chips, tags, "Yours" badge)
+  └── Tap own recipe → RecipeDetailScreen (owner view)
+      Tap others' recipe → SharedRecipeDetailScreen (visitor view)
+
+SharedRecipeDetailScreen  (pushed route "shared/{recipeId}")
+  Deep link: amrosa://shared/{recipeId}
+  ├── Recipe detail (read-only): yield adjuster, unit toggle
+  ├── Ingredients grouped by section
+  ├── Steps
+  ├── "Copy to My Recipes" button (disabled if already copied or not signed in)
+  └── Comments section (read + add/delete)
 
 ── Bottom Tab 4: Account ──────────────────────────────────────────────
 AccountScreen
-  ├── Profile card (name/email/phone or "Not signed in")
-  ├── "Sign In / Create Account" → AuthScreen  OR  "Sign Out"
-  ├── Sync & Storage stats, DB version, About
+  ├── Profile card (name / email / phone — always signed in)
+  ├── "Sign Out" button → dialog warning data deletion → clears Room + sync prefs + signs out
+  └── Sync stats · DB version · About
 
-AuthScreen  (pushed route "auth")
-  ├── "Amrita & Ambrosia" heading
-  ├── Segmented: Sign In | Create Account
-  ├── Google button, email+password form (+ name in Create Account)
-  └── "Use phone number" → phone number input → OTP input
-
-── Push routes ────────────────────────────────────────────────────────
-RecipeDetailScreen
-  ├── Title, source URLs (tappable), prep/cook time, yield adjuster
-  ├── Section jump chips, unit toggle (Orig/Metric/Imp — shown when conversions exist)
+── Push routes (from any tab) ─────────────────────────────────────────
+RecipeDetailScreen  (pushed route "recipe/{recipeId}")
+  ├── Title, source URLs (tappable), prep/cook time
+  ├── Yield adjuster (+/−, reset)
+  ├── Section jump chips (auto-scroll)
+  ├── Unit toggle: Original | Metric | Imperial (shown when conversions exist)
   ├── Substitute selectors, optional toggles, ingredient checklist
-  ├── Steps, Notes, Cooking Mode button, Edit button → RecipeEditorScreen
+  ├── Recipe steps with inline ingredient refs
+  ├── Notes (timestamped, add/edit/delete)
+  ├── Cooking Mode button → CookingModeScreen
+  ├── Top bar actions (owners only):
+  │     [Share icon] — opens share sheet if public; opens "Share?" dialog if private
+  │     [Edit pencil] — → RecipeEditorScreen
+  │     [Cooking Mode book]
+  ├── Visibility FilterChip in body (owner only): 🔒 Private | 🌐 Public
+  │     Confirms before toggling; public → comments section shown
+  └── Comments section (when recipe is public)
 
-RecipeEditorScreen
-  ├── Fork dialog (seeded recipes), full metadata + sections/ingredients/steps edit
-  └── Save → Room + Firestore push
+RecipeEditorScreen  (pushed route "recipe/edit/{recipeId}")
+  ├── Fork dialog (seeded/shared-copied recipes)
+  ├── Metadata: title, description, times, yield (single/range), tags, URLs
+  ├── Author dropdown (ExposedDropdownMenuBox):
+  │     [Imported]  — isImported=true, authorDisplayName="Imported"
+  │     [Personal — Name]  — isImported=false, authorDisplayName=user's name
+  │     Default: Imported for imported recipes; Personal for freeform recipes
+  ├── Sections with ingredients + steps (add/reorder/delete)
+  └── Save → Room (updates isImported + authorDisplayName) + push to personal_recipes Firestore
 
-CookingModeScreen (fullscreen)
-  └── Step-by-step, large text, screen-on lock
+CookingModeScreen  (pushed from RecipeDetailScreen)
+  ├── Fullscreen, one step at a time, large text
+  ├── Section label, ingredient card (scaled + unit-converted)
+  ├── Prev / Next navigation
+  └── Screen-on lock (keepScreenOn flag)
 ```
 
 ---
@@ -352,134 +606,82 @@ CookingModeScreen (fullscreen)
 | Navigation | Jetpack Navigation Compose |
 | Local DB | Room + SQLite |
 | Cloud DB | Firebase Firestore |
-| Auth | Firebase Authentication + `play-services-auth` (Google Sign-In) |
+| Auth | Firebase Authentication + `play-services-auth` |
 | Image Storage | Firebase Storage (planned) |
-| Background Sync | On-launch coroutine (AmrosaApplication) |
+| Background Sync | On-launch coroutine (`AmrosaApplication`) |
 | Recipe AI | Gemini 2.5 Flash via Firebase Cloud Functions v2 (Node.js 24) |
 | Image Loading | Coil |
-| DI | Manual (AppContainer) |
+| DI | Manual (`AppContainer` in `AmrosaApplication`) |
 | State Management | ViewModel + StateFlow |
 | JSON | Gson |
 | XLSX parsing (backend) | SheetJS (`xlsx` npm package) |
 
-> **Note:** This project uses **Gemini (Google AI)** — NOT the Anthropic Claude API. All AI calls go through the `GEMINI_API_KEY` Firebase secret. Do not add Anthropic dependencies.
-
----
-
-## Data Model (Room Entities — DB v8, seeder `seeded_v10`)
-
-```kotlin
-@Entity(tableName = "recipes")
-data class RecipeEntity(
-    @PrimaryKey val id: String,
-    val title: String, val description: String?,
-    val sourceUrls: String,           // JSON List<String>
-    val baseServings: Int,
-    val baseServingsMin: Int? = null, val baseServingsMax: Int? = null,
-    val scaleIngredientId: String? = null, val scaleStep: Double = 1.0,
-    val prepTimeMinutes: Int?, val cookTimeMinutes: Int?,
-    val imageUrl: String?,
-    val tags: String,                 // JSON List<String>
-    val isCustomized: Boolean = false, val isImported: Boolean = false,
-    val needsReview: Boolean = false,
-    val version: Int = 1, val changeLog: String = "[]",
-    val createdAt: Long, val updatedAt: Long,
-    val syncedAt: Long? = null,
-    val authorId: String? = null,
-    val authorDisplayName: String? = null
-)
-
-@Entity(tableName = "recipe_sections")
-data class RecipeSectionEntity(@PrimaryKey val id: String, val recipeId: String, val name: String, val orderIndex: Int)
-
-@Entity(tableName = "ingredients")
-data class IngredientEntity(
-    @PrimaryKey val id: String,
-    val recipeId: String, val sectionId: String?,
-    val name: String,
-    val quantityValue: Double?, val quantityUnit: String?, val quantityDisplay: String?,
-    val groupLabel: String?,
-    val isOptional: Boolean = false,
-    val substituteGroupId: String?, val substituteRatio: Float = 1.0f,
-    val orderIndex: Int,
-    // F6 fields — at end, all default null
-    val quantityValueMetric: Double? = null, val quantityUnitMetric: String? = null, val quantityDisplayMetric: String? = null,
-    val quantityValueImperial: Double? = null, val quantityUnitImperial: String? = null, val quantityDisplayImperial: String? = null
-)
-
-@Entity(tableName = "steps")
-data class StepEntity(@PrimaryKey val id: String, val recipeId: String, val sectionId: String?, val instruction: String, val orderIndex: Int)
-
-@Entity(tableName = "step_ingredient_refs", primaryKeys = ["stepId", "ingredientId"])
-data class StepIngredientRefEntity(val stepId: String, val ingredientId: String, val quantityDisplay: String?)
-
-@Entity(tableName = "recipe_notes")
-data class RecipeNoteEntity(@PrimaryKey val id: String, val recipeId: String, val content: String, val createdAt: Long, val updatedAt: Long)
-```
-
----
-
-## Current Recipes
-
-| ID | Title | Yield | Scaling | Sections |
-|---|---|---|---|---|
-| `recipe-001` | Brown Butter Chocolate Chip Cookies | 15–20 | Flour-based, ¼ cup steps | Cookie Dough |
-| `recipe-002` | Neapolitan Pizza | 8 | Servings ± 1 | Pizza Dough, Marinara Sauce, Béchamel Sauce, Final Pizza |
-| `recipe-003` | Butter Chicken | 6 | Servings ± 1 | Tandoori Chicken, Makhani Gravy Base, Final Cooking |
-| `recipe-004` | Malai Kofta | 4–5 | Servings ± 1 | Kofta Balls, Kofta Filling, Gravy |
-
-Source: `Food Recipes.xlsx` in the project root. DatabaseSeeder must match the xlsx exactly.
+> **AI note:** This project uses **Gemini (Google AI)** — NOT the Anthropic Claude API. All AI calls go through the `GEMINI_API_KEY` Firebase secret. Do not add Anthropic dependencies.
 
 ---
 
 ## Current Status
 
 ### Done ✅
-- Room DB **v8**, seeder `seeded_v10` — 4 seeded recipes
-- Recipe detail: yield scaling, ingredient checklist, step-ingredient refs, substitute selectors, optional toggles, section jump chips
-- Cooking mode (fullscreen, step-by-step, screen-on lock)
-- Notes system (per-recipe, timestamped, editable)
-- Firebase Firestore connected (`amrosa-2ec82`); `RecipeSyncService` pull delta + push sync
-- Version control (`version` int + `changeLog` JSON)
-- Recipe Editor — full edit, fork dialog, cloud push
-- Source URLs clickable
-- Cloud Functions: `parseRecipeUrl`, `parseRecipeContent`, `formatRecipeText` — all deployed
-- **F3** — Full pending-review import flow (needsReview, amber banner, Confirm/Reimport/Edit on sheet)
-- **`RecipeReviewSheet`** — extracted shared composable (`ui/import_recipe/RecipeReviewSheet.kt`); `onEdit` callback shows pencil icon in header
-- **F5** — Freeform recipe entry: FAB bottom sheet, FreeformEntryScreen, formatRecipeText CF, save/saveAndEdit actions
-- **F6** — Unit conversions: 6 fields on IngredientEntity, UnitMode enum, QuantityScaler, unit toggle in RecipeDetailScreen
-- **4-tab navigation**: All · Your Recipes · Shared · Account (Imported tab removed; Import is now a push route)
-- **F7 (core)** — AuthRepository (anonymous/Google/email/phone), AuthScreen with all 3 methods + sign-up, AccountScreen, anonymous sign-in on launch, authorId/authorDisplayName on RecipeEntity
-- **Author attribution** — Personal recipes stamp real user name; imported recipes always show "Imported" when shared; author choice toggle on review sheet lets user mark an import as their own recipe
+
+| Area | Detail |
+|---|---|
+| **Room DB v9** | All entities: recipes, sections, ingredients, steps, step_ingredient_refs, recipe_notes |
+| **Recipe detail** | Yield scaling (servings + anchor-based), ingredient checklist, step-ingredient refs, substitute selectors, optional toggles, section jump chips |
+| **Cooking mode** | Fullscreen step-by-step, screen-on lock |
+| **Notes system** | Per-recipe, timestamped, add/edit/delete |
+| **Firebase Firestore** | Connected (`amrosa-2ec82`), security rules deployed |
+| **RecipeSyncService** | Pull delta sync + `pushPersonalRecipe()` push to `personal_recipes/{uid}/recipes/` |
+| **Version control** | `version` int + `changeLog` JSON array of `RecipeChange` |
+| **Recipe Editor (F4)** | Full edit; fork dialog; author dropdown (Imported/Personal); cloud push; visibility preserved on save |
+| **Source URLs** | Clickable, open in browser |
+| **F3 — Import** | `parseRecipeUrl` + `parseRecipeContent` CF deployed; pending-review flow; Confirm/Reimport/Edit; Google Sheets/Docs auto-detect; file import (XLSX/CSV/TXT, 5 MB max) |
+| **RecipeReviewSheet** | Shared composable; parse notes banner (tertiaryContainer, dismissible); onEdit pencil icon; author toggle for imports |
+| **F5 — Freeform** | FreeformEntryScreen, FAB bottom sheet, `formatRecipeText` CF, save/saveAndEdit flow |
+| **F6 — Unit conversions** | 6 IngredientEntity fields, `QuantityScaler`, `UnitMode`, unit toggle on detail screen |
+| **4-tab navigation** | All · Your Recipes · Shared · Account (Imported tab removed; Import is push route) |
+| **Your Recipes filter chips** | `[All] [Personal] [Imported]` chips filter by `isImported` within the tab |
+| **Recipe cards** | Author row (person icon + name) + Shared pill on all cards |
+| **F7 — Mandatory auth gate** | Auth required at launch; `AuthScreen` shown as root when not signed in (no back button); main app only renders after real sign-in |
+| **F7 — Sign-out clears data** | `clearAllLocalData()` in `AppContainer` wipes Room + sync prefs; called before `signOut()` |
+| **F7 — Auth** | Google + email/password + phone OTP; `linkWithCredential` upgrade; sync on sign-in; `AccountScreen`; `AuthScreen` |
+| **F7 — Author attribution** | `authorId` + `authorDisplayName` stamped at creation; editor author dropdown; personal = real name; imported = "Imported" override at publish time |
+| **F8 — Visibility** | `visibility` field on RecipeEntity; private/public; share button in detail top bar |
+| **F8 — Share button** | Top bar icon (owners only); if public → Android share sheet with `amrosa://shared/{id}`; if private → dialog → publish → share sheet |
+| **F8 — Deep links** | `amrosa://shared/{recipeId}` scheme; `AndroidManifest.xml` BROWSABLE intent filter; `navDeepLink` in NavGraph |
+| **F8 — Shared tab** | `SharedScreen` + `SharedViewModel`; live Firestore stream; search; "Yours" badge; routing to owner vs visitor view |
+| **F8 — Shared detail** | `SharedRecipeDetailScreen`; read-only; yield adjuster; unit toggle; "Copy to My Recipes"; deep link entry point |
+| **F8 — Comments** | `Comment` domain model; post/delete; Firestore subcollection; delete by commenter or recipe owner |
+| **F8 — Security rules** | Full Firestore rules deployed; per-UID personal access; shared read-all; comment create/delete moderation |
+| **Seeder disabled** | `seedIfNeeded()` is a no-op; fresh installs start blank |
 
 ### Planned — In Priority Order
 
 | # | Feature | Description |
 |---|---|---|
-| **F7 remainder** | Auth wire-up | Populate `authorId`/`authorDisplayName` on save; scope push path to `personal_recipes/{uid}/`; deprecate SettingsScreen |
-| **F8** | Shared Recipes | Community tab, browse/copy/share; Firestore security rules |
-| — | Recipe Images | Firebase Storage integration |
-| — | Shopping List | Dedicated shopping list tab |
-| — | iOS | Swift/SwiftUI/SwiftData |
+| — | Recipe Images | Firebase Storage integration; image picker on editor; Coil display |
+| — | Shopping List | Dedicated screen; add ingredients from recipe detail |
+| — | iOS | Mirror Android features in Swift/SwiftUI/SwiftData (separate codebase) |
 
 ---
 
 ## UI/UX Guidelines
 
-- **Typography:** Minimum 16sp body, 20sp+ for steps
+- **Typography:** Minimum 16sp body text; 20sp+ for recipe steps
 - **Color palette:** Warm, earthy tones — cream, terracotta, deep green, muted gold
 - **Dark mode:** Supported from the start
 - **No ads. No onboarding flows. No forced permissions.**
-- **Cooking Mode** keeps screen on automatically
-- **Unit toggle** (Original / Metric / Imperial) is session-level, not persisted
-- **Parse notes banner** in review sheet uses `tertiaryContainer` color, is dismissible
-- **Auth is optional** — app is fully functional without signing in
+- **Cooking Mode** keeps screen on automatically — no separate toggle
+- **Unit toggle** (Original / Metric / Imperial) is session-level, not persisted to preferences
+- **Parse notes banner** uses `tertiaryContainer` color, is dismissible
+- **Auth is mandatory** — `AuthScreen` is the root wall; no anonymous access; sign-out deletes all local data
+- **needsReview badge** on cards uses `tertiaryContainer` (matches parse notes, consistent language)
 
 ---
 
 ## Out of Scope (permanently removed)
 
-- Social sharing other than recipe sharing (F8) — ❌
+- Social features beyond recipe sharing — ❌
 - Meal planning / calendar integration — ❌
 - Nutritional information — ❌
 - Voice input / hands-free mode — ❌
@@ -488,147 +690,72 @@ Source: `Food Recipes.xlsx` in the project root. DatabaseSeeder must match the x
 
 ## Notes for AI Coding Assistants
 
-- **AI model**: Gemini 2.5 Flash (`@google/generative-ai`). Do NOT use Anthropic SDK.
+### General
+- **AI model**: Gemini 2.5 Flash (`@google/generative-ai` npm). Do NOT use Anthropic SDK.
 - **Kotlin idioms**: data classes, sealed classes, extension functions, `StateFlow` over `LiveData`
 - **Compose only**: all UI in Jetpack Compose — no XML layouts
-- **IO dispatcher**: all DB and network on `Dispatchers.IO`
-- **Room is source of truth**: UI never reads Firestore directly
-- **Minimal dependencies**: no library added without justification
-- **Scaling math**: servings-based: `baseQty × selectedServings / baseServings`; anchor-based: `baseQty × anchorQty / baseAnchorQty`; unit conversions scale in parallel
-- **DB versioning**: bump `AmrosaDatabase.DB_VERSION` and `DatabaseSeeder` seeder key (`seeded_vN`) together. **Current: DB v8, seeder `seeded_v10`.**
-- **IngredientEntity field order**: F6 conversion fields are LAST (after `orderIndex`). Do not insert new fields before `orderIndex` — it will break positional DatabaseSeeder calls.
-- **isImported**: controls author display when sharing: `false` → real user name; `true` → "Imported".
-  Both `isImported = true` and `false` appear in All tab and Your Recipes tab.
-  The separate Imported tab has been removed.
-- **needsReview flow**: recipes saved to Room immediately with `needsReview = true`. Review sheet is a confirmation step, not a save step. `confirmImportedRecipe(recipeId)` clears flag. `dismissReview()` clears UI only. `reimportUrl()`/`reimportFromFile()` delete-and-reinsert same recipeId. `openReviewForRecipe(recipeId)` loads from Room via `getRecipeWithDetails` → `toParsedRecipeData()`.
-- **RecipeChange**: `data class RecipeChange(val version: Int, val timestamp: Long, val summary: String)` — auto-generated summary from changed fields
-- **Auth upgrade pattern**: all sign-in methods check `auth.currentUser?.isAnonymous == true` → `linkWithCredential` instead of new sign-in (preserves local data)
-- **RecipeReviewSheet**: shared composable in `ui/import_recipe/`. Pass `primaryLabel`/`secondaryLabel` to distinguish import vs freeform. Pass `onEdit` to show pencil icon.
+- **IO dispatcher**: all DB and network on `Dispatchers.IO`, never on Main
+- **Room is source of truth**: UI never reads Firestore directly (except `SharedRecipeDetailScreen` which loads from Firestore since the recipe is not in Room)
 
----
+### Database
+- **DB versioning**: `fallbackToDestructiveMigration()`. Always bump `AmrosaDatabase.DB_VERSION` and `DatabaseSeeder` seeder key (`seeded_vN`) together. **Current: DB v9, seeder `seeded_v11`**.
+- **Seeder**: `seedIfNeeded()` is a no-op. Do not add seeding logic. Bump key only when schema changes.
+- **IngredientEntity field order**: F6 conversion fields are **last** (after `orderIndex`). Do not insert new fields before them — it breaks positional `DatabaseSeeder` calls.
 
-## iOS Implementation
+### Recipe Logic
+- **Scaling math**: servings-based: `baseQty × selectedServings / baseServings`; anchor-based: `baseQty × anchorQty / baseAnchorQty`; unit conversion quantities scale in parallel using the same ratio.
+- **Substitute resolution**: when substitute selected, apply `substituteRatio` to quantity; show substitute name in step inline text.
+- **StepIngredientRef quantities**: always derived from base value × ratio — never store pre-scaled values.
+- **Version tracking**: every editor save must increment `version` and append to `changeLog`.
 
-> iOS app is a feature-for-feature port of the Android app. Swift 5, iOS 17+, SwiftUI, SwiftData, MVVM + @Observable.
+### Author Attribution
+- `authorId` + `authorDisplayName` are stamped at creation time (freeform, import, editor fork of seeded recipe).
+- `isImported` controls two things: (1) which author name appears when shared, (2) which filter chip it appears under in Your Recipes.
+  - `isImported = false` → `authorDisplayName` (real user name) shown on shared recipe; appears under "Personal" chip
+  - `isImported = true` → always "Imported" shown (override applied in `SharedRecipeService.buildDocument()`); appears under "Imported" chip
+- `authorId` is always the real UID regardless of `isImported` — required for Firestore security rules.
+- The editor **author dropdown** changes both `isImported` and `authorDisplayName` on save. `authorId` is never changed.
+- `isOwner` in `RecipeDetailViewModel`: `true` when `authorId == currentUid` OR when `authorId == null` (pre-attribution recipes).
 
-### iOS Tech Stack
+### Visibility & Sharing
+- Share button in detail top bar (owners only):
+  - Already public → opens Android share sheet immediately with `amrosa://shared/{recipeId}`
+  - Private → dialog → confirm → `setVisibility("public")` + set `pendingShareAfterPublish = true` → `LaunchedEffect` fires share sheet once `state.isPublic` becomes true
+- `setVisibility("public")` → updates Room + publishes to `shared_recipes` + starts comment observer.
+- `setVisibility("private")` → updates Room + unpublishes + stops comment observer.
+- `SharedRecipeService.buildDocument()` applies `authorDisplayName = "Imported"` when `recipe.isImported == true`.
+- Comments are Firestore-only; never stored in Room.
 
-| Layer | Technology |
-|---|---|
-| UI | SwiftUI + NavigationStack |
-| Local DB | SwiftData (@Model) |
-| Cloud DB | Firebase Firestore (iOS SDK 11.x) |
-| Auth | FirebaseAuth + GoogleSignIn-iOS 8.x |
-| AI / Import | Firebase Cloud Functions (same backend as Android) |
-| Image Loading | Kingfisher 8.x |
-| DI | Manual (AppContainer — @Observable @MainActor) |
-| State Management | @Observable + @State (no ViewModel protocol) |
-| Project generation | xcodegen 2.45.4 (`project.yml` in `ios/Amrosa/`) |
-| Bundle ID | `com.aerion.amrosa` |
-| Firebase project | amrosa-2ec82 |
+### Import / Review Flow
+- Recipes are saved to Room **immediately** with `needsReview = true` before the review sheet opens — data is never lost.
+- `confirmRecipe()` calls both `confirmImportedRecipe()` (clears needsReview) and `updateIsImported(!isOwnRecipe)`.
+- `dismissReview()` clears only UI state — Room record untouched.
+- `reimportUrl()` / `reimportFromFile()` delete-and-reinsert same `recipeId` so the list card updates in place.
+- `openReviewForRecipe(recipeId)` reloads from Room via `getRecipeWithDetails` → `toParsedRecipeData()`.
+- `isOwnRecipe` in `ImportUiState` defaults to `false` (Imported); resets to `!recipe.isImported` when re-opening a pending recipe.
 
-### iOS File Structure
+### Navigation
+- **Auth gate**: `AmrosaNavGraph` collects `authStateFlow()`. `isSignedIn = currentUser?.isAnonymous == false`. When false → renders `AuthScreen()` (root, no back). When true → renders `MainAppScaffold()`.
+- **MainAppScaffold** is a separate private composable with its own `rememberNavController()`. Created fresh on each sign-in.
+- Tab routes: `"all_tab"`, `"yours_tab"`, `"shared_tab"`, `"account_tab"`
+- Push routes: `"recipe/{recipeId}"`, `"recipe/edit/{recipeId}"`, `"shared/{recipeId}"`, `"freeform"`, `"import?reviewId={reviewId}"`
+- The `"auth"` route is **removed** from the nav graph — auth is handled at the outer `AmrosaNavGraph` level.
+- Import route uses optional query param `reviewId`; default empty string, treated as null in screen.
+- `showBottomBar` is true only when `currentDestination?.route` is one of the 4 tab routes.
+- Deep link `amrosa://shared/{recipeId}` is registered on the `"shared/{recipeId}"` composable via `navDeepLink`.
 
+### Auth Patterns
+- Anonymous auth removed. Do not call `signInAnonymouslyIfNeeded()` — it exists in `AuthRepository` for compat but is never called.
+- Sign-out flow: always call `container.clearAllLocalData(context)` before `authRepository.signOut()`.
+- Push sync: only runs for `!authRepository.isAnonymous` users.
+- On sign-in: `AmrosaApplication.authStateFlow` observer automatically triggers seed + sync.
+
+### AppContainer
+- `clearAllLocalData(context: Context)` — `database.clearAllTables()` + clears `amrosa_sync` prefs. Called on sign-out.
+- The `database` field is `private` — access it only through `clearAllLocalData()` or the exposed DAOs via `repository`.
+
+### RecipeChange
+```kotlin
+data class RecipeChange(val version: Int, val timestamp: Long, val summary: String)
 ```
-ios/Amrosa/
-├── project.yml                         # xcodegen spec (run: xcodegen generate from ios/Amrosa/)
-├── Amrosa.xcodeproj/                   # generated — do not edit manually
-└── Amrosa/
-    ├── AmrosaApp.swift                 # @main, Firebase.configure(), AppContainer init
-    ├── AppContainer.swift              # DI: ModelContainer + all repos/services
-    ├── Data/
-    │   ├── DTOs/
-    │   │   ├── ParsedRecipeData.swift  # ParsedRecipeData, ParsedSection, ParsedIngredient, ParsedStep, ParsedStepRef
-    │   │   └── RecipeChange.swift      # RecipeChange(version:timestamp:summary:)
-    │   ├── Models/                     # SwiftData @Model classes (6 models)
-    │   │   ├── RecipeModel.swift       # Full field parity with Android RecipeEntity incl. visibility
-    │   │   ├── RecipeSectionModel.swift
-    │   │   ├── IngredientModel.swift   # Incl. all F6 metric/imperial fields
-    │   │   ├── StepModel.swift
-    │   │   ├── StepIngredientRefModel.swift
-    │   │   └── RecipeNoteModel.swift
-    │   ├── Repositories/
-    │   │   ├── RecipeRepository.swift  # Full CRUD: fetchAll/Yours/Personal, insertFullRecipe,
-    │   │   │                           #   insertFullRecipeFromParsed, updateFullRecipe (delta),
-    │   │   │                           #   upsertFromFirestore, confirmReview, updateIsImported,
-    │   │   │                           #   updateVisibility, addNote, updateNote, deleteNote
-    │   │   └── AuthRepository.swift    # anonymous/Google/email/phone; link-or-sign-in pattern
-    │   └── Services/
-    │       ├── CloudFunctionsService.swift  # parseRecipeUrl, parseRecipeContent, formatRecipeText
-    │       └── RecipeSyncService.swift      # pullSeededRecipes, pullPersonalRecipes, pushPersonalRecipe,
-    │                                        #   pushAllPersonalRecipes, sync()
-    ├── UI/
-    │   ├── ContentView.swift           # 4-tab TabView: All · Your Recipes · Shared · Account
-    │   ├── AllRecipes/                 # AllRecipesView + AllRecipesViewModel
-    │   ├── YourRecipes/                # YourRecipesView + YourRecipesViewModel (needsReview banner)
-    │   ├── Shared/                     # SharedRecipesView (placeholder — F8 planned)
-    │   ├── Account/                    # AccountView + AccountViewModel (profile, stats, sign-out)
-    │   ├── Auth/                       # AuthView + AuthViewModel (Google/email/phone + sign-up)
-    │   ├── RecipeDetail/               # RecipeDetailView + RecipeDetailViewModel
-    │   ├── RecipeEditor/               # RecipeEditorView + RecipeEditorViewModel
-    │   │                               #   EditorSection/EditorIngredient/EditorStep structs
-    │   ├── Import/                     # ImportView + ImportViewModel + RecipeReviewSheet
-    │   │                               #   FreeformEntryView + FreeformEntryViewModel
-    │   ├── CookingMode/               # CookingModeView (fullscreen step-by-step)
-    │   └── Components/                # RecipeCard
-    └── Util/
-        ├── QuantityScaler.swift        # UnitMode enum + scale() functions + fraction formatting
-        └── Extensions.swift            # String.trimmed, Date.relativeString, Int.timeDisplayString
-```
-
-### iOS Implementation Status
-
-#### ✅ Implemented
-
-| Feature | Notes |
-|---|---|
-| **SwiftData schema** | 6 @Model classes, full field parity with Android. Cascade delete rules. |
-| **AppContainer DI** | @Observable @MainActor. ModelContainer, RecipeRepository, AuthRepository, CloudFunctionsService, RecipeSyncService. |
-| **Anonymous sign-in on launch** | `authRepository.signInAnonymouslyIfNeeded()` called in `AppContainer.onLaunch()` |
-| **Firebase init ordering** | `FirebaseApp.configure()` in App.init() before `AppContainer` creation (avoids crash) |
-| **GoogleService-Info.plist** | Declared in project.yml `resources:` block so xcodegen bundles it |
-| **4-tab navigation** | All · Your Recipes · Shared · Account; Shared is placeholder |
-| **Recipe list (All)** | Search + filter, recipe cards |
-| **Your Recipes tab** | needsReview sorted first with banner; FAB → Import or Freeform sheet |
-| **Recipe detail** | Yield adjuster (servings + anchor-based), unit toggle, section jump chips, ingredient checklist, substitute selector, optional toggle, step-ingredient refs, notes, cooking mode, fork/edit |
-| **Anchor-based scaling** | `scaleAnchorQty` tracks current anchor amount; `adjustScale(delta:)`, `resetScale()` (long-press), `yieldDisplay` |
-| **Unit conversions (F6)** | Original/Metric/Imperial toggle; only shown when conversion data exists |
-| **Cooking mode** | Fullscreen step-by-step (CookingModeView) |
-| **Recipe editor** | Full CRUD: metadata (title/description/times/servings/tags/URLs), sections, ingredients (qty/unit/display/optional), steps; delta-save via `updateFullRecipe`; fork dialog |
-| **EditorSection / EditorIngredient / EditorStep** | Value-type editor models in RecipeEditorViewModel.swift |
-| **Recipe import (F3)** | URL import, file import (.txt/.csv), `RecipeReviewSheet` with Confirm/Reimport/Edit, author toggle (Imported vs My Recipe), needsReview pending flow |
-| **Freeform entry (F5)** | FreeformEntryScreen → formatRecipeText CF → RecipeReviewSheet (Save/Reformat/Edit) |
-| **Notes** | Per-recipe timestamped notes; add/edit/delete |
-| **Auth (F7 core)** | Google Sign-In, email/password (sign-in + sign-up), phone OTP; link-or-sign-in upgrades anonymous session |
-| **Account screen** | Profile card, sign-in/sign-out, recipe count, last sync date |
-| **Cloud sync pull** | `pullSeededRecipes` (delta by updatedAt), `pullPersonalRecipes(uid:)` |
-| **Cloud sync push** | `pushPersonalRecipe` — full payload: sections, ingredients (incl. F6 fields), steps; `pushAllPersonalRecipes()` |
-| **Firestore deserialization** | `upsertFromFirestore` + `firestoreToParsedRecipeData` — full sections/ingredients/steps/refs |
-| **Version control** | `version` Int + `changeLog` JSON on every editor save |
-| **isOwner flag** | `RecipeDetailViewModel.isOwner` — compares recipe.authorId to auth.uid |
-| **Visibility field** | `RecipeModel.visibility: String` (default "private") — parity with Android |
-
-#### 🔧 Remaining Gaps (vs Android)
-
-| Gap | Detail |
-|---|---|
-| **F7 remainder** | `authorId`/`authorDisplayName` not yet stamped on save in all paths (freeform saves it; editor save uses existing recipe's value) |
-| **Sign-out local data wipe** | Android wipes local Room DB on sign-out. iOS currently just calls `auth.signOut()` — local SwiftData persists |
-| **F8 Shared Recipes** | Placeholder tab only — no browse/copy/share implementation |
-| **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists) |
-| **Seeding** | iOS starts empty; recipes come from Firestore sync on sign-in (no offline seed like Android `seeded_v10`) |
-
-### iOS Notes for AI Coding Assistants
-
-- **Swift version**: 5 (not 6). Strict concurrency is OFF — do not add `Sendable` or `actor` isolation unless explicitly needed.
-- **@MainActor everywhere**: All ViewModels and Repositories are `@MainActor`. No `DispatchQueue.main.async` needed.
-- **SwiftData is source of truth**: UI never reads Firestore directly (same rule as Android Room).
-- **xcodegen**: After adding/removing Swift files, run `xcodegen generate` from `ios/Amrosa/` to regenerate the Xcode project. Never edit `.xcodeproj` manually.
-- **Anchor scaling math**: `scaleFactor = scaleAnchorQty / baseAnchorQty`. Anchor quantity starts at ingredient's baseValue. `adjustScale(delta: Int)` adds `delta × scaleStep` to `scaleAnchorQty` (min = 1 step). Long-press yield display → `resetScale()`.
-- **EditorSection/EditorIngredient/EditorStep**: Defined in `RecipeEditorViewModel.swift`. Used by both `RecipeEditorViewModel` and `RecipeRepository.updateFullRecipe`.
-- **RecipeRepository.updateFullRecipe**: Delta save — pass `deletedSectionIds`, `deletedIngredientIds`, `deletedStepIds` as `[String]`. Handles upsert of surviving items.
-- **RecipeRepository.insertFullRecipeFromParsed**: Full insert from `ParsedRecipeData` — creates all sections, ingredients, steps, and refs atomically.
-- **Firebase init crash prevention**: `@State private var appContainer: AppContainer` (type annotation only, no default value); initialize in `App.init()` body after `FirebaseApp.configure()` using `_appContainer = State(initialValue: AppContainer())`.
-- **GoogleService-Info.plist**: Must be listed under `resources:` in `project.yml`, not just present in the filesystem.
-- **isImported on iOS**: Same semantics as Android — controls author display. Both appear in All + Your Recipes tabs.
-- **needsReview on iOS**: Same flow as Android — save immediately with `needsReview = true`, confirm later. `confirmReview(recipeId:)` clears flag.
+Appended to `changeLog` on every editor save. Summary auto-generated from changed fields (e.g. "Updated: title, author, recipe content").
