@@ -504,3 +504,131 @@ Source: `Food Recipes.xlsx` in the project root. DatabaseSeeder must match the x
 - **RecipeChange**: `data class RecipeChange(val version: Int, val timestamp: Long, val summary: String)` — auto-generated summary from changed fields
 - **Auth upgrade pattern**: all sign-in methods check `auth.currentUser?.isAnonymous == true` → `linkWithCredential` instead of new sign-in (preserves local data)
 - **RecipeReviewSheet**: shared composable in `ui/import_recipe/`. Pass `primaryLabel`/`secondaryLabel` to distinguish import vs freeform. Pass `onEdit` to show pencil icon.
+
+---
+
+## iOS Implementation
+
+> iOS app is a feature-for-feature port of the Android app. Swift 5, iOS 17+, SwiftUI, SwiftData, MVVM + @Observable.
+
+### iOS Tech Stack
+
+| Layer | Technology |
+|---|---|
+| UI | SwiftUI + NavigationStack |
+| Local DB | SwiftData (@Model) |
+| Cloud DB | Firebase Firestore (iOS SDK 11.x) |
+| Auth | FirebaseAuth + GoogleSignIn-iOS 8.x |
+| AI / Import | Firebase Cloud Functions (same backend as Android) |
+| Image Loading | Kingfisher 8.x |
+| DI | Manual (AppContainer — @Observable @MainActor) |
+| State Management | @Observable + @State (no ViewModel protocol) |
+| Project generation | xcodegen 2.45.4 (`project.yml` in `ios/Amrosa/`) |
+| Bundle ID | `com.aerion.amrosa` |
+| Firebase project | amrosa-2ec82 |
+
+### iOS File Structure
+
+```
+ios/Amrosa/
+├── project.yml                         # xcodegen spec (run: xcodegen generate from ios/Amrosa/)
+├── Amrosa.xcodeproj/                   # generated — do not edit manually
+└── Amrosa/
+    ├── AmrosaApp.swift                 # @main, Firebase.configure(), AppContainer init
+    ├── AppContainer.swift              # DI: ModelContainer + all repos/services
+    ├── Data/
+    │   ├── DTOs/
+    │   │   ├── ParsedRecipeData.swift  # ParsedRecipeData, ParsedSection, ParsedIngredient, ParsedStep, ParsedStepRef
+    │   │   └── RecipeChange.swift      # RecipeChange(version:timestamp:summary:)
+    │   ├── Models/                     # SwiftData @Model classes (6 models)
+    │   │   ├── RecipeModel.swift       # Full field parity with Android RecipeEntity incl. visibility
+    │   │   ├── RecipeSectionModel.swift
+    │   │   ├── IngredientModel.swift   # Incl. all F6 metric/imperial fields
+    │   │   ├── StepModel.swift
+    │   │   ├── StepIngredientRefModel.swift
+    │   │   └── RecipeNoteModel.swift
+    │   ├── Repositories/
+    │   │   ├── RecipeRepository.swift  # Full CRUD: fetchAll/Yours/Personal, insertFullRecipe,
+    │   │   │                           #   insertFullRecipeFromParsed, updateFullRecipe (delta),
+    │   │   │                           #   upsertFromFirestore, confirmReview, updateIsImported,
+    │   │   │                           #   updateVisibility, addNote, updateNote, deleteNote
+    │   │   └── AuthRepository.swift    # anonymous/Google/email/phone; link-or-sign-in pattern
+    │   └── Services/
+    │       ├── CloudFunctionsService.swift  # parseRecipeUrl, parseRecipeContent, formatRecipeText
+    │       └── RecipeSyncService.swift      # pullSeededRecipes, pullPersonalRecipes, pushPersonalRecipe,
+    │                                        #   pushAllPersonalRecipes, sync()
+    ├── UI/
+    │   ├── ContentView.swift           # 4-tab TabView: All · Your Recipes · Shared · Account
+    │   ├── AllRecipes/                 # AllRecipesView + AllRecipesViewModel
+    │   ├── YourRecipes/                # YourRecipesView + YourRecipesViewModel (needsReview banner)
+    │   ├── Shared/                     # SharedRecipesView (placeholder — F8 planned)
+    │   ├── Account/                    # AccountView + AccountViewModel (profile, stats, sign-out)
+    │   ├── Auth/                       # AuthView + AuthViewModel (Google/email/phone + sign-up)
+    │   ├── RecipeDetail/               # RecipeDetailView + RecipeDetailViewModel
+    │   ├── RecipeEditor/               # RecipeEditorView + RecipeEditorViewModel
+    │   │                               #   EditorSection/EditorIngredient/EditorStep structs
+    │   ├── Import/                     # ImportView + ImportViewModel + RecipeReviewSheet
+    │   │                               #   FreeformEntryView + FreeformEntryViewModel
+    │   ├── CookingMode/               # CookingModeView (fullscreen step-by-step)
+    │   └── Components/                # RecipeCard
+    └── Util/
+        ├── QuantityScaler.swift        # UnitMode enum + scale() functions + fraction formatting
+        └── Extensions.swift            # String.trimmed, Date.relativeString, Int.timeDisplayString
+```
+
+### iOS Implementation Status
+
+#### ✅ Implemented
+
+| Feature | Notes |
+|---|---|
+| **SwiftData schema** | 6 @Model classes, full field parity with Android. Cascade delete rules. |
+| **AppContainer DI** | @Observable @MainActor. ModelContainer, RecipeRepository, AuthRepository, CloudFunctionsService, RecipeSyncService. |
+| **Anonymous sign-in on launch** | `authRepository.signInAnonymouslyIfNeeded()` called in `AppContainer.onLaunch()` |
+| **Firebase init ordering** | `FirebaseApp.configure()` in App.init() before `AppContainer` creation (avoids crash) |
+| **GoogleService-Info.plist** | Declared in project.yml `resources:` block so xcodegen bundles it |
+| **4-tab navigation** | All · Your Recipes · Shared · Account; Shared is placeholder |
+| **Recipe list (All)** | Search + filter, recipe cards |
+| **Your Recipes tab** | needsReview sorted first with banner; FAB → Import or Freeform sheet |
+| **Recipe detail** | Yield adjuster (servings + anchor-based), unit toggle, section jump chips, ingredient checklist, substitute selector, optional toggle, step-ingredient refs, notes, cooking mode, fork/edit |
+| **Anchor-based scaling** | `scaleAnchorQty` tracks current anchor amount; `adjustScale(delta:)`, `resetScale()` (long-press), `yieldDisplay` |
+| **Unit conversions (F6)** | Original/Metric/Imperial toggle; only shown when conversion data exists |
+| **Cooking mode** | Fullscreen step-by-step (CookingModeView) |
+| **Recipe editor** | Full CRUD: metadata (title/description/times/servings/tags/URLs), sections, ingredients (qty/unit/display/optional), steps; delta-save via `updateFullRecipe`; fork dialog |
+| **EditorSection / EditorIngredient / EditorStep** | Value-type editor models in RecipeEditorViewModel.swift |
+| **Recipe import (F3)** | URL import, file import (.txt/.csv), `RecipeReviewSheet` with Confirm/Reimport/Edit, author toggle (Imported vs My Recipe), needsReview pending flow |
+| **Freeform entry (F5)** | FreeformEntryScreen → formatRecipeText CF → RecipeReviewSheet (Save/Reformat/Edit) |
+| **Notes** | Per-recipe timestamped notes; add/edit/delete |
+| **Auth (F7 core)** | Google Sign-In, email/password (sign-in + sign-up), phone OTP; link-or-sign-in upgrades anonymous session |
+| **Account screen** | Profile card, sign-in/sign-out, recipe count, last sync date |
+| **Cloud sync pull** | `pullSeededRecipes` (delta by updatedAt), `pullPersonalRecipes(uid:)` |
+| **Cloud sync push** | `pushPersonalRecipe` — full payload: sections, ingredients (incl. F6 fields), steps; `pushAllPersonalRecipes()` |
+| **Firestore deserialization** | `upsertFromFirestore` + `firestoreToParsedRecipeData` — full sections/ingredients/steps/refs |
+| **Version control** | `version` Int + `changeLog` JSON on every editor save |
+| **isOwner flag** | `RecipeDetailViewModel.isOwner` — compares recipe.authorId to auth.uid |
+| **Visibility field** | `RecipeModel.visibility: String` (default "private") — parity with Android |
+
+#### 🔧 Remaining Gaps (vs Android)
+
+| Gap | Detail |
+|---|---|
+| **F7 remainder** | `authorId`/`authorDisplayName` not yet stamped on save in all paths (freeform saves it; editor save uses existing recipe's value) |
+| **Sign-out local data wipe** | Android wipes local Room DB on sign-out. iOS currently just calls `auth.signOut()` — local SwiftData persists |
+| **F8 Shared Recipes** | Placeholder tab only — no browse/copy/share implementation |
+| **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists) |
+| **Seeding** | iOS starts empty; recipes come from Firestore sync on sign-in (no offline seed like Android `seeded_v10`) |
+
+### iOS Notes for AI Coding Assistants
+
+- **Swift version**: 5 (not 6). Strict concurrency is OFF — do not add `Sendable` or `actor` isolation unless explicitly needed.
+- **@MainActor everywhere**: All ViewModels and Repositories are `@MainActor`. No `DispatchQueue.main.async` needed.
+- **SwiftData is source of truth**: UI never reads Firestore directly (same rule as Android Room).
+- **xcodegen**: After adding/removing Swift files, run `xcodegen generate` from `ios/Amrosa/` to regenerate the Xcode project. Never edit `.xcodeproj` manually.
+- **Anchor scaling math**: `scaleFactor = scaleAnchorQty / baseAnchorQty`. Anchor quantity starts at ingredient's baseValue. `adjustScale(delta: Int)` adds `delta × scaleStep` to `scaleAnchorQty` (min = 1 step). Long-press yield display → `resetScale()`.
+- **EditorSection/EditorIngredient/EditorStep**: Defined in `RecipeEditorViewModel.swift`. Used by both `RecipeEditorViewModel` and `RecipeRepository.updateFullRecipe`.
+- **RecipeRepository.updateFullRecipe**: Delta save — pass `deletedSectionIds`, `deletedIngredientIds`, `deletedStepIds` as `[String]`. Handles upsert of surviving items.
+- **RecipeRepository.insertFullRecipeFromParsed**: Full insert from `ParsedRecipeData` — creates all sections, ingredients, steps, and refs atomically.
+- **Firebase init crash prevention**: `@State private var appContainer: AppContainer` (type annotation only, no default value); initialize in `App.init()` body after `FirebaseApp.configure()` using `_appContainer = State(initialValue: AppContainer())`.
+- **GoogleService-Info.plist**: Must be listed under `resources:` in `project.yml`, not just present in the filesystem.
+- **isImported on iOS**: Same semantics as Android — controls author display. Both appear in All + Your Recipes tabs.
+- **needsReview on iOS**: Same flow as Android — save immediately with `needsReview = true`, confirm later. `confirmReview(recipeId:)` clears flag.
