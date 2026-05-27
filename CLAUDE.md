@@ -11,11 +11,14 @@
 |---|---|
 | **App Name** | Amrosa |
 | **Company** | Aerion |
-| **Platform** | Android (primary); iOS planned (Swift/SwiftUI/SwiftData, separate codebase) |
-| **Language** | Kotlin |
-| **Min SDK** | API 26 (Android 8.0+) |
-| **Architecture** | MVVM + Repository Pattern |
-| **Database (local)** | Room (SQLite) — **current: DB v9, seeder key `seeded_v11`** |
+| **Platform** | Android (primary, Kotlin); iOS (Swift/SwiftUI/SwiftData — in progress, separate codebase) |
+| **Android Language** | Kotlin |
+| **iOS Language** | Swift |
+| **Min SDK (Android)** | API 26 (Android 8.0+) |
+| **Min OS (iOS)** | iOS 17+ (SwiftData) |
+| **Architecture** | MVVM + Repository Pattern (both platforms) |
+| **Database (local — Android)** | Room (SQLite) — **current: DB v9, seeder key `seeded_v11`** |
+| **Database (local — iOS)** | SwiftData (ModelContainer, no manual migrations) |
 | **Database (cloud)** | Firebase Firestore (`amrosa-2ec82`) |
 | **Cloud Storage** | Firebase Storage (planned — images) |
 | **Auth** | Firebase Authentication — **mandatory** (Google Sign-In + email/password + phone OTP) |
@@ -28,7 +31,28 @@
 ```
 Amrosa/
 ├── android/          # Android app (Kotlin + Jetpack Compose) — primary platform
-├── ios/              # iOS app (Swift + SwiftUI + SwiftData) — planned
+├── ios/              # iOS app (Swift + SwiftUI + SwiftData) — in progress
+│   └── Amrosa/Amrosa/
+│       ├── AmrosaApp.swift         # Entry point; Firebase init; AppContainer setup
+│       ├── AppContainer.swift      # DI root; ModelContainer; repositories; onLaunch()
+│       ├── Data/
+│       │   ├── Models/             # SwiftData models (RecipeModel, IngredientModel, etc.)
+│       │   ├── DTOs/               # ParsedRecipeData, RecipeChange
+│       │   ├── Repositories/       # AuthRepository, RecipeRepository
+│       │   └── Services/           # CloudFunctionsService, RecipeSyncService
+│       └── UI/
+│           ├── ContentView.swift   # 4-tab TabView (auth gate NOT yet implemented)
+│           ├── AllRecipes/         # AllRecipesView + AllRecipesViewModel
+│           ├── YourRecipes/        # YourRecipesView + YourRecipesViewModel
+│           ├── Shared/             # SharedRecipesView (stub — "Coming Soon")
+│           ├── Account/            # AccountView + AccountViewModel
+│           ├── RecipeDetail/       # RecipeDetailView + RecipeDetailViewModel
+│           ├── CookingMode/        # CookingModeView
+│           ├── RecipeEditor/       # RecipeEditorView + RecipeEditorViewModel
+│           ├── Import/             # ImportView, ImportViewModel, FreeformEntryView, RecipeReviewSheet
+│           ├── Auth/               # AuthView + AuthViewModel
+│           ├── Components/         # RecipeCard, FilterChip, TagChip, etc.
+│           └── Util/               # Extensions, QuantityScaler
 ├── backend/
 │   ├── functions/    # Firebase Cloud Functions (Node.js 24)
 │   │   ├── index.js           # Function entry points
@@ -37,6 +61,12 @@ Amrosa/
 │   │   └── package.json       # firebase-functions, axios, @google/generative-ai, xlsx
 │   └── firestore/
 │       └── upload-recipes.js  # Node.js admin upload script (reference only)
+├── hosting/          # Firebase Hosting (deployed to amrosa-2ec82.web.app)
+│   └── public/
+│       ├── index.html          # Landing page
+│       ├── shared.html         # Recipe viewer (browser fallback for shared links)
+│       └── .well-known/
+│           └── assetlinks.json # Android App Links domain verification
 └── shared/           # Shared assets, design tokens, documentation
 ```
 
@@ -422,17 +452,37 @@ Making private: the `FilterChip` (lock / globe icon) in the recipe body still to
 3. `"public"` → `sharedRecipeService.publish(recipe)` + starts comment observer
 4. `"private"` → `sharedRecipeService.unpublish(recipeId)` + stops comment observer
 
-#### Deep links
+#### Deep links & sharing URL
 
-Scheme: **`amrosa://shared/{recipeId}`**
+Share URL format: **`https://amrosa-2ec82.web.app/shared/{recipeId}`**
 
-Registered in `AndroidManifest.xml` with `BROWSABLE` intent filter. `NavGraph` composable for `"shared/{recipeId}"` has:
+**Android App Links** — `AndroidManifest.xml` has two intent filters on `MainActivity`:
+1. `android:autoVerify="true"` HTTPS filter for `amrosa-2ec82.web.app/shared/**` — verified via `assetlinks.json` in Firebase Hosting. When verified, tapping the link opens the app directly with no chooser dialog.
+2. `amrosa://shared` custom scheme — legacy fallback; works immediately without domain verification.
+
+NavGraph composable for `"shared/{recipeId}"` handles both:
 ```kotlin
-deepLinks = listOf(navDeepLink { uriPattern = "amrosa://shared/{recipeId}" })
+deepLinks = listOf(
+    navDeepLink { uriPattern = "https://amrosa-2ec82.web.app/shared/{recipeId}" },
+    navDeepLink { uriPattern = "amrosa://shared/{recipeId}" }
+)
 ```
-Any device with the app installed opens `SharedRecipeDetailScreen` directly when the link is tapped. Works with sideloaded APKs — no store release required.
 
-Test via ADB: `adb shell am start -W -a android.intent.action.VIEW -d "amrosa://shared/RECIPE_ID" com.aerion.amrosa`
+**Firebase Hosting** (`amrosa-2ec82.web.app`) — deployed:
+- `/.well-known/assetlinks.json` — Android App Links domain verification (SHA-256 fingerprint of debug keystore)
+- `/shared/{recipeId}` → `shared.html` — browser fallback page; fetches recipe from Firestore REST API, renders full recipe. Has "Open in Amrosa" button (tries `amrosa://` scheme). Works for anyone — app not required.
+- `/` → `index.html` — minimal landing page.
+
+Firestore rules updated: `shared_recipes` allows `read: if true` (unauthenticated reads for the web page).
+
+**iOS Universal Links** — NOT yet implemented. Requires:
+1. `apple-app-site-association` file at `https://amrosa-2ec82.web.app/.well-known/apple-app-site-association`
+2. `Associated Domains` entitlement in Xcode project: `applinks:amrosa-2ec82.web.app`
+
+Test Android App Links via ADB:
+```
+adb shell am start -W -a android.intent.action.VIEW -d "https://amrosa-2ec82.web.app/shared/RECIPE_ID" com.aerion.amrosa
+```
 
 #### Author attribution when sharing
 
@@ -548,7 +598,7 @@ SharedScreen  (live Firestore stream)
       Tap others' recipe → SharedRecipeDetailScreen (visitor view)
 
 SharedRecipeDetailScreen  (pushed route "shared/{recipeId}")
-  Deep link: amrosa://shared/{recipeId}
+  Deep links: https://amrosa-2ec82.web.app/shared/{recipeId}  |  amrosa://shared/{recipeId}
   ├── Recipe detail (read-only): yield adjuster, unit toggle
   ├── Ingredients grouped by section
   ├── Steps
@@ -600,6 +650,8 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 ## Tech Stack
 
+**Android:**
+
 | Layer | Technology |
 |---|---|
 | UI | Jetpack Compose + Material 3 |
@@ -614,7 +666,30 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | DI | Manual (`AppContainer` in `AmrosaApplication`) |
 | State Management | ViewModel + StateFlow |
 | JSON | Gson |
-| XLSX parsing (backend) | SheetJS (`xlsx` npm package) |
+
+**iOS:**
+
+| Layer | Technology |
+|---|---|
+| UI | SwiftUI |
+| Navigation | NavigationStack + NavigationDestination |
+| Local DB | SwiftData (ModelContainer) |
+| Cloud DB | Firebase Firestore (FirebaseFirestore SDK) |
+| Auth | Firebase Authentication + GoogleSignIn-iOS |
+| Background Sync | `.task` modifier on app entry; `RecipeSyncService` |
+| Recipe AI | Same Cloud Functions as Android (`CloudFunctionsService`) |
+| DI | Manual (`AppContainer` — `@Observable @MainActor`) |
+| State Management | `@Observable` ViewModels + SwiftUI bindings |
+| JSON | Swift Codable (JSONEncoder/Decoder) |
+
+**Backend / Shared:**
+
+| Layer | Technology |
+|---|---|
+| Cloud Functions | Node.js 24, Firebase Functions v2 |
+| Recipe parsing | `@google/generative-ai` (Gemini 2.5 Flash) |
+| XLSX parsing | SheetJS (`xlsx` npm package) |
+| Hosting | Firebase Hosting (`amrosa-2ec82.web.app`) |
 
 > **AI note:** This project uses **Gemini (Google AI)** — NOT the Anthropic Claude API. All AI calls go through the `GEMINI_API_KEY` Firebase secret. Do not add Anthropic dependencies.
 
@@ -648,11 +723,12 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F7 — Author attribution** | `authorId` + `authorDisplayName` stamped at creation; editor author dropdown; personal = real name; imported = "Imported" override at publish time |
 | **F8 — Visibility** | `visibility` field on RecipeEntity; private/public; share button in detail top bar |
 | **F8 — Share button** | Top bar icon (owners only); if public → Android share sheet with `amrosa://shared/{id}`; if private → dialog → publish → share sheet |
-| **F8 — Deep links** | `amrosa://shared/{recipeId}` scheme; `AndroidManifest.xml` BROWSABLE intent filter; `navDeepLink` in NavGraph |
+| **F8 — Deep links + App Links** | HTTPS App Links (`https://amrosa-2ec82.web.app/shared/{id}`) + `amrosa://` fallback; `assetlinks.json` in Firebase Hosting; `navDeepLink` for both patterns in NavGraph |
+| **F8 — Firebase Hosting** | `shared.html` recipe viewer (browser fallback); `index.html` landing page; deployed at `amrosa-2ec82.web.app` |
 | **F8 — Shared tab** | `SharedScreen` + `SharedViewModel`; live Firestore stream; search; "Yours" badge; routing to owner vs visitor view |
 | **F8 — Shared detail** | `SharedRecipeDetailScreen`; read-only; yield adjuster; unit toggle; "Copy to My Recipes"; deep link entry point |
 | **F8 — Comments** | `Comment` domain model; post/delete; Firestore subcollection; delete by commenter or recipe owner |
-| **F8 — Security rules** | Full Firestore rules deployed; per-UID personal access; shared read-all; comment create/delete moderation |
+| **F8 — Security rules** | Full Firestore rules deployed; per-UID personal access; `shared_recipes` public read; comment create/delete moderation |
 | **Seeder disabled** | `seedIfNeeded()` is a no-op; fresh installs start blank |
 
 ### Planned — In Priority Order
@@ -661,7 +737,87 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 |---|---|---|
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil display |
 | — | Shopping List | Dedicated screen; add ingredients from recipe detail |
-| — | iOS | Mirror Android features in Swift/SwiftUI/SwiftData (separate codebase) |
+| — | iOS gaps (see below) | Auth gate, sign-out data clear, Shared tab, share/visibility, comments, Universal Links |
+
+---
+
+## iOS Platform Status
+
+The iOS codebase (`ios/Amrosa/`) is a work-in-progress port of the Android app. It uses Swift, SwiftUI, and SwiftData. The core recipe experience is solid; the social/sharing layer and auth gate are not yet implemented.
+
+### iOS ✅ Implemented & Matching Android
+
+| Feature | Notes |
+|---|---|
+| **SwiftData schema** | Matches Android Room exactly — all fields including F6 unit conversion fields |
+| **Recipe detail** | Scaling (servings + anchor-based), ingredient checklist, optional toggle, substitute selection, section jump chips, notes (add/edit/delete), unit mode picker (Original/Metric/Imperial) |
+| **Cooking mode** | Full-screen step-by-step; section labels; prev/next nav |
+| **Import flow** | URL, file (XLSX/CSV/TXT), freeform; `CloudFunctionsService` calls all 3 Cloud Functions; `RecipeReviewSheet` with parse notes banner, Confirm/Reimport, author toggle |
+| **Pending review model** | `needsReview = true` on save; float to top; tap re-opens review |
+| **Fork dialog** | Triggered before editing non-owned recipes |
+| **Auth providers** | Google Sign-In, Email/Password, Phone OTP; anonymous→named `linkOrSignIn` upgrade |
+| **Pull sync** | Pulls seeded (`recipes/`) + personal (`personal_recipes/{uid}/recipes/`) from Firestore |
+| **Push sync** | `pushPersonalRecipe()` + `pushAllPersonalRecipes()` to `personal_recipes/{uid}/recipes/` |
+| **YourRecipesView** | Filter chips (All/Personal/Imported), search, FAB with "Type it out"/"Import" options |
+| **RecipeCard** | Author name + needs-review banner |
+| **Account tab** | Profile (name/email/phone), sign in/out, recipe count, last sync |
+
+### iOS ❌ Critical Gaps (must be fixed for parity)
+
+**1. No auth gate**
+`ContentView` renders all 4 tabs unconditionally. Android shows `AuthScreen()` as a full-screen wall when `!isSignedIn`. iOS lets anyone use the app; sign-in is buried in the Account tab.
+- Fix: Observe `authRepository.authStateStream()` at the `ContentView` level; conditionally show `AuthView()` when `!isSignedIn`.
+
+**2. Anonymous auth still active**
+`AppContainer.onLaunch()` calls `signInAnonymouslyIfNeeded()`. Android removed this. Per spec, auth is mandatory — no anonymous sessions.
+- Fix: Remove `signInAnonymouslyIfNeeded()` call from `onLaunch()`. Keep the method in `AuthRepository` for compat but never call it.
+
+**3. Sign-out doesn't clear local data**
+`AccountViewModel.signOut()` calls only `authRepository.signOut()`. Android wipes all Room tables + sync prefs before signing out.
+- Fix: Add `clearAllLocalData()` to `AppContainer` (delete all SwiftData records + clear `UserDefaults` sync key). Call it in `AccountViewModel.signOut()` before `authRepository.signOut()`. Update the sign-out confirmation dialog to warn about data deletion.
+
+**4. Shared tab is a stub**
+`SharedRecipesView` shows `ContentUnavailableView("Coming Soon")`. Android has a full `SharedScreen` + `SharedRecipeDetailScreen`.
+- Fix: Implement a `SharedRecipeService.swift` that reads from Firestore `shared_recipes` collection (mirrors `SharedRecipeService.kt`). Build `SharedRecipesView` and a `SharedRecipeDetailView` with read-only recipe display + "Copy to My Recipes".
+
+### iOS 🐛 Sync Bugs
+
+**5. `stepIngredientRefs` not pushed**
+`RecipeSyncService.pushPersonalRecipe()` serializes sections, ingredients, and steps but omits `stepIngredientRefs`. Android's push includes them. Step↔ingredient associations are lost on cross-platform sync.
+- Fix: Add `stepIngredientRefs` array to the push payload (same format as `SharedRecipeService.buildDocument()` in Android).
+
+**6. `scaleStep` not pushed**
+The `scaleStep` field (anchor-based scaling increment) is missing from the push data map.
+- Fix: Add `"scaleStep": recipe.scaleStep` to the top-level push dict.
+
+**7. `substituteRatio` not pushed**
+Missing from the ingredient dict in `pushPersonalRecipe()`.
+- Fix: Add `"substituteRatio": ing.substituteRatio` to each ingredient entry.
+
+**8. Timestamp type mismatch**
+iOS writes `updatedAt: Timestamp(date:)` (Firestore `Timestamp` type). Android reads it as `(data["updatedAt"] as? Number)?.toLong()` — a Firestore `Timestamp` is not a `Number`, so Android gets `null` and falls back to `now`. Timestamps are silently clobbered on cross-platform sync.
+- Fix: iOS should write `updatedAt` as milliseconds since epoch (a `Long`/`Int64`): `data["updatedAt"] = Int64(recipe.updatedAt.timeIntervalSince1970 * 1000)`. Do the same for `createdAt` and `syncedAt`.
+
+### iOS 🔶 Missing Features (planned, Android has them)
+
+**9. No share / visibility toggle**
+No share button in `RecipeDetailView`. No way to make a recipe public or share a link. No `SharedRecipeService.swift`.
+- Depends on gap #4 (Shared tab). When implementing: add visibility `FilterChip` + share button to `RecipeDetailView`; use `UIActivityViewController` for the share sheet sharing `https://amrosa-2ec82.web.app/shared/{recipeId}`.
+
+**10. No comments**
+`RecipeDetailView` has no comment section. Android shows comments on public recipes.
+
+**11. No Universal Links (iOS App Links equivalent)**
+The HTTPS share URL (`https://amrosa-2ec82.web.app/shared/{recipeId}`) does not open the iOS app. Requires:
+1. Deploy `apple-app-site-association` to Firebase Hosting at `/.well-known/apple-app-site-association` (JSON with app's Team ID + Bundle ID)
+2. Add `Associated Domains` entitlement in Xcode: `applinks:amrosa-2ec82.web.app`
+3. Handle the URL in `AmrosaApp.swift` via `.onOpenURL`
+
+### iOS 🔸 Minor Behavioral Difference
+
+**12. Seeded recipes excluded from Your Recipes**
+`YourRecipesViewModel.load()` filters to `isCustomized || isImported || authorId != nil`. Seeded recipes (`isCustomized=false`, `isImported=false`, `authorId=nil`) are excluded. Android shows seeded recipes under the "Personal" filter chip in Your Recipes (since they have `isImported=false`). Per spec, seeded recipes belong in the Personal tab.
+- Fix: Change filter to `!recipe.isImported || recipe.isImported` (all recipes in Your Recipes), or more precisely show all recipes that are not from another user's shared collection (i.e., `recipe.authorId == nil || recipe.authorId == currentUid`).
 
 ---
 
@@ -719,7 +875,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 ### Visibility & Sharing
 - Share button in detail top bar (owners only):
-  - Already public → opens Android share sheet immediately with `amrosa://shared/{recipeId}`
+  - Already public → opens Android share sheet immediately with `https://amrosa-2ec82.web.app/shared/{recipeId}`
   - Private → dialog → confirm → `setVisibility("public")` + set `pendingShareAfterPublish = true` → `LaunchedEffect` fires share sheet once `state.isPublic` becomes true
 - `setVisibility("public")` → updates Room + publishes to `shared_recipes` + starts comment observer.
 - `setVisibility("private")` → updates Room + unpublishes + stops comment observer.
@@ -759,3 +915,99 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 data class RecipeChange(val version: Int, val timestamp: Long, val summary: String)
 ```
 Appended to `changeLog` on every editor save. Summary auto-generated from changed fields (e.g. "Updated: title, author, recipe content").
+
+---
+
+### iOS-Specific Notes
+
+#### SwiftData
+- Models are in `Data/Models/`. Use `@Model final class` for all entities.
+- `RecipeModel` stores `tags` and `sourceUrls` as JSON strings (`tagsJson`, `sourceUrlsJson`); access via computed properties that decode on the fly.
+- Relationships use `@Relationship(deleteRule: .cascade, inverse: \...)` — no manual foreign keys.
+- SwiftData uses automatic migrations on schema changes (unlike Room which requires manual migration or destructive fallback). No seeder key concept needed.
+- `ModelContext` is created in `AppContainer` and injected via `.modelContainer()` on `AmrosaApp`.
+
+#### iOS Architecture
+- ViewModels are `@Observable @MainActor final class`. Use `@State private var viewModel: SomeViewModel?` + `if let vm = viewModel { ... }` pattern throughout.
+- `AppContainer` is `@Observable @MainActor` and injected via `.environment(appContainer)`. Access it in views with `@Environment(AppContainer.self) private var container`.
+- Async operations use Swift Concurrency (`async/await`, `Task { ... }`). No Combine.
+- `AuthRepository.authStateStream()` returns an `AsyncStream<User?>` — use `for await user in authRepository.authStateStream()` to observe auth state.
+
+#### iOS Auth Gate (to be implemented)
+The auth gate pattern in iOS should mirror Android:
+```swift
+// In ContentView or AmrosaApp WindowGroup:
+@State private var isSignedIn = false
+
+// Observe auth state:
+.task {
+    for await user in container.authRepository.authStateStream() {
+        isSignedIn = user != nil && !user!.isAnonymous
+    }
+}
+
+// Render conditionally:
+if isSignedIn {
+    MainTabView()
+} else {
+    AuthView()  // no back button, full screen
+}
+```
+
+#### iOS Sign-out Data Clear (to be implemented)
+```swift
+// AppContainer.swift — add:
+func clearAllLocalData() throws {
+    try modelContainer.mainContext.delete(model: RecipeModel.self)
+    try modelContainer.mainContext.delete(model: RecipeSectionModel.self)
+    // ... all models
+    UserDefaults.standard.removeObject(forKey: "amrosa_last_sync")
+}
+```
+Call from `AccountViewModel.signOut()` before `authRepository.signOut()`.
+
+#### iOS Timestamps — cross-platform sync
+iOS MUST write timestamps as `Int64` milliseconds (not Firestore `Timestamp`) for Android compatibility:
+```swift
+data["updatedAt"] = Int64(recipe.updatedAt.timeIntervalSince1970 * 1000)
+data["createdAt"] = Int64(recipe.createdAt.timeIntervalSince1970 * 1000)
+```
+When reading from Firestore on iOS, convert back:
+```swift
+if let ms = data["updatedAt"] as? Int64 {
+    recipe.updatedAt = Date(timeIntervalSince1970: Double(ms) / 1000)
+}
+```
+
+#### iOS `RecipeSyncService` — missing push fields (to be fixed)
+Add to `pushPersonalRecipe()`:
+- Top-level: `data["scaleStep"] = recipe.scaleStep`
+- In steps array, include `stepIngredientRefs` as a top-level array (same structure as Android `SharedRecipeService.buildDocument()`)
+- In each ingredient dict: `d["substituteRatio"] = ing.substituteRatio`
+
+#### iOS Universal Links (to be implemented)
+1. Create `hosting/public/.well-known/apple-app-site-association`:
+```json
+{
+  "applinks": {
+    "apps": [],
+    "details": [{
+      "appID": "TEAM_ID.com.aerion.amrosa",
+      "paths": ["/shared/*"]
+    }]
+  }
+}
+```
+2. Add `Associated Domains` entitlement in Xcode: `applinks:amrosa-2ec82.web.app`
+3. Handle in `AmrosaApp.swift` (already has `.onOpenURL` for Google Sign-In — extend it):
+```swift
+.onOpenURL { url in
+    GIDSignIn.sharedInstance.handle(url)
+    // Handle amrosa universal links
+    if url.host == "amrosa-2ec82.web.app", url.pathComponents.count >= 3,
+       url.pathComponents[1] == "shared" {
+        let recipeId = url.pathComponents[2]
+        // Navigate to SharedRecipeDetailView(recipeId: recipeId)
+    }
+}
+```
