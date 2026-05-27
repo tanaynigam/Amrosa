@@ -89,7 +89,7 @@ Auth Gate   (🔐)  Full-screen login wall — shown when not signed in; no back
 Tab 1 — All           (📖)  Browse all recipes (personal + imported + shared copies)
 Tab 2 — Your Recipes  (🔖)  All your recipes merged (personal + imported); Add Recipe FAB
 Tab 3 — Shared        (🌐)  Community shared recipes; browse, copy, share your own
-Tab 4 — Account       (👤)  Profile, sign-out, sync status, settings
+Tab 4 — Profile       (👤)  Your profile, friends list, notifications, sync, sign-out
 ```
 
 **Design decisions:**
@@ -100,6 +100,7 @@ Tab 4 — Account       (👤)  Profile, sign-out, sync status, settings
 - `isImported` controls **author display when sharing** (`false` = real name, `true` = "Imported"), not which tab a recipe appears in.
 - **Import** is a push route (`"import?reviewId=..."`) accessible from the Add Recipe FAB, not a tab.
 - Pending-review recipes float to the top of Your Recipes with a "Needs review — tap to confirm" badge; tapping opens the import screen with the review sheet pre-loaded.
+- **Tab 4 is "Profile"** (formerly "Account") — contains both account management and social features (friends, notifications). Keeps the tab count at 4 and avoids a dedicated social tab.
 
 ---
 
@@ -224,6 +225,9 @@ Comments are stored in Firestore only (`shared_recipes/{recipeId}/comments/{comm
 | `personal_recipes/{uid}/recipes/{recipeId}` | User's personal recipes — push on save, pull on sign-in |
 | `shared_recipes/{recipeId}` | Community-shared recipes (visibility = "public") |
 | `shared_recipes/{recipeId}/comments/{commentId}` | Comments on shared recipes |
+| `users/{uid}` | Public user profile — display name, photo URL, recipe count (planned F9) |
+| `friendships/{id}` | Friendship records — `id = [uid_a, uid_b].sorted().join("_")` (planned F9) |
+| `notifications/{uid}/items/{notifId}` | Per-user notifications — friend requests, accepted, recipe shares (planned F9) |
 
 **Sync behaviour:**
 - **Pull sync** on app launch (if signed in): fetches `personal_recipes/{uid}/recipes/` where `updatedAt > lastSyncTimestamp`, upserts into Room.
@@ -537,7 +541,141 @@ shared_recipes/{recipeId}/comments:
                                 create = non-anonymous + content 1–1000 chars
                                 delete = commenter OR recipe author (via get())
                                 update = false (immutable)
+users/{uid}:                    read = auth != null (planned F9)
+                                write = auth.uid == uid
+friendships/{id}:               read = auth.uid in resource.data.users (planned F9)
+                                create = auth.uid == request.resource.data.requestedBy
+                                update = auth.uid in resource.data.users (accept/decline)
+                                delete = auth.uid in resource.data.users
+notifications/{uid}/items:      read/delete = auth.uid == uid (planned F9)
+                                create = auth != null (anyone can send a notif to a user)
+                                update = auth.uid == uid (mark as read)
 ```
+
+---
+
+### F9 — Friends & In-App Sharing (planned)
+
+Two sharing modes:
+1. **Deep link sharing** (already implemented) — share an HTTPS link anyone can open; opens in app or browser
+2. **Direct in-app sharing** — share a recipe directly to a specific friend; they get a notification and see it in their Profile tab
+
+Friends live inside **Tab 4 (Profile)** — no new tab needed.
+
+#### Firestore data model
+
+**`users/{uid}`** — public user profile (written on account creation / profile update)
+```
+displayName:  String
+photoURL:     String?
+recipeCount:  Int         // denormalized; updated whenever a recipe is saved or deleted
+joinedAt:     Timestamp
+```
+
+**`friendships/{id}`** — `id = [uid_a, uid_b].sorted().joined(separator: "_")` — guarantees one doc per pair regardless of who initiated
+```
+users:        [uid_a, uid_b]   // both UIDs — enables "where uid in users" queries
+status:       "pending" | "accepted"
+requestedBy:  String           // UID of who sent the request
+createdAt:    Timestamp
+updatedAt:    Timestamp
+```
+
+**`notifications/{uid}/items/{notifId}`** — per-user notification inbox
+```
+type:              "friend_request" | "friend_accepted" | "recipe_shared"
+fromUid:           String
+fromDisplayName:   String
+recipeId:          String?     // populated for recipe_shared
+recipeTitle:       String?     // populated for recipe_shared
+read:              Boolean
+createdAt:         Timestamp
+```
+
+#### Profile tab (Tab 4 — replaces Account tab)
+
+The Profile tab is reorganised into sections:
+
+```
+ProfileScreen
+  ├── Header: avatar · display name · email / phone
+  │     [Edit Profile] button → edit display name / photo
+  ├── Stats row: "N recipes" · "N friends"
+  ├── Notifications section (shown only when unread count > 0)
+  │     Each notification: avatar · message · "Accept / Decline" (friend_request)
+  │                        or "View Recipe" (recipe_shared) · timestamp
+  │     "See all" → NotificationsScreen (pushed)
+  ├── Friends section
+  │     Pending requests received (above accepted list, with Accept/Decline)
+  │     Accepted friends list (tappable → FriendProfileScreen)
+  │     [Add Friend] button → AddFriendSheet (search by display name or email)
+  ├── Sync & Storage: last synced · recipe count · Force Sync button
+  ├── About: version · Aerion
+  └── [Sign Out] button → confirmation dialog → clears data + signs out
+```
+
+**Notification badge** on the Profile tab icon — shows count of unread notifications. Cleared when Profile tab is opened.
+
+#### FriendProfileScreen (push route `"friend/{uid}"`)
+
+```
+FriendProfileScreen
+  ├── Header: avatar · display name · recipe count
+  ├── [Remove Friend] option (overflow menu)
+  └── Their public recipes (read from shared_recipes where authorId == uid)
+        Each card: tappable → SharedRecipeDetailScreen (read-only)
+```
+
+#### AddFriendSheet (modal bottom sheet)
+
+```
+AddFriendSheet
+  ├── Search field (by display name or email — queries users/ collection)
+  ├── Search results: avatar · name · [Add Friend] button
+  │     If already friends → shows "Friends ✓"
+  │     If request pending → shows "Requested"
+  └── Sending a request → creates friendships/{id} with status="pending"
+        + creates notification for recipient: type="friend_request"
+```
+
+#### NotificationsScreen (push route `"notifications"`)
+
+Full notification history. Each item:
+- `friend_request` → Accept / Decline buttons → updates `friendships/{id}.status`; Accept also creates `friend_accepted` notification for the requester
+- `friend_accepted` → informational; tap navigates to FriendProfileScreen
+- `recipe_shared` → tap navigates to `SharedRecipeDetailScreen`
+
+#### In-app recipe sharing (share sheet extension)
+
+The existing share button on `RecipeDetailScreen` (owners only) gains a second option:
+
+```
+Share Sheet (ModalBottomSheet)
+  ├── "Share via link"    → Android share sheet with https://amrosa-2ec82.web.app/shared/{id}
+  └── "Send to a friend"  → FriendPickerSheet
+        ├── Friend list (only accepted friends)
+        ├── Tap a friend → confirm dialog
+        └── On confirm:
+              1. If recipe is private → make public first (confirm dialog)
+              2. Push recipe to shared_recipes (if not already)
+              3. Create notification: type="recipe_shared", recipeId, recipeTitle, fromUid
+```
+
+#### Push notifications (FCM — planned)
+
+Firebase Cloud Messaging for background/foreground push notifications. Notification types map to the same `notifications` collection entries:
+- **`friend_request`** — "Name wants to add you as a friend"
+- **`friend_accepted`** — "Name accepted your friend request"
+- **`recipe_shared`** — "Name shared a recipe with you: [Recipe Title]"
+
+Tapping a push notification deep-links to the relevant screen. Token stored in `users/{uid}.fcmToken`.
+
+#### Security and privacy notes
+
+- Friend search only matches users who have set a public `displayName` (no email exposure in search results)
+- A user can only see another user's public recipes (`shared_recipes` where `authorId == uid`, not personal recipes)
+- Removing a friend deletes the `friendships/{id}` doc; both users lose access to each other's friend-only content
+- Notifications can only be created by authenticated users; a user can only read/delete their own notifications
 
 ---
 
@@ -559,7 +697,7 @@ HomeScreen (RecipeFilter.ALL)
   │     Each card: title · time · tags · Author row (person icon + name) · Shared pill (if public)
   │     needsReview badge on pending cards
   ├── needsReview cards → "import?reviewId=$id" (review sheet)
-  └── Settings gear icon → Account tab
+  └── Settings gear icon → Profile tab
 
 ── Bottom Tab 2: Your Recipes ─────────────────────────────────────────
 HomeScreen (RecipeFilter.YOURS — all user recipes: personal + imported)
@@ -605,11 +743,37 @@ SharedRecipeDetailScreen  (pushed route "shared/{recipeId}")
   ├── "Copy to My Recipes" button (disabled if already copied or not signed in)
   └── Comments section (read + add/delete)
 
-── Bottom Tab 4: Account ──────────────────────────────────────────────
-AccountScreen
-  ├── Profile card (name / email / phone — always signed in)
-  ├── "Sign Out" button → dialog warning data deletion → clears Room + sync prefs + signs out
-  └── Sync stats · DB version · About
+── Bottom Tab 4: Profile ──────────────────────────────────────────────
+ProfileScreen  (route "profile_tab")
+  ├── Header: avatar · display name · email / phone  [Edit Profile]
+  ├── Stats row: recipe count · friends count
+  ├── Notifications section (unread items only; "See all" → NotificationsScreen)
+  │     friend_request → Accept / Decline inline
+  │     recipe_shared → "View Recipe" tap → SharedRecipeDetailScreen
+  ├── Friends section
+  │     Pending requests (Accept / Decline)
+  │     Friends list (tappable → FriendProfileScreen)
+  │     [Add Friend] button → AddFriendSheet (search by name/email)
+  ├── Sync & Storage: last synced · recipe count · Force Sync
+  ├── About: version · Aerion
+  └── [Sign Out] → dialog: "Recipes removed from device..." → clears data + signs out
+
+NotificationsScreen  (pushed route "notifications")
+  ├── Full notification history (read + unread)
+  ├── friend_request → Accept / Decline
+  ├── friend_accepted → tap → FriendProfileScreen
+  └── recipe_shared → tap → SharedRecipeDetailScreen
+
+FriendProfileScreen  (pushed route "friend/{uid}")
+  ├── Header: avatar · display name · recipe count
+  ├── Overflow: Remove Friend
+  └── Their public recipes (shared_recipes where authorId == uid)
+        Tap → SharedRecipeDetailScreen
+
+AddFriendSheet  (modal bottom sheet)
+  ├── Search field (display name or email)
+  ├── Results: avatar · name · [Add Friend] / "Friends ✓" / "Requested"
+  └── Add → creates friendships doc + sends friend_request notification
 
 ── Push routes (from any tab) ─────────────────────────────────────────
 RecipeDetailScreen  (pushed route "recipe/{recipeId}")
@@ -622,12 +786,20 @@ RecipeDetailScreen  (pushed route "recipe/{recipeId}")
   ├── Notes (timestamped, add/edit/delete)
   ├── Cooking Mode button → CookingModeScreen
   ├── Top bar actions (owners only):
-  │     [Share icon] — opens share sheet if public; opens "Share?" dialog if private
+  │     [Share icon] — ModalBottomSheet with two options:
+  │           "Share via link"   → system share sheet (HTTPS URL)
+  │           "Send to a friend" → FriendPickerSheet → confirm → recipe_shared notification
+  │           (if recipe is private, prompts to make public first)
   │     [Edit pencil] — → RecipeEditorScreen
   │     [Cooking Mode book]
   ├── Visibility FilterChip in body (owner only): 🔒 Private | 🌐 Public
   │     Confirms before toggling; public → comments section shown
   └── Comments section (when recipe is public)
+
+FriendPickerSheet  (modal bottom sheet — from share flow)
+  ├── "Send to a friend" header
+  ├── Accepted friends list with avatars
+  └── Tap friend → confirm dialog → creates recipe_shared notification for them
 
 RecipeEditorScreen  (pushed route "recipe/edit/{recipeId}")
   ├── Fork dialog (seeded/shared-copied recipes)
@@ -735,6 +907,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 | # | Feature | Description |
 |---|---|---|
+| **F9** | Friends & In-App Sharing | Friends list in Profile tab; search/add friends; send recipes directly to friends; notifications (friend_request, friend_accepted, recipe_shared); FCM push notifications |
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil display |
 | — | Shopping List | Dedicated screen; add ingredients from recipe detail |
 | — | iOS gaps (see below) | Auth gate, sign-out data clear, Shared tab, share/visibility, comments, Universal Links |
