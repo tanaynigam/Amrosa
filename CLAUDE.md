@@ -11,11 +11,14 @@
 |---|---|
 | **App Name** | Amrosa |
 | **Company** | Aerion |
-| **Platform** | Android (primary); iOS planned (Swift/SwiftUI/SwiftData, separate codebase) |
-| **Language** | Kotlin |
-| **Min SDK** | API 26 (Android 8.0+) |
-| **Architecture** | MVVM + Repository Pattern |
-| **Database (local)** | Room (SQLite) — **current: DB v9, seeder key `seeded_v11`** |
+| **Platform** | Android (primary, Kotlin); iOS (Swift/SwiftUI/SwiftData — in progress, separate codebase) |
+| **Android Language** | Kotlin |
+| **iOS Language** | Swift |
+| **Min SDK (Android)** | API 26 (Android 8.0+) |
+| **Min OS (iOS)** | iOS 17+ (SwiftData) |
+| **Architecture** | MVVM + Repository Pattern (both platforms) |
+| **Database (local — Android)** | Room (SQLite) — **current: DB v9, seeder key `seeded_v11`** |
+| **Database (local — iOS)** | SwiftData (ModelContainer, no manual migrations) |
 | **Database (cloud)** | Firebase Firestore (`amrosa-2ec82`) |
 | **Cloud Storage** | Firebase Storage (planned — images) |
 | **Auth** | Firebase Authentication — **mandatory** (Google Sign-In + email/password + phone OTP) |
@@ -28,7 +31,28 @@
 ```
 Amrosa/
 ├── android/          # Android app (Kotlin + Jetpack Compose) — primary platform
-├── ios/              # iOS app (Swift + SwiftUI + SwiftData) — planned
+├── ios/              # iOS app (Swift + SwiftUI + SwiftData) — in progress
+│   └── Amrosa/Amrosa/
+│       ├── AmrosaApp.swift         # Entry point; Firebase init; AppContainer setup
+│       ├── AppContainer.swift      # DI root; ModelContainer; repositories; onLaunch()
+│       ├── Data/
+│       │   ├── Models/             # SwiftData models (RecipeModel, IngredientModel, etc.)
+│       │   ├── DTOs/               # ParsedRecipeData, RecipeChange
+│       │   ├── Repositories/       # AuthRepository, RecipeRepository
+│       │   └── Services/           # CloudFunctionsService, RecipeSyncService
+│       └── UI/
+│           ├── ContentView.swift   # 4-tab TabView (auth gate NOT yet implemented)
+│           ├── AllRecipes/         # AllRecipesView + AllRecipesViewModel
+│           ├── YourRecipes/        # YourRecipesView + YourRecipesViewModel
+│           ├── Shared/             # SharedRecipesView (stub — "Coming Soon")
+│           ├── Account/            # AccountView + AccountViewModel
+│           ├── RecipeDetail/       # RecipeDetailView + RecipeDetailViewModel
+│           ├── CookingMode/        # CookingModeView
+│           ├── RecipeEditor/       # RecipeEditorView + RecipeEditorViewModel
+│           ├── Import/             # ImportView, ImportViewModel, FreeformEntryView, RecipeReviewSheet
+│           ├── Auth/               # AuthView + AuthViewModel
+│           ├── Components/         # RecipeCard, FilterChip, TagChip, etc.
+│           └── Util/               # Extensions, QuantityScaler
 ├── backend/
 │   ├── functions/    # Firebase Cloud Functions (Node.js 24)
 │   │   ├── index.js           # Function entry points
@@ -37,6 +61,12 @@ Amrosa/
 │   │   └── package.json       # firebase-functions, axios, @google/generative-ai, xlsx
 │   └── firestore/
 │       └── upload-recipes.js  # Node.js admin upload script (reference only)
+├── hosting/          # Firebase Hosting (deployed to amrosa-2ec82.web.app)
+│   └── public/
+│       ├── index.html          # Landing page
+│       ├── shared.html         # Recipe viewer (browser fallback for shared links)
+│       └── .well-known/
+│           └── assetlinks.json # Android App Links domain verification
 └── shared/           # Shared assets, design tokens, documentation
 ```
 
@@ -59,7 +89,7 @@ Auth Gate   (🔐)  Full-screen login wall — shown when not signed in; no back
 Tab 1 — All           (📖)  Browse all recipes (personal + imported + shared copies)
 Tab 2 — Your Recipes  (🔖)  All your recipes merged (personal + imported); Add Recipe FAB
 Tab 3 — Shared        (🌐)  Community shared recipes; browse, copy, share your own
-Tab 4 — Account       (👤)  Profile, sign-out, sync status, settings
+Tab 4 — Profile       (👤)  Your profile, friends list, notifications, sync, sign-out
 ```
 
 **Design decisions:**
@@ -70,6 +100,7 @@ Tab 4 — Account       (👤)  Profile, sign-out, sync status, settings
 - `isImported` controls **author display when sharing** (`false` = real name, `true` = "Imported"), not which tab a recipe appears in.
 - **Import** is a push route (`"import?reviewId=..."`) accessible from the Add Recipe FAB, not a tab.
 - Pending-review recipes float to the top of Your Recipes with a "Needs review — tap to confirm" badge; tapping opens the import screen with the review sheet pre-loaded.
+- **Tab 4 is "Profile"** (formerly "Account") — contains both account management and social features (friends, notifications). Keeps the tab count at 4 and avoids a dedicated social tab.
 
 ---
 
@@ -194,6 +225,9 @@ Comments are stored in Firestore only (`shared_recipes/{recipeId}/comments/{comm
 | `personal_recipes/{uid}/recipes/{recipeId}` | User's personal recipes — push on save, pull on sign-in |
 | `shared_recipes/{recipeId}` | Community-shared recipes (visibility = "public") |
 | `shared_recipes/{recipeId}/comments/{commentId}` | Comments on shared recipes |
+| `users/{uid}` | Public user profile — display name, photo URL, recipe count (planned F9) |
+| `friendships/{id}` | Friendship records — `id = [uid_a, uid_b].sorted().join("_")` (planned F9) |
+| `notifications/{uid}/items/{notifId}` | Per-user notifications — friend requests, accepted, recipe shares (planned F9) |
 
 **Sync behaviour:**
 - **Pull sync** on app launch (if signed in): fetches `personal_recipes/{uid}/recipes/` where `updatedAt > lastSyncTimestamp`, upserts into Room.
@@ -422,17 +456,37 @@ Making private: the `FilterChip` (lock / globe icon) in the recipe body still to
 3. `"public"` → `sharedRecipeService.publish(recipe)` + starts comment observer
 4. `"private"` → `sharedRecipeService.unpublish(recipeId)` + stops comment observer
 
-#### Deep links
+#### Deep links & sharing URL
 
-Scheme: **`amrosa://shared/{recipeId}`**
+Share URL format: **`https://amrosa-2ec82.web.app/shared/{recipeId}`**
 
-Registered in `AndroidManifest.xml` with `BROWSABLE` intent filter. `NavGraph` composable for `"shared/{recipeId}"` has:
+**Android App Links** — `AndroidManifest.xml` has two intent filters on `MainActivity`:
+1. `android:autoVerify="true"` HTTPS filter for `amrosa-2ec82.web.app/shared/**` — verified via `assetlinks.json` in Firebase Hosting. When verified, tapping the link opens the app directly with no chooser dialog.
+2. `amrosa://shared` custom scheme — legacy fallback; works immediately without domain verification.
+
+NavGraph composable for `"shared/{recipeId}"` handles both:
 ```kotlin
-deepLinks = listOf(navDeepLink { uriPattern = "amrosa://shared/{recipeId}" })
+deepLinks = listOf(
+    navDeepLink { uriPattern = "https://amrosa-2ec82.web.app/shared/{recipeId}" },
+    navDeepLink { uriPattern = "amrosa://shared/{recipeId}" }
+)
 ```
-Any device with the app installed opens `SharedRecipeDetailScreen` directly when the link is tapped. Works with sideloaded APKs — no store release required.
 
-Test via ADB: `adb shell am start -W -a android.intent.action.VIEW -d "amrosa://shared/RECIPE_ID" com.aerion.amrosa`
+**Firebase Hosting** (`amrosa-2ec82.web.app`) — deployed:
+- `/.well-known/assetlinks.json` — Android App Links domain verification (SHA-256 fingerprint of debug keystore)
+- `/shared/{recipeId}` → `shared.html` — browser fallback page; fetches recipe from Firestore REST API, renders full recipe. Has "Open in Amrosa" button (tries `amrosa://` scheme). Works for anyone — app not required.
+- `/` → `index.html` — minimal landing page.
+
+Firestore rules updated: `shared_recipes` allows `read: if true` (unauthenticated reads for the web page).
+
+**iOS Universal Links** — NOT yet implemented. Requires:
+1. `apple-app-site-association` file at `https://amrosa-2ec82.web.app/.well-known/apple-app-site-association`
+2. `Associated Domains` entitlement in Xcode project: `applinks:amrosa-2ec82.web.app`
+
+Test Android App Links via ADB:
+```
+adb shell am start -W -a android.intent.action.VIEW -d "https://amrosa-2ec82.web.app/shared/RECIPE_ID" com.aerion.amrosa
+```
 
 #### Author attribution when sharing
 
@@ -487,7 +541,141 @@ shared_recipes/{recipeId}/comments:
                                 create = non-anonymous + content 1–1000 chars
                                 delete = commenter OR recipe author (via get())
                                 update = false (immutable)
+users/{uid}:                    read = auth != null (planned F9)
+                                write = auth.uid == uid
+friendships/{id}:               read = auth.uid in resource.data.users (planned F9)
+                                create = auth.uid == request.resource.data.requestedBy
+                                update = auth.uid in resource.data.users (accept/decline)
+                                delete = auth.uid in resource.data.users
+notifications/{uid}/items:      read/delete = auth.uid == uid (planned F9)
+                                create = auth != null (anyone can send a notif to a user)
+                                update = auth.uid == uid (mark as read)
 ```
+
+---
+
+### F9 — Friends & In-App Sharing (planned)
+
+Two sharing modes:
+1. **Deep link sharing** (already implemented) — share an HTTPS link anyone can open; opens in app or browser
+2. **Direct in-app sharing** — share a recipe directly to a specific friend; they get a notification and see it in their Profile tab
+
+Friends live inside **Tab 4 (Profile)** — no new tab needed.
+
+#### Firestore data model
+
+**`users/{uid}`** — public user profile (written on account creation / profile update)
+```
+displayName:  String
+photoURL:     String?
+recipeCount:  Int         // denormalized; updated whenever a recipe is saved or deleted
+joinedAt:     Timestamp
+```
+
+**`friendships/{id}`** — `id = [uid_a, uid_b].sorted().joined(separator: "_")` — guarantees one doc per pair regardless of who initiated
+```
+users:        [uid_a, uid_b]   // both UIDs — enables "where uid in users" queries
+status:       "pending" | "accepted"
+requestedBy:  String           // UID of who sent the request
+createdAt:    Timestamp
+updatedAt:    Timestamp
+```
+
+**`notifications/{uid}/items/{notifId}`** — per-user notification inbox
+```
+type:              "friend_request" | "friend_accepted" | "recipe_shared"
+fromUid:           String
+fromDisplayName:   String
+recipeId:          String?     // populated for recipe_shared
+recipeTitle:       String?     // populated for recipe_shared
+read:              Boolean
+createdAt:         Timestamp
+```
+
+#### Profile tab (Tab 4 — replaces Account tab)
+
+The Profile tab is reorganised into sections:
+
+```
+ProfileScreen
+  ├── Header: avatar · display name · email / phone
+  │     [Edit Profile] button → edit display name / photo
+  ├── Stats row: "N recipes" · "N friends"
+  ├── Notifications section (shown only when unread count > 0)
+  │     Each notification: avatar · message · "Accept / Decline" (friend_request)
+  │                        or "View Recipe" (recipe_shared) · timestamp
+  │     "See all" → NotificationsScreen (pushed)
+  ├── Friends section
+  │     Pending requests received (above accepted list, with Accept/Decline)
+  │     Accepted friends list (tappable → FriendProfileScreen)
+  │     [Add Friend] button → AddFriendSheet (search by display name or email)
+  ├── Sync & Storage: last synced · recipe count · Force Sync button
+  ├── About: version · Aerion
+  └── [Sign Out] button → confirmation dialog → clears data + signs out
+```
+
+**Notification badge** on the Profile tab icon — shows count of unread notifications. Cleared when Profile tab is opened.
+
+#### FriendProfileScreen (push route `"friend/{uid}"`)
+
+```
+FriendProfileScreen
+  ├── Header: avatar · display name · recipe count
+  ├── [Remove Friend] option (overflow menu)
+  └── Their public recipes (read from shared_recipes where authorId == uid)
+        Each card: tappable → SharedRecipeDetailScreen (read-only)
+```
+
+#### AddFriendSheet (modal bottom sheet)
+
+```
+AddFriendSheet
+  ├── Search field (by display name or email — queries users/ collection)
+  ├── Search results: avatar · name · [Add Friend] button
+  │     If already friends → shows "Friends ✓"
+  │     If request pending → shows "Requested"
+  └── Sending a request → creates friendships/{id} with status="pending"
+        + creates notification for recipient: type="friend_request"
+```
+
+#### NotificationsScreen (push route `"notifications"`)
+
+Full notification history. Each item:
+- `friend_request` → Accept / Decline buttons → updates `friendships/{id}.status`; Accept also creates `friend_accepted` notification for the requester
+- `friend_accepted` → informational; tap navigates to FriendProfileScreen
+- `recipe_shared` → tap navigates to `SharedRecipeDetailScreen`
+
+#### In-app recipe sharing (share sheet extension)
+
+The existing share button on `RecipeDetailScreen` (owners only) gains a second option:
+
+```
+Share Sheet (ModalBottomSheet)
+  ├── "Share via link"    → Android share sheet with https://amrosa-2ec82.web.app/shared/{id}
+  └── "Send to a friend"  → FriendPickerSheet
+        ├── Friend list (only accepted friends)
+        ├── Tap a friend → confirm dialog
+        └── On confirm:
+              1. If recipe is private → make public first (confirm dialog)
+              2. Push recipe to shared_recipes (if not already)
+              3. Create notification: type="recipe_shared", recipeId, recipeTitle, fromUid
+```
+
+#### Push notifications (FCM — planned)
+
+Firebase Cloud Messaging for background/foreground push notifications. Notification types map to the same `notifications` collection entries:
+- **`friend_request`** — "Name wants to add you as a friend"
+- **`friend_accepted`** — "Name accepted your friend request"
+- **`recipe_shared`** — "Name shared a recipe with you: [Recipe Title]"
+
+Tapping a push notification deep-links to the relevant screen. Token stored in `users/{uid}.fcmToken`.
+
+#### Security and privacy notes
+
+- Friend search only matches users who have set a public `displayName` (no email exposure in search results)
+- A user can only see another user's public recipes (`shared_recipes` where `authorId == uid`, not personal recipes)
+- Removing a friend deletes the `friendships/{id}` doc; both users lose access to each other's friend-only content
+- Notifications can only be created by authenticated users; a user can only read/delete their own notifications
 
 ---
 
@@ -509,7 +697,7 @@ HomeScreen (RecipeFilter.ALL)
   │     Each card: title · time · tags · Author row (person icon + name) · Shared pill (if public)
   │     needsReview badge on pending cards
   ├── needsReview cards → "import?reviewId=$id" (review sheet)
-  └── Settings gear icon → Account tab
+  └── Settings gear icon → Profile tab
 
 ── Bottom Tab 2: Your Recipes ─────────────────────────────────────────
 HomeScreen (RecipeFilter.YOURS — all user recipes: personal + imported)
@@ -548,18 +736,44 @@ SharedScreen  (live Firestore stream)
       Tap others' recipe → SharedRecipeDetailScreen (visitor view)
 
 SharedRecipeDetailScreen  (pushed route "shared/{recipeId}")
-  Deep link: amrosa://shared/{recipeId}
+  Deep links: https://amrosa-2ec82.web.app/shared/{recipeId}  |  amrosa://shared/{recipeId}
   ├── Recipe detail (read-only): yield adjuster, unit toggle
   ├── Ingredients grouped by section
   ├── Steps
   ├── "Copy to My Recipes" button (disabled if already copied or not signed in)
   └── Comments section (read + add/delete)
 
-── Bottom Tab 4: Account ──────────────────────────────────────────────
-AccountScreen
-  ├── Profile card (name / email / phone — always signed in)
-  ├── "Sign Out" button → dialog warning data deletion → clears Room + sync prefs + signs out
-  └── Sync stats · DB version · About
+── Bottom Tab 4: Profile ──────────────────────────────────────────────
+ProfileScreen  (route "profile_tab")
+  ├── Header: avatar · display name · email / phone  [Edit Profile]
+  ├── Stats row: recipe count · friends count
+  ├── Notifications section (unread items only; "See all" → NotificationsScreen)
+  │     friend_request → Accept / Decline inline
+  │     recipe_shared → "View Recipe" tap → SharedRecipeDetailScreen
+  ├── Friends section
+  │     Pending requests (Accept / Decline)
+  │     Friends list (tappable → FriendProfileScreen)
+  │     [Add Friend] button → AddFriendSheet (search by name/email)
+  ├── Sync & Storage: last synced · recipe count · Force Sync
+  ├── About: version · Aerion
+  └── [Sign Out] → dialog: "Recipes removed from device..." → clears data + signs out
+
+NotificationsScreen  (pushed route "notifications")
+  ├── Full notification history (read + unread)
+  ├── friend_request → Accept / Decline
+  ├── friend_accepted → tap → FriendProfileScreen
+  └── recipe_shared → tap → SharedRecipeDetailScreen
+
+FriendProfileScreen  (pushed route "friend/{uid}")
+  ├── Header: avatar · display name · recipe count
+  ├── Overflow: Remove Friend
+  └── Their public recipes (shared_recipes where authorId == uid)
+        Tap → SharedRecipeDetailScreen
+
+AddFriendSheet  (modal bottom sheet)
+  ├── Search field (display name or email)
+  ├── Results: avatar · name · [Add Friend] / "Friends ✓" / "Requested"
+  └── Add → creates friendships doc + sends friend_request notification
 
 ── Push routes (from any tab) ─────────────────────────────────────────
 RecipeDetailScreen  (pushed route "recipe/{recipeId}")
@@ -572,12 +786,20 @@ RecipeDetailScreen  (pushed route "recipe/{recipeId}")
   ├── Notes (timestamped, add/edit/delete)
   ├── Cooking Mode button → CookingModeScreen
   ├── Top bar actions (owners only):
-  │     [Share icon] — opens share sheet if public; opens "Share?" dialog if private
+  │     [Share icon] — ModalBottomSheet with two options:
+  │           "Share via link"   → system share sheet (HTTPS URL)
+  │           "Send to a friend" → FriendPickerSheet → confirm → recipe_shared notification
+  │           (if recipe is private, prompts to make public first)
   │     [Edit pencil] — → RecipeEditorScreen
   │     [Cooking Mode book]
   ├── Visibility FilterChip in body (owner only): 🔒 Private | 🌐 Public
   │     Confirms before toggling; public → comments section shown
   └── Comments section (when recipe is public)
+
+FriendPickerSheet  (modal bottom sheet — from share flow)
+  ├── "Send to a friend" header
+  ├── Accepted friends list with avatars
+  └── Tap friend → confirm dialog → creates recipe_shared notification for them
 
 RecipeEditorScreen  (pushed route "recipe/edit/{recipeId}")
   ├── Fork dialog (seeded/shared-copied recipes)
@@ -600,6 +822,8 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 ## Tech Stack
 
+**Android:**
+
 | Layer | Technology |
 |---|---|
 | UI | Jetpack Compose + Material 3 |
@@ -614,7 +838,30 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | DI | Manual (`AppContainer` in `AmrosaApplication`) |
 | State Management | ViewModel + StateFlow |
 | JSON | Gson |
-| XLSX parsing (backend) | SheetJS (`xlsx` npm package) |
+
+**iOS:**
+
+| Layer | Technology |
+|---|---|
+| UI | SwiftUI |
+| Navigation | NavigationStack + NavigationDestination |
+| Local DB | SwiftData (ModelContainer) |
+| Cloud DB | Firebase Firestore (FirebaseFirestore SDK) |
+| Auth | Firebase Authentication + GoogleSignIn-iOS |
+| Background Sync | `.task` modifier on app entry; `RecipeSyncService` |
+| Recipe AI | Same Cloud Functions as Android (`CloudFunctionsService`) |
+| DI | Manual (`AppContainer` — `@Observable @MainActor`) |
+| State Management | `@Observable` ViewModels + SwiftUI bindings |
+| JSON | Swift Codable (JSONEncoder/Decoder) |
+
+**Backend / Shared:**
+
+| Layer | Technology |
+|---|---|
+| Cloud Functions | Node.js 24, Firebase Functions v2 |
+| Recipe parsing | `@google/generative-ai` (Gemini 2.5 Flash) |
+| XLSX parsing | SheetJS (`xlsx` npm package) |
+| Hosting | Firebase Hosting (`amrosa-2ec82.web.app`) |
 
 > **AI note:** This project uses **Gemini (Google AI)** — NOT the Anthropic Claude API. All AI calls go through the `GEMINI_API_KEY` Firebase secret. Do not add Anthropic dependencies.
 
@@ -648,20 +895,102 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F7 — Author attribution** | `authorId` + `authorDisplayName` stamped at creation; editor author dropdown; personal = real name; imported = "Imported" override at publish time |
 | **F8 — Visibility** | `visibility` field on RecipeEntity; private/public; share button in detail top bar |
 | **F8 — Share button** | Top bar icon (owners only); if public → Android share sheet with `amrosa://shared/{id}`; if private → dialog → publish → share sheet |
-| **F8 — Deep links** | `amrosa://shared/{recipeId}` scheme; `AndroidManifest.xml` BROWSABLE intent filter; `navDeepLink` in NavGraph |
+| **F8 — Deep links + App Links** | HTTPS App Links (`https://amrosa-2ec82.web.app/shared/{id}`) + `amrosa://` fallback; `assetlinks.json` in Firebase Hosting; `navDeepLink` for both patterns in NavGraph |
+| **F8 — Firebase Hosting** | `shared.html` recipe viewer (browser fallback); `index.html` landing page; deployed at `amrosa-2ec82.web.app` |
 | **F8 — Shared tab** | `SharedScreen` + `SharedViewModel`; live Firestore stream; search; "Yours" badge; routing to owner vs visitor view |
 | **F8 — Shared detail** | `SharedRecipeDetailScreen`; read-only; yield adjuster; unit toggle; "Copy to My Recipes"; deep link entry point |
 | **F8 — Comments** | `Comment` domain model; post/delete; Firestore subcollection; delete by commenter or recipe owner |
-| **F8 — Security rules** | Full Firestore rules deployed; per-UID personal access; shared read-all; comment create/delete moderation |
+| **F8 — Security rules** | Full Firestore rules deployed; per-UID personal access; `shared_recipes` public read; comment create/delete moderation |
 | **Seeder disabled** | `seedIfNeeded()` is a no-op; fresh installs start blank |
 
 ### Planned — In Priority Order
 
 | # | Feature | Description |
 |---|---|---|
+| **F9** | Friends & In-App Sharing | Friends list in Profile tab; search/add friends; send recipes directly to friends; notifications (friend_request, friend_accepted, recipe_shared); FCM push notifications |
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil display |
 | — | Shopping List | Dedicated screen; add ingredients from recipe detail |
-| — | iOS | Mirror Android features in Swift/SwiftUI/SwiftData (separate codebase) |
+| — | iOS gaps (see below) | Auth gate, sign-out data clear, Shared tab, share/visibility, comments, Universal Links |
+
+---
+
+## iOS Platform Status
+
+The iOS codebase (`ios/Amrosa/`) is a work-in-progress port of the Android app. It uses Swift, SwiftUI, and SwiftData. The core recipe experience is solid; the social/sharing layer and auth gate are not yet implemented.
+
+### iOS ✅ Implemented & Matching Android
+
+| Feature | Notes |
+|---|---|
+| **SwiftData schema** | Matches Android Room exactly — all fields including F6 unit conversion fields |
+| **Recipe detail** | Scaling (servings + anchor-based), ingredient checklist, optional toggle, substitute selection, section jump chips, notes (add/edit/delete), unit mode picker (Original/Metric/Imperial) |
+| **Cooking mode** | Full-screen step-by-step; section labels; prev/next nav |
+| **Import flow** | URL, file (XLSX/CSV/TXT), freeform; `CloudFunctionsService` calls all 3 Cloud Functions; `RecipeReviewSheet` with parse notes banner, Confirm/Reimport, author toggle |
+| **Pending review model** | `needsReview = true` on save; float to top; tap re-opens review |
+| **Fork dialog** | Triggered before editing non-owned recipes |
+| **Auth providers** | Google Sign-In, Email/Password, Phone OTP; anonymous→named `linkOrSignIn` upgrade |
+| **Pull sync** | Pulls seeded (`recipes/`) + personal (`personal_recipes/{uid}/recipes/`) from Firestore |
+| **Push sync** | `pushPersonalRecipe()` + `pushAllPersonalRecipes()` to `personal_recipes/{uid}/recipes/` |
+| **YourRecipesView** | Filter chips (All/Personal/Imported), search, FAB with "Type it out"/"Import" options |
+| **RecipeCard** | Author name + needs-review banner |
+| **Account tab** | Profile (name/email/phone), sign in/out, recipe count, last sync |
+
+### iOS ❌ Critical Gaps (must be fixed for parity)
+
+**1. No auth gate**
+`ContentView` renders all 4 tabs unconditionally. Android shows `AuthScreen()` as a full-screen wall when `!isSignedIn`. iOS lets anyone use the app; sign-in is buried in the Account tab.
+- Fix: Observe `authRepository.authStateStream()` at the `ContentView` level; conditionally show `AuthView()` when `!isSignedIn`.
+
+**2. Anonymous auth still active**
+`AppContainer.onLaunch()` calls `signInAnonymouslyIfNeeded()`. Android removed this. Per spec, auth is mandatory — no anonymous sessions.
+- Fix: Remove `signInAnonymouslyIfNeeded()` call from `onLaunch()`. Keep the method in `AuthRepository` for compat but never call it.
+
+**3. Sign-out doesn't clear local data**
+`AccountViewModel.signOut()` calls only `authRepository.signOut()`. Android wipes all Room tables + sync prefs before signing out.
+- Fix: Add `clearAllLocalData()` to `AppContainer` (delete all SwiftData records + clear `UserDefaults` sync key). Call it in `AccountViewModel.signOut()` before `authRepository.signOut()`. Update the sign-out confirmation dialog to warn about data deletion.
+
+**4. Shared tab is a stub**
+`SharedRecipesView` shows `ContentUnavailableView("Coming Soon")`. Android has a full `SharedScreen` + `SharedRecipeDetailScreen`.
+- Fix: Implement a `SharedRecipeService.swift` that reads from Firestore `shared_recipes` collection (mirrors `SharedRecipeService.kt`). Build `SharedRecipesView` and a `SharedRecipeDetailView` with read-only recipe display + "Copy to My Recipes".
+
+### iOS 🐛 Sync Bugs
+
+**5. `stepIngredientRefs` not pushed**
+`RecipeSyncService.pushPersonalRecipe()` serializes sections, ingredients, and steps but omits `stepIngredientRefs`. Android's push includes them. Step↔ingredient associations are lost on cross-platform sync.
+- Fix: Add `stepIngredientRefs` array to the push payload (same format as `SharedRecipeService.buildDocument()` in Android).
+
+**6. `scaleStep` not pushed**
+The `scaleStep` field (anchor-based scaling increment) is missing from the push data map.
+- Fix: Add `"scaleStep": recipe.scaleStep` to the top-level push dict.
+
+**7. `substituteRatio` not pushed**
+Missing from the ingredient dict in `pushPersonalRecipe()`.
+- Fix: Add `"substituteRatio": ing.substituteRatio` to each ingredient entry.
+
+**8. Timestamp type mismatch**
+iOS writes `updatedAt: Timestamp(date:)` (Firestore `Timestamp` type). Android reads it as `(data["updatedAt"] as? Number)?.toLong()` — a Firestore `Timestamp` is not a `Number`, so Android gets `null` and falls back to `now`. Timestamps are silently clobbered on cross-platform sync.
+- Fix: iOS should write `updatedAt` as milliseconds since epoch (a `Long`/`Int64`): `data["updatedAt"] = Int64(recipe.updatedAt.timeIntervalSince1970 * 1000)`. Do the same for `createdAt` and `syncedAt`.
+
+### iOS 🔶 Missing Features (planned, Android has them)
+
+**9. No share / visibility toggle**
+No share button in `RecipeDetailView`. No way to make a recipe public or share a link. No `SharedRecipeService.swift`.
+- Depends on gap #4 (Shared tab). When implementing: add visibility `FilterChip` + share button to `RecipeDetailView`; use `UIActivityViewController` for the share sheet sharing `https://amrosa-2ec82.web.app/shared/{recipeId}`.
+
+**10. No comments**
+`RecipeDetailView` has no comment section. Android shows comments on public recipes.
+
+**11. No Universal Links (iOS App Links equivalent)**
+The HTTPS share URL (`https://amrosa-2ec82.web.app/shared/{recipeId}`) does not open the iOS app. Requires:
+1. Deploy `apple-app-site-association` to Firebase Hosting at `/.well-known/apple-app-site-association` (JSON with app's Team ID + Bundle ID)
+2. Add `Associated Domains` entitlement in Xcode: `applinks:amrosa-2ec82.web.app`
+3. Handle the URL in `AmrosaApp.swift` via `.onOpenURL`
+
+### iOS 🔸 Minor Behavioral Difference
+
+**12. Seeded recipes excluded from Your Recipes**
+`YourRecipesViewModel.load()` filters to `isCustomized || isImported || authorId != nil`. Seeded recipes (`isCustomized=false`, `isImported=false`, `authorId=nil`) are excluded. Android shows seeded recipes under the "Personal" filter chip in Your Recipes (since they have `isImported=false`). Per spec, seeded recipes belong in the Personal tab.
+- Fix: Change filter to `!recipe.isImported || recipe.isImported` (all recipes in Your Recipes), or more precisely show all recipes that are not from another user's shared collection (i.e., `recipe.authorId == nil || recipe.authorId == currentUid`).
 
 ---
 
@@ -697,6 +1026,15 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 - **IO dispatcher**: all DB and network on `Dispatchers.IO`, never on Main
 - **Room is source of truth**: UI never reads Firestore directly (except `SharedRecipeDetailScreen` which loads from Firestore since the recipe is not in Room)
 
+### Platform scope — IMPORTANT
+**Do NOT touch anything inside `ios/`.**
+All implementation work is Android-only. The iOS port is maintained separately by the developer.
+- ✅ `android/` — all changes go here
+- ✅ `backend/` — Cloud Functions, Firestore rules, shared backend
+- ✅ `hosting/` — Firebase Hosting web pages
+- ✅ `CLAUDE.md`, `firebase.json`, `firestore.rules` — shared config and docs
+- ❌ `ios/` — never modify, never create files here, never suggest iOS-specific code changes
+
 ### Database
 - **DB versioning**: `fallbackToDestructiveMigration()`. Always bump `AmrosaDatabase.DB_VERSION` and `DatabaseSeeder` seeder key (`seeded_vN`) together. **Current: DB v9, seeder `seeded_v11`**.
 - **Seeder**: `seedIfNeeded()` is a no-op. Do not add seeding logic. Bump key only when schema changes.
@@ -719,7 +1057,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 ### Visibility & Sharing
 - Share button in detail top bar (owners only):
-  - Already public → opens Android share sheet immediately with `amrosa://shared/{recipeId}`
+  - Already public → opens Android share sheet immediately with `https://amrosa-2ec82.web.app/shared/{recipeId}`
   - Private → dialog → confirm → `setVisibility("public")` + set `pendingShareAfterPublish = true` → `LaunchedEffect` fires share sheet once `state.isPublic` becomes true
 - `setVisibility("public")` → updates Room + publishes to `shared_recipes` + starts comment observer.
 - `setVisibility("private")` → updates Room + unpublishes + stops comment observer.
@@ -901,3 +1239,4 @@ ios/Amrosa/
 - **EditorSection/EditorIngredient/EditorStep**: Defined in `RecipeEditorViewModel.swift`. Used by both `RecipeEditorViewModel` and `RecipeRepository.updateFullRecipe`.
 - **Firebase init crash prevention**: `@State private var appContainer: AppContainer` (type annotation only); initialize in `App.init()` body after `FirebaseApp.configure()` using `_appContainer = State(initialValue: AppContainer())`.
 - **needsReview on iOS**: Same flow as Android — save immediately with `needsReview = true`, confirm later. `confirmReview(recipeId:)` clears flag.
+- **Timestamp cross-platform sync**: iOS must write timestamps as `Int64` milliseconds to be compatible with Android's `Long` fields. Use `Int64(date.timeIntervalSince1970 * 1000)` when pushing to Firestore.
