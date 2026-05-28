@@ -8,6 +8,7 @@ struct RecipeDetailView: View {
     @State private var navigateToEditor = false
     @State private var showForkAlert = false
     @State private var isForkMode = false
+    @State private var showShareOptions = false
     @State private var showFollowerPicker = false
     @State private var showSentConfirmation = false
 
@@ -27,19 +28,11 @@ struct RecipeDetailView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                // Send button (direct share to follower) — owners only
+                // Single share button — owners only; opens ShareOptionsSheet
                 if viewModel?.isOwner == true {
                     Button {
                         viewModel?.loadFollowing()
-                        showFollowerPicker = true
-                    } label: {
-                        Image(systemName: "paperplane")
-                    }
-                }
-                // Share button — owners only
-                if viewModel?.isOwner == true {
-                    Button {
-                        viewModel?.handleShareTap()
+                        showShareOptions = true
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
@@ -80,6 +73,21 @@ struct RecipeDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This recipe will be visible to anyone with the link. You can make it private again at any time.")
+        }
+        .sheet(isPresented: $showShareOptions) {
+            if let vm = viewModel {
+                ShareOptionsSheet(
+                    isPresented: $showShareOptions,
+                    onSendToFollower: {
+                        showShareOptions = false
+                        showFollowerPicker = true
+                    },
+                    onShareLink: {
+                        showShareOptions = false
+                        vm.handleShareTap()
+                    }
+                )
+            }
         }
         .sheet(isPresented: $showFollowerPicker) {
             if let vm = viewModel {
@@ -592,6 +600,83 @@ private struct RecipeCommentsSection: View {
             }
             .padding(.horizontal)
         }
+    }
+}
+
+// MARK: - Share options sheet
+
+private struct ShareOptionsSheet: View {
+    @Binding var isPresented: Bool
+    let onSendToFollower: () -> Void
+    let onShareLink: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Handle
+            Capsule()
+                .fill(Color(.systemFill))
+                .frame(width: 36, height: 4)
+                .padding(.top, 12)
+
+            Text("Share Recipe")
+                .font(.headline)
+                .padding(.vertical, 16)
+
+            Divider()
+
+            // Option A: Send to follower (highlighted)
+            Button(action: onSendToFollower) {
+                HStack(spacing: 14) {
+                    Image(systemName: "paperplane.fill")
+                        .font(.title3)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Send to a follower")
+                            .font(.body)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.primary)
+                        Text("Share directly — only that person will see it")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .background(Color.accentColor.opacity(0.07))
+            }
+            .buttonStyle(.plain)
+
+            Divider()
+                .padding(.leading, 66)
+
+            // Option B: Share link
+            Button(action: onShareLink) {
+                HStack(spacing: 14) {
+                    Image(systemName: "link")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Share link")
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                        Text("Anyone with the link can view this recipe")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+            }
+            .buttonStyle(.plain)
+
+            Spacer().frame(minHeight: 20)
+        }
+        .presentationDetents([.height(240)])
+        .presentationDragIndicator(.hidden)
     }
 }
 

@@ -935,18 +935,15 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 | # | Feature | Description |
 |---|---|---|
-| **next** | Profile name edit | Tap profile card → AlertDialog → `updateDisplayName()` + `upsertProfile()` |
 | **next** | User search by email | Add `email` field to `users/{uid}`; parallel name+email prefix query; show email in result rows |
-| **next** | Merged share button | Single Share icon → `ShareOptionsSheet` (Send to follower / Share link) |
-| **next** | Shared tab rework | Tab 2 = received recipes from `shared_to/{uid}/`; remove `SharedScreen` community browse |
-| **next** | Tab restructure | Remove All tab; Your Recipes = Tab 1; Discover placeholder = Tab 3 |
+| **next** | Imperial unit fix | Dry ingredients → oz/lbs; liquids → fl oz; update seeded recipes in DatabaseSeeder + Gemini prompt |
 | **next** | Imperial unit fix | Dry ingredients → oz/lbs; liquids → fl oz; update seeded recipes in DatabaseSeeder + Gemini prompt |
 | — | FCM push notifications | Background push for `follow_request` / `recipe_shared` via Cloud Function triggered on Firestore write |
 | — | Discover / Recommendations tab | Personalised recipe suggestions (Gemini-powered); replaces placeholder |
 | — | Public profile view | View another user's public recipes at `"profile/{uid}"` |
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil display |
 | — | Shopping List | Dedicated screen; add ingredients from recipe detail |
-| — | iOS gaps (see below) | F9 follow/notifications, tab restructure, name edit, imperial fix, Discover tab |
+| — | iOS gaps (see below) | Imperial unit fix, user search by email |
 
 ---
 
@@ -972,15 +969,20 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 | **Pull sync** | Pulls seeded (`recipes/`) + personal (`personal_recipes/{uid}/recipes/`) from Firestore |
 | **Push sync** | `pushPersonalRecipe()` — full payload: sections, ingredients (incl. F6 + `substituteRatio`), steps, `stepIngredientRefs`, `scaleStep`; `pushAllPersonalRecipes()` |
 | **Timestamps** | Written as `Int64` milliseconds (Android-compatible `Long`) |
-| **F8 — Shared tab** | `SharedRecipesView` + `SharedRecipesViewModel`; live Firestore stream; search; "Yours" badge |
 | **F8 — Shared detail** | `SharedRecipeDetailView`; read-only; yield adjuster; unit toggle; "Copy to My Recipes"; comments |
 | **F8 — Visibility chip** | Owners see Private/Public toggle chip in detail body; confirms before toggling |
-| **F8 — Share button** | Top bar (owners only); iOS share sheet with `https://amrosa-2ec82.web.app/shared/{id}`; publish dialog for private recipes |
+| **F8 — Merged share button** | Single Share icon → `ShareOptionsSheet` ("Send to a follower" / "Share link"); owners only |
+| **F8 — Share link** | iOS share sheet with `https://amrosa-2ec82.web.app/shared/{id}`; publish dialog for private recipes |
 | **F8 — Comments** | Post/delete in owner view + visitor view; commenter or recipe owner can delete |
-| **F8 — SharedRecipeService** | `publish/unpublish`, live `sharedRecipesStream()`, `getSharedRecipeDetail`, `commentsStream`, `addComment`, `deleteComment`, `copyToMyRecipes` |
+| **F8 — SharedRecipeService** | `publish/unpublish`, `sharedRecipesStream()`, `getSharedRecipeDetail`, `commentsStream`, `addComment`, `deleteComment`, `copyToMyRecipes` |
 | **Deep links** | `amrosa://shared/{id}` custom scheme + `https://amrosa-2ec82.web.app/shared/{id}` via `onOpenURL`; routes to `SharedRecipeDetailView` |
-| **YourRecipesView** | All local recipes shown (seeded included); filter chips (All/Personal/Imported); search; FAB |
-| **Account tab** | Profile (name/email/phone), sign-out + data-wipe dialog, recipe count, last sync |
+| **Tab restructure** | All tab removed; 4 tabs: Your Recipes · Shared with Me · Discover (placeholder) · Account |
+| **Shared with Me tab** | `SharedInboxView` + `SharedInboxViewModel`; live `shared_to/{uid}/recipes/` stream; taps → `ReceivedRecipeView` |
+| **Discover tab** | Placeholder screen |
+| **YourRecipesView** | All local recipes; filter chips (All/Personal/Imported); search; FAB |
+| **Account tab** | Profile card (tappable → edit name alert), sign-out + data-wipe dialog, recipe count, last sync |
+| **Profile name edit** | Tap profile card → alert with text field → `authRepository.updateDisplayName()` + `upsertProfile()`; toast on success |
+| **F9 — Follow system** | `SocialRepository`, `UserSearchView`, `NotificationsView`, `ReceivedRecipeView`; follow/unfollow/accept/decline, notification stream, direct recipe sharing |
 
 ### iOS 🔶 Remaining Gaps (planned)
 
@@ -988,7 +990,6 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 |---|---|
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
-| **F9 — Friends & notifications** | ✅ Implemented: `SocialRepository`, `UserSearchView`, `NotificationsView`, `ReceivedRecipeView`; follow/unfollow/accept/decline, notification stream, direct recipe sharing |
 | **Your Recipes filter chips** | iOS uses a segmented picker; Android uses `[All] [Personal] [Imported]` filter chips — minor UX difference |
 
 ---

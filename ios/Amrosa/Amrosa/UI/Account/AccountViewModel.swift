@@ -8,6 +8,7 @@ final class AccountViewModel {
     var errorMessage: String? = nil
     var recipeCount: Int = 0
     var lastSyncDate: Date? = nil
+    var nameUpdateMessage: String? = nil
 
     // Social
     var pendingRequests: [UserProfile] = []
@@ -81,6 +82,22 @@ final class AccountViewModel {
         pendingFollowAction = profile.uid
         await socialRepository.declineFollowRequest(fromUid: profile.uid)
         pendingFollowAction = nil
+    }
+
+    /// Update the signed-in user's display name in Firebase and re-upsert the public profile.
+    func updateDisplayName(_ name: String) async {
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        do {
+            try await authRepository.updateDisplayName(name)
+            await socialRepository.upsertProfile()
+            nameUpdateMessage = "Name updated"
+        } catch {
+            nameUpdateMessage = "Failed to update name: \(error.localizedDescription)"
+        }
+    }
+
+    func clearNameUpdateMessage() {
+        nameUpdateMessage = nil
     }
 
     /// Clears all local data then signs out.

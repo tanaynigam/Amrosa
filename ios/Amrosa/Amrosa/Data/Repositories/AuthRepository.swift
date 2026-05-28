@@ -123,6 +123,15 @@ final class AuthRepository {
         }
     }
 
+    // MARK: - Profile update
+
+    func updateDisplayName(_ name: String) async throws {
+        guard let user = auth.currentUser else { return }
+        let request = user.createProfileChangeRequest()
+        request.displayName = name.trimmingCharacters(in: .whitespaces)
+        try await request.commitChanges()
+    }
+
     // MARK: - Sign Out
 
     func signOut() throws {

@@ -8,24 +8,43 @@ struct AccountView: View {
     @State private var showUserSearch = false
     @State private var notifShareId: String? = nil
     @State private var showReceivedRecipe = false
+    @State private var showEditName = false
+    @State private var editNameText = ""
 
     var body: some View {
         List {
             if let vm = viewModel {
-                // Profile section — always signed in (auth is mandatory)
+                // Profile section — tappable to edit name
                 Section("Profile") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let name = vm.displayName {
-                            Text(name).font(.headline)
+                    Button {
+                        editNameText = vm.displayName ?? ""
+                        showEditName = true
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                if let name = vm.displayName {
+                                    Text(name).font(.headline).foregroundStyle(.primary)
+                                } else {
+                                    Text("Add your name").font(.headline).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "pencil")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let email = vm.email {
+                                Text(email).font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            if let phone = vm.phoneNumber {
+                                Text(phone).font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Text("Tap to edit name")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
                         }
-                        if let email = vm.email {
-                            Text(email).font(.subheadline).foregroundStyle(.secondary)
-                        }
-                        if let phone = vm.phoneNumber {
-                            Text(phone).font(.subheadline).foregroundStyle(.secondary)
-                        }
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
+                    .buttonStyle(.plain)
                 }
 
                 // People section
@@ -181,6 +200,39 @@ struct AccountView: View {
                         }
                     }
                 }
+            }
+        }
+        .alert("Edit Name", isPresented: $showEditName) {
+            TextField("Display name", text: $editNameText)
+                .autocorrectionDisabled()
+            Button("Save") {
+                let name = editNameText
+                Task { await viewModel?.updateDisplayName(name) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This name is visible to people you follow.")
+        }
+        .onChange(of: viewModel?.nameUpdateMessage) { _, msg in
+            if msg != nil {
+                // Auto-clear after 2 seconds
+                Task {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    viewModel?.clearNameUpdateMessage()
+                }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let msg = viewModel?.nameUpdateMessage {
+                Text(msg)
+                    .font(.subheadline)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color(.systemBackground).shadow(.drop(radius: 4)))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .animation(.easeInOut(duration: 0.25), value: msg)
             }
         }
         .onAppear {

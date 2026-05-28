@@ -27,9 +27,8 @@ final class SocialRepository {
             "uid": uid,
             "displayName": displayName
         ]
-        if let photoURL = authRepository.photoURL?.absoluteString {
-            data["photoUrl"] = photoURL
-        }
+        if let email = authRepository.email { data["email"] = email }
+        if let photoURL = authRepository.photoURL?.absoluteString { data["photoUrl"] = photoURL }
         try? await db.collection("users").document(uid).setData(data, merge: true)
     }
 
@@ -443,6 +442,38 @@ final class SocialRepository {
         if let v = recipe.baseServingsMax       { doc["baseServingsMax"] = v }
         if let v = recipe.scaleIngredientId     { doc["scaleIngredientId"] = v }
         return doc
+    }
+
+    // MARK: - Shared inbox summary
+
+    /// Live stream of lightweight summaries for `shared_to/{uid}/recipes/`, newest first.
+    func receivedRecipesSummaryStream() -> AsyncStream<[ReceivedRecipeSummary]> {
+        guard let myUid = authRepository.uid else { return AsyncStream { $0.finish() } }
+        return AsyncStream { continuation in
+            let listener = self.db.collection("shared_to")
+                .document(myUid)
+                .collection("recipes")
+                .order(by: "sharedAt", descending: true)
+                .addSnapshotListener { snapshot, _ in
+                    guard let docs = snapshot?.documents else {
+                        continuation.yield([])
+                        return
+                    }
+                    let summaries = docs.compactMap { doc -> ReceivedRecipeSummary? in
+                        let data = doc.data()
+                        guard let title = data["title"] as? String else { return nil }
+                        let sharedAtMs = (data["sharedAt"] as? Double) ?? 0
+                        return ReceivedRecipeSummary(
+                            shareId: doc.documentID,
+                            title: title,
+                            fromDisplayName: data["fromDisplayName"] as? String ?? "Someone",
+                            sharedAt: Date(timeIntervalSince1970: sharedAtMs / 1000)
+                        )
+                    }
+                    continuation.yield(summaries)
+                }
+            continuation.onTermination = { _ in listener.remove() }
+        }
     }
 
     /// Parse a received recipe document — same as SharedRecipeService.parseSharedRecipe
