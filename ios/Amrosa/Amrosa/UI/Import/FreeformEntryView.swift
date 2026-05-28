@@ -58,7 +58,6 @@ final class FreeformEntryViewModel {
     func saveRecipe() {
         guard let parsed = parsedRecipe else { return }
         let recipeId = UUID().uuidString
-        let now = Date()
         let uid = authRepository.uid
         let name = authRepository.displayName ?? "Me"
 

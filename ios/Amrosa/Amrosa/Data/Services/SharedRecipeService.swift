@@ -133,7 +133,6 @@ final class SharedRecipeService {
     func copyToMyRecipes(_ sharedRecipe: SharedRecipe) async -> Bool {
         guard let uid = authRepository.uid else { return false }
         let newId = UUID().uuidString
-        let now = Date()
 
         // Build ParsedRecipeData from the shared recipe
         let sections = sharedRecipe.sections.map { s in

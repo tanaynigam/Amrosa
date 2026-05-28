@@ -97,7 +97,7 @@ final class RecipeDetailViewModel {
     }
 
     func adjustScale(delta: Int) {
-        if let base = baseAnchorQty {
+        if baseAnchorQty != nil {
             let step = recipe.scaleStep
             let newQty = scaleAnchorQty + Double(delta) * step
             scaleAnchorQty = max(step, newQty)

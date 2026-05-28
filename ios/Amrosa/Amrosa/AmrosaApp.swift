@@ -20,9 +20,6 @@ struct AmrosaApp: App {
                 .onOpenURL { url in
                     GIDSignIn.sharedInstance.handle(url)
                 }
-                .task {
-                    await appContainer.onLaunch()
-                }
         }
     }
 }

@@ -38,7 +38,7 @@ final class AuthRepository {
 
     func signInAnonymouslyIfNeeded() async {
         guard auth.currentUser == nil else { return }
-        try? await auth.signInAnonymously()
+        _ = try? await auth.signInAnonymously()
     }
 
     // MARK: - Google
