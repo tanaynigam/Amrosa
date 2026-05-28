@@ -35,7 +35,7 @@ struct AuthView: View {
 
                     // Google Sign In
                     GoogleSignInButton {
-                        Task {
+                        Task { @MainActor in
                             guard let vc = UIApplication.shared.connectedScenes
                                 .compactMap({ $0 as? UIWindowScene })
                                 .first?.windows.first?.rootViewController else { return }

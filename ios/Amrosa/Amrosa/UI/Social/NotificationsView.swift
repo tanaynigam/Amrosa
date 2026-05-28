@@ -9,14 +9,14 @@ final class NotificationsViewModel {
     var isLoading: Bool = true
 
     private let socialRepository: SocialRepository
-    nonisolated(unsafe) private var streamTask: Task<Void, Never>? = nil
+    private var streamTask: Task<Void, Never>? = nil
 
     init(socialRepository: SocialRepository) {
         self.socialRepository = socialRepository
-        start()
     }
 
-    private func start() {
+    func start() {
+        guard streamTask == nil else { return }
         streamTask = Task {
             for await batch in socialRepository.notificationsStream() {
                 guard !Task.isCancelled else { break }
@@ -26,16 +26,17 @@ final class NotificationsViewModel {
         }
     }
 
+    func stop() {
+        streamTask?.cancel()
+        streamTask = nil
+    }
+
     func markRead(_ notifId: String) {
         Task { await socialRepository.markNotificationRead(notifId: notifId) }
     }
 
     func markAllRead() {
         Task { await socialRepository.markAllNotificationsRead() }
-    }
-
-    deinit {
-        streamTask?.cancel()
     }
 }
 
@@ -66,6 +67,10 @@ struct NotificationsView: View {
             if viewModel == nil {
                 viewModel = NotificationsViewModel(socialRepository: container.socialRepository)
             }
+            viewModel?.start()
+        }
+        .onDisappear {
+            viewModel?.stop()
         }
     }
 }
