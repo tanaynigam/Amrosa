@@ -68,18 +68,28 @@ class SocialRepository(
     // ── User search ────────────────────────────────────────────────────────────
 
     /**
-     * Search users whose display name starts with [query].
+     * Search users by display name prefix or exact email address.
+     * If [query] contains '@', performs an exact email lookup.
+     * Otherwise, does a display name prefix search.
      * Excludes the current user. Returns up to 20 results.
      */
     suspend fun searchUsers(query: String): List<UserProfile> {
         if (query.isBlank()) return emptyList()
         val uid = authRepository.uid ?: return emptyList()
+        val isEmailQuery = query.contains('@')
         return try {
-            val snapshot = firestore.collection(COL_USERS)
-                .whereGreaterThanOrEqualTo("displayName", query)
-                .whereLessThanOrEqualTo("displayName", query + "")
-                .limit(20)
-                .get().await()
+            val snapshot = if (isEmailQuery) {
+                firestore.collection(COL_USERS)
+                    .whereEqualTo("email", query.trim().lowercase())
+                    .limit(5)
+                    .get().await()
+            } else {
+                firestore.collection(COL_USERS)
+                    .whereGreaterThanOrEqualTo("displayName", query)
+                    .whereLessThanOrEqualTo("displayName", query + "")
+                    .limit(20)
+                    .get().await()
+            }
             snapshot.documents
                 .filter { it.id != uid }
                 .mapNotNull { doc ->

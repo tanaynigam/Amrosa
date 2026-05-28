@@ -1,5 +1,6 @@
 package com.aerion.amrosa.ui.edit
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -40,10 +41,16 @@ fun RecipeEditorScreen(
     )
     val state by vm.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     // Navigate back once save completes
     LaunchedEffect(state.saveComplete) {
         if (state.saveComplete) onBack()
+    }
+
+    // Navigate back once delete completes
+    LaunchedEffect(state.deleteComplete) {
+        if (state.deleteComplete) onBack()
     }
 
     // Show errors as snackbar
@@ -52,6 +59,28 @@ fun RecipeEditorScreen(
             snackbarHostState.showSnackbar(it)
             vm.clearError()
         }
+    }
+
+    // Delete confirmation dialog
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Delete Recipe?") },
+            text = { Text("\"${state.title}\" will be permanently deleted from this device. This cannot be undone.") },
+            confirmButton = {
+                Button(
+                    onClick = { showDeleteDialog = false; vm.deleteRecipe() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 
     // Fork confirmation dialog
@@ -147,6 +176,34 @@ fun RecipeEditorScreen(
                     Icon(Icons.Default.Add, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("Add Section")
+                }
+            }
+
+            // ── Delete ────────────────────────────────────────────────────────
+            item(key = "delete_button") {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { showDeleteDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isDeleting,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    border = BorderStroke(
+                        1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                    )
+                ) {
+                    if (state.isDeleting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Delete Recipe")
+                    }
                 }
             }
 

@@ -50,6 +50,8 @@ data class EditorUiState(
     val showForkDialog: Boolean = false,
     val isSaving: Boolean = false,
     val saveComplete: Boolean = false,
+    val isDeleting: Boolean = false,
+    val deleteComplete: Boolean = false,
     val error: String? = null,
     // Recipe metadata
     val title: String = "",
@@ -465,6 +467,18 @@ class RecipeEditorViewModel(
     )
 
     private fun Step.toEditor() = EditorStep(id = id, instruction = instruction)
+
+    // ─── Delete ───────────────────────────────────────────────────────────────
+
+    fun deleteRecipe() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDeleting = true) }
+            withContext(Dispatchers.IO) {
+                repository.deleteFullRecipe(recipeId)
+            }
+            _uiState.update { it.copy(isDeleting = false, deleteComplete = true) }
+        }
+    }
 
     companion object {
         fun factory(
