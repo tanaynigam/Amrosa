@@ -22,6 +22,12 @@ final class RecipeDetailViewModel {
     var showShareConfirmDialog = false
     var isPublishing = false
 
+    // Direct sharing to followers
+    var following: [UserProfile] = []
+    var isFollowingLoading = false
+    var shareSentToName: String? = nil
+    private var followingTask: Task<Void, Never>? = nil
+
     // Comments (shown when recipe is public)
     var comments: [SharedComment] = []
     var newCommentText = ""
@@ -30,12 +36,14 @@ final class RecipeDetailViewModel {
     private let repository: RecipeRepository
     private let authRepository: AuthRepository
     private let sharedRecipeService: SharedRecipeService
+    private let socialRepository: SocialRepository
 
-    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService) {
+    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService, socialRepository: SocialRepository) {
         self.recipe = recipe
         self.repository = repository
         self.authRepository = authRepository
         self.sharedRecipeService = sharedRecipeService
+        self.socialRepository = socialRepository
         self.selectedServings = recipe.baseServings
         // Seed anchor quantity from the anchor ingredient's base value
         if let anchorId = recipe.scaleIngredientId,
@@ -219,6 +227,31 @@ final class RecipeDetailViewModel {
                 _ = await sharedRecipeService.unpublish(recipe.id)
                 stopCommentListener()
                 comments = []
+            }
+        }
+    }
+
+    // MARK: - Direct sharing to followers
+
+    /// Starts (or re-starts) the following stream to populate the follower picker.
+    func loadFollowing() {
+        guard followingTask == nil else { return }
+        isFollowingLoading = true
+        followingTask = Task {
+            for await profiles in socialRepository.followingStream() {
+                guard !Task.isCancelled else { break }
+                following = profiles
+                isFollowingLoading = false
+            }
+        }
+    }
+
+    /// Share this recipe directly to a follower.
+    func shareToFollower(uid: String, name: String) {
+        Task {
+            let success = await socialRepository.shareRecipeTo(recipientUid: uid, recipientName: name, recipe: recipe)
+            if success {
+                shareSentToName = name
             }
         }
     }

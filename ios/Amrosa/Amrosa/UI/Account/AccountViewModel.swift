@@ -9,9 +9,17 @@ final class AccountViewModel {
     var recipeCount: Int = 0
     var lastSyncDate: Date? = nil
 
+    // Social
+    var pendingRequests: [UserProfile] = []
+    var followingCount: Int = 0
+    var unreadNotificationCount: Int = 0
+    var pendingFollowAction: String? = nil
+
     private let authRepository: AuthRepository
     private let repository: RecipeRepository
     private let container: AppContainer
+    private let socialRepository: SocialRepository
+    private var socialTasks: [Task<Void, Never>] = []
 
     var isSignedIn: Bool { authRepository.isSignedIn }
     var displayName: String? { authRepository.displayName }
@@ -19,10 +27,11 @@ final class AccountViewModel {
     var phoneNumber: String? { authRepository.phoneNumber }
     var uid: String? { authRepository.uid }
 
-    init(authRepository: AuthRepository, repository: RecipeRepository, container: AppContainer) {
+    init(authRepository: AuthRepository, repository: RecipeRepository, container: AppContainer, socialRepository: SocialRepository) {
         self.authRepository = authRepository
         self.repository = repository
         self.container = container
+        self.socialRepository = socialRepository
     }
 
     func loadStats() {
@@ -31,12 +40,56 @@ final class AccountViewModel {
         lastSyncDate = ts > 0 ? Date(timeIntervalSince1970: ts) : nil
     }
 
+    /// Start live social observers. Called from AccountView.onAppear.
+    func startObserving() {
+        guard socialTasks.isEmpty else { return }
+
+        socialTasks.append(Task {
+            for await profiles in socialRepository.pendingRequestsStream() {
+                guard !Task.isCancelled else { break }
+                pendingRequests = profiles
+            }
+        })
+
+        socialTasks.append(Task {
+            for await profiles in socialRepository.followingStream() {
+                guard !Task.isCancelled else { break }
+                followingCount = profiles.count
+            }
+        })
+
+        socialTasks.append(Task {
+            for await count in socialRepository.unreadCountStream() {
+                guard !Task.isCancelled else { break }
+                unreadNotificationCount = count
+            }
+        })
+    }
+
+    func stopObserving() {
+        socialTasks.forEach { $0.cancel() }
+        socialTasks = []
+    }
+
+    func acceptFollowRequest(_ profile: UserProfile) async {
+        pendingFollowAction = profile.uid
+        await socialRepository.acceptFollowRequest(fromUid: profile.uid)
+        pendingFollowAction = nil
+    }
+
+    func declineFollowRequest(_ profile: UserProfile) async {
+        pendingFollowAction = profile.uid
+        await socialRepository.declineFollowRequest(fromUid: profile.uid)
+        pendingFollowAction = nil
+    }
+
     /// Clears all local data then signs out.
     /// Auth state change in ContentView handles the navigation back to auth gate.
     func signOut() async {
         isSigningOut = true
         defer { isSigningOut = false }
         do {
+            stopObserving()
             container.clearAllLocalData()
             try authRepository.signOut()
         } catch {

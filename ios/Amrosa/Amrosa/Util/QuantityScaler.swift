@@ -42,6 +42,29 @@ enum QuantityScaler {
         }
     }
 
+    // MARK: - Scale SharedIngredient (Firestore-only model)
+
+    static func scaleShared(
+        ingredient: SharedIngredient,
+        scaleFactor: Double,
+        unitMode: UnitMode
+    ) -> String {
+        switch unitMode {
+        case .metric where ingredient.quantityValueMetric != nil:
+            let scaled = ingredient.quantityValueMetric! * scaleFactor
+            return formatDisplay(value: scaled, unit: ingredient.quantityUnitMetric, baseDisplay: ingredient.quantityDisplayMetric)
+        case .imperial where ingredient.quantityValueImperial != nil:
+            let scaled = ingredient.quantityValueImperial! * scaleFactor
+            return formatDisplay(value: scaled, unit: ingredient.quantityUnitImperial, baseDisplay: ingredient.quantityDisplayImperial)
+        default:
+            if let value = ingredient.quantityValue {
+                let scaled = value * scaleFactor
+                return formatDisplay(value: scaled, unit: ingredient.quantityUnit, baseDisplay: ingredient.quantityDisplay)
+            }
+            return ingredient.quantityDisplay ?? ""
+        }
+    }
+
     // MARK: - Scale raw value/unit/display triple
 
     static func scale(
