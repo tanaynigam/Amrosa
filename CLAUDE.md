@@ -961,7 +961,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 |---|---|
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
-| **F9 — Friends & notifications** | Not yet implemented on iOS (Android feature, planned) |
+| **F9 — Friends & notifications** | ✅ Implemented: `SocialRepository`, `UserSearchView`, `NotificationsView`, `ReceivedRecipeView`; follow/unfollow/accept/decline, notification stream, direct recipe sharing |
 | **Your Recipes filter chips** | iOS uses a segmented picker; Android uses `[All] [Personal] [Imported]` filter chips — minor UX difference |
 
 ---
@@ -1202,7 +1202,7 @@ ios/Amrosa/
 |---|---|
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` but requires `Associated Domains` entitlement + `apple-app-site-association` on the hosting server for the OS to intercept them before Safari |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
-| **F9 — Friends & notifications** | Not yet implemented on iOS (Android feature, planned) |
+| **F9 — Friends & notifications** | ✅ Implemented: `SocialRepository`, `UserSearchView`, `NotificationsView`, `ReceivedRecipeView`; follow/unfollow/accept/decline, notification stream, direct recipe sharing |
 | **Your Recipes filter chips** | iOS uses a segmented picker; Android has `[All] [Personal] [Imported]` chips — minor UX difference |
 
 ### iOS Notes for AI Coding Assistants
