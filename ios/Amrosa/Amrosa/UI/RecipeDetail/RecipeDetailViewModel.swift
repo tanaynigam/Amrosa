@@ -11,7 +11,7 @@ final class RecipeDetailViewModel {
     var unitMode: UnitMode = .original
     var checkedIngredientIds: Set<String> = []
     var selectedSubstitutes: [String: String] = [:]  // substituteGroupId → chosen ingredientId
-    var showOptional = false
+    var enabledOptionals: Set<String> = []            // per-ingredient optional toggle (like Android)
     var newNoteText = ""
     var isEditingNote: RecipeNoteModel? = nil
     var editingNoteText = ""
@@ -97,6 +97,12 @@ final class RecipeDetailViewModel {
         return "\(selectedServings)"
     }
 
+    /// True when the scale is at the recipe's base value (no adjustment made).
+    var isDefaultScale: Bool {
+        if let base = baseAnchorQty { return scaleAnchorQty == base }
+        return selectedServings == recipe.baseServings
+    }
+
     var canDecrement: Bool {
         if isAnchorBased {
             return scaleAnchorQty > recipe.scaleStep
@@ -145,30 +151,44 @@ final class RecipeDetailViewModel {
         recipe.sections.sorted { $0.orderIndex < $1.orderIndex }
     }
 
-    func ingredients(for section: RecipeSectionModel?) -> [IngredientModel] {
-        let all = recipe.ingredients.filter { $0.section?.id == section?.id }
-        return all.sorted { $0.orderIndex < $1.orderIndex }
-    }
-
     func steps(for section: RecipeSectionModel?) -> [StepModel] {
-        let all = recipe.steps.filter { $0.section?.id == section?.id }
-        return all.sorted { $0.orderIndex < $1.orderIndex }
+        recipe.steps.filter { $0.section?.id == section?.id }.sorted { $0.orderIndex < $1.orderIndex }
     }
 
-    func visibleIngredients(for section: RecipeSectionModel?) -> [IngredientModel] {
-        ingredients(for: section).filter { ing in
-            guard ing.isOptional else {
-                // For substitute groups, show only selected substitute
+    /// Substitute groups — used to render "Options" selectors above ingredients.
+    var substituteGroups: [(groupId: String, options: [IngredientModel])] {
+        let grouped = Dictionary(grouping: recipe.ingredients.filter { $0.substituteGroupId != nil },
+                                 by: { $0.substituteGroupId! })
+        return grouped.map { (groupId: $0.key, options: $0.value.sorted { $0.orderIndex < $1.orderIndex }) }
+    }
+
+    /// ALL visible ingredients as a flat list — collapses substitute groups to the selected option
+    /// and always shows optional ingredients (they are individually togglable, like Android).
+    var visibleIngredients: [IngredientModel] {
+        recipe.ingredients
+            .sorted { $0.orderIndex < $1.orderIndex }
+            .filter { ing in
+                // Substitute group: show only the selected option
                 if let gid = ing.substituteGroupId {
                     let groupMembers = recipe.ingredients.filter { $0.substituteGroupId == gid }
                     let selected = selectedSubstitutes[gid]
                     if let s = selected { return ing.id == s }
-                    return groupMembers.first?.id == ing.id
+                    return groupMembers.sorted { $0.orderIndex < $1.orderIndex }.first?.id == ing.id
                 }
-                return true
+                return true // show all including optionals (they get a toggle UI)
             }
-            return showOptional
+    }
+
+    func toggleOptional(_ ingredientId: String) {
+        if enabledOptionals.contains(ingredientId) {
+            enabledOptionals.remove(ingredientId)
+        } else {
+            enabledOptionals.insert(ingredientId)
         }
+    }
+
+    func selectSubstitute(_ groupId: String, _ ingredientId: String) {
+        selectedSubstitutes[groupId] = ingredientId
     }
 
     // MARK: - Notes

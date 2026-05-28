@@ -164,168 +164,181 @@ struct SharedRecipeDetailView: View {
     }
 }
 
-// MARK: - Detail content
+// MARK: - Detail content (flat layout matching Android / RecipeDetailView)
 
 private struct SharedDetailContent: View {
     let recipe: SharedRecipe
     @Bindable var viewModel: SharedRecipeDetailViewModel
 
+    var allIngredients: [SharedIngredient] { recipe.ingredients.sorted { $0.orderIndex < $1.orderIndex } }
+    var sortedSections: [SharedSection] { recipe.sections.sorted { $0.orderIndex < $1.orderIndex } }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Meta bar
-                SharedMetaBar(recipe: recipe, viewModel: viewModel)
+            LazyVStack(alignment: .leading, spacing: 0) {
 
-                // Unit toggle
-                if viewModel.hasConversionData {
-                    Picker("Units", selection: $viewModel.unitMode) {
-                        ForEach(UnitMode.allCases, id: \.self) { mode in
-                            Text(mode.rawValue).tag(mode)
+                // Author + description
+                if let author = recipe.authorDisplayName {
+                    Label(author, systemImage: "person")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .padding(.horizontal, 16).padding(.top, 12)
+                }
+                if let desc = recipe.description {
+                    Text(desc).font(.body).foregroundStyle(.secondary)
+                        .padding(.horizontal, 16).padding(.top, 4)
+                }
+
+                // Time + Yield
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let prep = recipe.prepTimeMinutes {
+                            Text("Prep  \(prep.timeDisplayString)").font(.footnote).foregroundStyle(.secondary)
+                        }
+                        if let cook = recipe.cookTimeMinutes {
+                            Text("Cook  \(cook.timeDisplayString)").font(.footnote).foregroundStyle(.secondary)
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Text("Yield").font(.footnote).foregroundStyle(.secondary)
+                        Button { viewModel.adjustServings(delta: -1) } label: {
+                            Image(systemName: "minus").frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.plain).disabled(viewModel.selectedServings <= 1)
+                        Text(viewModel.yieldDisplay).font(.title3).fontWeight(.semibold).frame(minWidth: 40)
+                        Button { viewModel.adjustServings(delta: 1) } label: {
+                            Image(systemName: "plus").frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                Divider().padding(.horizontal, 16)
+
+                // Section jump chips
+                if sortedSections.count > 1 {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(sortedSections) { s in
+                                Text(s.name)
+                                    .font(.caption).fontWeight(.medium)
+                                    .padding(.horizontal, 12).padding(.vertical, 6)
+                                    .background(Color(.secondarySystemBackground))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                    }
                 }
 
-                // Sections
-                let sortedSections = recipe.sections
-                ForEach(sortedSections) { section in
-                    SharedSectionBlock(section: section, recipe: recipe, viewModel: viewModel)
+                // Ingredients (flat)
+                HStack {
+                    Text("Ingredients").font(.title2).fontWeight(.semibold)
+                    Spacer()
+                    if viewModel.hasConversionData {
+                        Picker("Units", selection: $viewModel.unitMode) {
+                            ForEach(UnitMode.allCases, id: \.self) { mode in Text(mode.rawValue).tag(mode) }
+                        }
+                        .pickerStyle(.segmented).frame(width: 180)
+                    }
                 }
+                .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
+
+                let groupedIngs = Dictionary(grouping: allIngredients) { $0.groupLabel ?? "" }
+                let groupOrder = allIngredients.compactMap { $0.groupLabel }.uniqued()
+                let ungrouped = allIngredients.filter { $0.groupLabel == nil || $0.groupLabel!.isEmpty }
+                ForEach(ungrouped) { ing in SharedIngredientRow(ing: ing, viewModel: viewModel) }
+                ForEach(groupOrder, id: \.self) { label in
+                    if let ings = groupedIngs[label], !ings.isEmpty {
+                        Text(label).font(.footnote).fontWeight(.semibold).foregroundStyle(.secondary)
+                            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 2)
+                        ForEach(ings) { ing in SharedIngredientRow(ing: ing, viewModel: viewModel) }
+                    }
+                }
+
+                Divider().padding(.horizontal, 16).padding(.vertical, 8)
+
+                // Instructions (by section)
+                Text("Instructions").font(.title2).fontWeight(.semibold)
+                    .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 4)
+
+                if sortedSections.isEmpty {
+                    let steps = recipe.steps.sorted { $0.orderIndex < $1.orderIndex }
+                    ForEach(Array(steps.enumerated()), id: \.element.id) { idx, step in
+                        SharedStepRow(instruction: step.instruction, index: idx + 1)
+                    }
+                } else {
+                    ForEach(sortedSections) { section in
+                        Text(section.name).font(.title3).fontWeight(.semibold)
+                            .padding(.horizontal, 16).padding(.vertical, 6)
+                        let steps = recipe.steps.filter { $0.sectionId == section.id }.sorted { $0.orderIndex < $1.orderIndex }
+                        ForEach(Array(steps.enumerated()), id: \.element.id) { idx, step in
+                            SharedStepRow(instruction: step.instruction, index: idx + 1)
+                        }
+                    }
+                    let unsectioned = recipe.steps.filter { $0.sectionId == nil }.sorted { $0.orderIndex < $1.orderIndex }
+                    ForEach(Array(unsectioned.enumerated()), id: \.element.id) { idx, step in
+                        SharedStepRow(instruction: step.instruction, index: idx + 1)
+                    }
+                }
+
+                Divider().padding(.horizontal, 16).padding(.vertical, 8)
 
                 // Copy button
-                CopyToMyRecipesButton(viewModel: viewModel)
-                    .padding(.horizontal)
+                CopyToMyRecipesButton(viewModel: viewModel).padding(.horizontal, 16)
 
                 // Comments
                 CommentsSection(viewModel: viewModel)
+
+                Spacer(minLength: 32)
             }
         }
         .navigationTitle(recipe.title)
     }
 }
 
-// MARK: - Meta bar
+// MARK: - Shared ingredient row
 
-private struct SharedMetaBar: View {
-    let recipe: SharedRecipe
+private struct SharedIngredientRow: View {
+    let ing: SharedIngredient
     @Bindable var viewModel: SharedRecipeDetailViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let author = recipe.authorDisplayName {
-                Label(author, systemImage: "person")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal)
-            }
-
-            if let desc = recipe.description {
-                Text(desc).font(.body).foregroundStyle(.secondary).padding(.horizontal)
-            }
-
-            HStack(spacing: 20) {
-                if let prep = recipe.prepTimeMinutes {
-                    LabeledContent("Prep", value: prep.timeDisplayString)
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "circle").foregroundStyle(.secondary).font(.title3)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(viewModel.scaledQty(for: ing)).fontWeight(.medium)
+                    Text(ing.name)
                 }
-                if let cook = recipe.cookTimeMinutes {
-                    LabeledContent("Cook", value: cook.timeDisplayString)
-                }
-                Spacer()
-            }
-            .font(.subheadline)
-            .padding(.horizontal)
-
-            // Yield adjuster
-            HStack {
-                Text("Yield").font(.subheadline)
-                Spacer()
-                HStack(spacing: 16) {
-                    Button { viewModel.adjustServings(delta: -1) } label: {
-                        Image(systemName: "minus.circle.fill").font(.title2)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(viewModel.selectedServings <= 1)
-
-                    Text(viewModel.yieldDisplay)
-                        .font(.headline)
-                        .frame(minWidth: 40)
-
-                    Button { viewModel.adjustServings(delta: 1) } label: {
-                        Image(systemName: "plus.circle.fill").font(.title2)
-                    }
-                    .buttonStyle(.plain)
+                .font(.body)
+                if ing.isOptional {
+                    Text("Optional").font(.caption).foregroundStyle(.tertiary)
                 }
             }
-            .padding(.horizontal)
+            Spacer()
         }
+        .padding(.horizontal, 16).padding(.vertical, 8)
     }
 }
 
-// MARK: - Section block
+// MARK: - Shared step row
 
-private struct SharedSectionBlock: View {
-    let section: SharedSection
-    let recipe: SharedRecipe
-    @Bindable var viewModel: SharedRecipeDetailViewModel
-
-    var sectionIngredients: [SharedIngredient] {
-        recipe.ingredients.filter { $0.sectionId == section.id }
-    }
-    var sectionSteps: [SharedStep] {
-        recipe.steps.filter { $0.sectionId == section.id }
-    }
+private struct SharedStepRow: View {
+    let instruction: String
+    let index: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(section.name)
-                .font(.title3).fontWeight(.semibold)
-                .padding(.horizontal).padding(.vertical, 8)
-
-            if !sectionIngredients.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Ingredients")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .padding(.horizontal).padding(.bottom, 4)
-                    ForEach(sectionIngredients) { ing in
-                        HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: "circle").foregroundStyle(.secondary).font(.title3)
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    Text(viewModel.scaledQty(for: ing)).fontWeight(.medium)
-                                    Text(ing.name)
-                                }
-                                if ing.isOptional {
-                                    Text("Optional").font(.caption).foregroundStyle(.tertiary)
-                                }
-                            }
-                            Spacer()
-                        }
-                        .padding(.horizontal).padding(.vertical, 8)
-                    }
-                }
-                .padding(.bottom, 12)
+        HStack(alignment: .top, spacing: 14) {
+            ZStack {
+                Circle().fill(Color.accentColor.opacity(0.15)).frame(width: 32, height: 32)
+                Text("\(index)").font(.headline).foregroundStyle(Color.accentColor)
             }
-
-            if !sectionSteps.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Steps")
-                        .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
-                    ForEach(Array(sectionSteps.enumerated()), id: \.element.id) { idx, step in
-                        HStack(alignment: .top, spacing: 14) {
-                            ZStack {
-                                Circle().fill(Color.accentColor.opacity(0.15)).frame(width: 32, height: 32)
-                                Text("\(idx + 1)").font(.headline).foregroundStyle(Color.accentColor)
-                            }
-                            .padding(.top, 2)
-                            Text(step.instruction).font(.body).fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.horizontal)
-                    }
-                }
-                .padding(.bottom, 16)
-            }
+            .padding(.top, 2)
+            Text(instruction).font(.body).fixedSize(horizontal: false, vertical: true)
+            Spacer()
         }
+        .padding(.horizontal, 16).padding(.vertical, 8)
     }
 }
 

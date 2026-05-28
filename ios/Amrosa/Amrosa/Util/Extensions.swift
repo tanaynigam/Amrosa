@@ -36,6 +36,14 @@ extension Int {
     }
 }
 
+extension Array where Element: Hashable {
+    /// Returns the array with duplicates removed, preserving original order.
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
+    }
+}
+
 extension View {
     func amrosaCard() -> some View {
         self
