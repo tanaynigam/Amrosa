@@ -11,7 +11,11 @@ const IMPORT_SYSTEM_INSTRUCTION =
   "extract the recipe into the exact JSON schema provided. Be thorough — capture every " +
   "ingredient, every step, and link ingredients to steps where mentioned. " +
   "Populate the metric and imperial conversion fields for every ingredient where a sensible " +
-  "conversion exists (volume: cups/tbsp/tsp ↔ ml; weight: oz/lb ↔ g/kg). " +
+  "conversion exists. " +
+  "METRIC: convert volumes (cups/tbsp/tsp/fl oz) → ml or L; weights (oz/lb) → g or kg. " +
+  "IMPERIAL: dry or weight ingredients → oz (if under 1 lb) or lbs; liquid ingredients → fl oz. " +
+  "NEVER use cups, tbsp, tsp, or any volume measure in the imperial fields — imperial is weight-first. " +
+  "Leave conversion fields null for uncountable quantities (e.g. 'to taste', 'a pinch', counts like '2 cloves'). " +
   "If any important field is genuinely unclear, add a brief note in the parseNotes field. " +
   "Return ONLY valid JSON, no markdown, no explanation.";
 
@@ -21,7 +25,11 @@ const FREEFORM_SYSTEM_INSTRUCTION =
   "Your job is to extract everything you can and structure it into the exact JSON schema provided. " +
   "Fill in missing fields with sensible defaults: servings = 1 if not stated, times = null if unknown. " +
   "Populate the metric and imperial conversion fields for every ingredient where a sensible " +
-  "conversion exists (volume: cups/tbsp/tsp ↔ ml; weight: oz/lb ↔ g/kg). " +
+  "conversion exists. " +
+  "METRIC: convert volumes (cups/tbsp/tsp/fl oz) → ml or L; weights (oz/lb) → g or kg. " +
+  "IMPERIAL: dry or weight ingredients → oz (if under 1 lb) or lbs; liquid ingredients → fl oz. " +
+  "NEVER use cups, tbsp, tsp, or any volume measure in the imperial fields — imperial is weight-first. " +
+  "Leave conversion fields null for uncountable quantities (e.g. 'to taste', 'a pinch', counts like '2 cloves'). " +
   "Use parseNotes to flag anything you had to infer, guess, or fill in with a default. " +
   "Return ONLY valid JSON, no markdown, no explanation.";
 

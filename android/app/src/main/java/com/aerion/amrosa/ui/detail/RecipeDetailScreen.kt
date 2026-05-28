@@ -611,9 +611,9 @@ fun RecipeDetailScreen(
             text = {
                 Text(
                     if (isPublic)
-                        "This recipe will be removed from the Shared tab. Existing comments will be preserved if you make it public again."
+                        "This recipe will no longer be accessible via share link. Existing comments will be preserved if you make it public again."
                     else
-                        "This recipe will be visible to anyone with the link. You can make it private again at any time."
+                        "This recipe will be accessible to anyone with the share link. You can make it private again at any time."
                 )
             },
             confirmButton = {
