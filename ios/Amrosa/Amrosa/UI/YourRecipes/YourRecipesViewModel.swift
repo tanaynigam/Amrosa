@@ -55,8 +55,14 @@ final class YourRecipesViewModel {
 
     func load() {
         do {
-            let all = try repository.fetchAllRecipes()
-            recipes = all.filter { $0.isCustomized || $0.isImported || $0.authorId != nil }
+            // Show all recipes that belong to the user:
+            // - seeded/personal (authorId nil = pre-auth seeded, counts as yours)
+            // - any recipe the user created or imported
+            // Exclude only recipes from other users' shared copies
+            // (authorId != nil && authorId != currentUid would exclude those,
+            // but since we never store other users' shared recipes in local SwiftData
+            // except as copies with currentUid, showing all local recipes is correct)
+            recipes = try repository.fetchAllRecipes()
         } catch {
             errorMessage = error.localizedDescription
         }

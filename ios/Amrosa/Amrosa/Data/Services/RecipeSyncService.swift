@@ -65,6 +65,7 @@ final class RecipeSyncService {
     func pushPersonalRecipe(_ recipe: RecipeModel) async {
         guard let uid = authRepository.uid else { return }
 
+        // Use Int64 milliseconds — not Firestore Timestamp — so Android can read as Long
         var data: [String: Any] = [
             "id": recipe.id,
             "title": recipe.title,
@@ -74,8 +75,9 @@ final class RecipeSyncService {
             "needsReview": recipe.needsReview,
             "version": recipe.version,
             "visibility": recipe.visibility,
-            "updatedAt": Timestamp(date: recipe.updatedAt),
-            "createdAt": Timestamp(date: recipe.createdAt)
+            "scaleStep": recipe.scaleStep,
+            "updatedAt": Int64(recipe.updatedAt.timeIntervalSince1970 * 1000),
+            "createdAt": Int64(recipe.createdAt.timeIntervalSince1970 * 1000)
         ]
         if let v = recipe.recipeDescription { data["description"] = v }
         if let v = recipe.prepTimeMinutes   { data["prepTimeMinutes"] = v }
@@ -111,6 +113,7 @@ final class RecipeSyncService {
             if let v = ing.quantityDisplay     { d["quantityDisplay"] = v }
             if let v = ing.groupLabel          { d["groupLabel"] = v }
             if let v = ing.substituteGroupId   { d["substituteGroupId"] = v }
+            d["substituteRatio"] = ing.substituteRatio
             if let v = ing.quantityValueMetric   { d["quantityValueMetric"] = v }
             if let v = ing.quantityUnitMetric    { d["quantityUnitMetric"] = v }
             if let v = ing.quantityDisplayMetric { d["quantityDisplayMetric"] = v }
@@ -131,6 +134,19 @@ final class RecipeSyncService {
             if let v = step.section?.id { d["sectionId"] = v }
             return d
         }
+
+        // Push stepIngredientRefs as a top-level array (same format as Android)
+        let refs = recipe.steps.flatMap { step in
+            step.ingredientRefs.map { ref -> [String: Any] in
+                var d: [String: Any] = [
+                    "stepId": step.id,
+                    "ingredientId": ref.ingredient?.id ?? ""
+                ]
+                if let v = ref.quantityDisplay { d["quantityDisplay"] = v }
+                return d
+            }
+        }
+        data["stepIngredientRefs"] = refs
 
         let docRef = db.collection("personal_recipes").document(uid).collection("recipes").document(recipe.id)
         try? await docRef.setData(data)
