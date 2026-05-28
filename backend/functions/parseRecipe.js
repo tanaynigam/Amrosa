@@ -56,7 +56,11 @@ async function parseRecipeFromUrl(url, apiKey) {
     sourceHint = `Google Docs: ${url}`;
   } else {
     const html = await fetchPage(url);
-    content = cleanHtml(html);
+    // Extract JSON-LD BEFORE cleaning — cleanHtml strips <script> tags
+    const jsonLd = extractJsonLdRecipe(html);
+    content = jsonLd
+      ? `Structured recipe data (JSON-LD schema.org/Recipe):\n${jsonLd}`
+      : cleanHtml(html);
     sourceHint = url;
   }
 
@@ -67,7 +71,7 @@ async function parseRecipeFromUrl(url, apiKey) {
     );
   }
 
-  const recipe = await callGemini(content, sourceHint, apiKey, IMPORT_SYSTEM_INSTRUCTION);
+  const recipe = await callGemini(geminiContent, sourceHint, apiKey, IMPORT_SYSTEM_INSTRUCTION);
   validateRecipe(recipe);
 
   // Ensure the original URL is captured in sourceUrls
@@ -219,26 +223,85 @@ function parseXlsxToText(base64String) {
   return sheetTexts.join("\n\n");
 }
 
+// ─── JSON-LD extraction ───────────────────────────────────────────────────────
+
+/**
+ * Attempts to extract a Recipe JSON-LD block from raw HTML.
+ * Most recipe sites embed structured data for Google rich snippets — this is
+ * much more reliable than scraping HTML, and works even on sites that otherwise
+ * block scrapers because it's part of the initial document response.
+ * Returns the JSON object as a formatted string, or null if none found.
+ */
+function extractJsonLdRecipe(html) {
+  const scriptRegex =
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = scriptRegex.exec(html)) !== null) {
+    try {
+      const raw = match[1].trim();
+      if (!raw) continue;
+      const data = JSON.parse(raw);
+      // Some sites wrap everything in a @graph array
+      const candidates = Array.isArray(data["@graph"])
+        ? data["@graph"]
+        : [data];
+      for (const item of candidates) {
+        const types = Array.isArray(item["@type"])
+          ? item["@type"]
+          : [item["@type"]];
+        if (types.includes("Recipe")) {
+          return JSON.stringify(item, null, 2);
+        }
+      }
+    } catch {
+      // Malformed JSON-LD — skip and try the next script block
+    }
+  }
+  return null;
+}
+
 // ─── HTML fetch + clean ───────────────────────────────────────────────────────
 
 async function fetchPage(url) {
   try {
     const response = await axios.get(url, {
-      timeout: 15000,
+      timeout: 20000,
       maxRedirects: 5,
+      decompress: true,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+        "Upgrade-Insecure-Requests": "1",
+        "sec-ch-ua":
+          '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "none",
+        "sec-fetch-user": "?1",
       },
     });
     return response.data;
   } catch (err) {
     if (err.response) {
-      throw new Error(`Failed to fetch URL (HTTP ${err.response.status})`);
+      const status = err.response.status;
+      if (status === 402 || status === 403) {
+        throw new Error(
+          `BLOCKED:${status}:This website blocks automated access. ` +
+          `Try copying the recipe text and using "Type it out" in the Personal tab instead.`
+        );
+      }
+      throw new Error(`Failed to fetch URL (HTTP ${status})`);
+    }
+    if (err.code === "ECONNREFUSED" || err.code === "ENOTFOUND") {
+      throw new Error(`Failed to fetch URL: Could not reach ${new URL(url).hostname}`);
     }
     throw new Error(`Failed to fetch URL: ${err.message}`);
   }

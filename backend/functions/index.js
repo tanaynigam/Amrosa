@@ -17,6 +17,11 @@ const geminiKey = defineSecret("GEMINI_API_KEY");
 
 function toHttpsError(err) {
   const msg = err.message || "";
+  // BLOCKED:4xx: errors come from fetchPage with a user-facing message already attached
+  if (msg.startsWith("BLOCKED:")) {
+    const userMsg = msg.split(":").slice(2).join(":");
+    return new HttpsError("failed-precondition", userMsg.trim());
+  }
   if (msg.includes("Failed to fetch URL")) return new HttpsError("not-found", msg);
   if (msg.includes("Could not extract"))   return new HttpsError("failed-precondition", msg);
   if (msg.includes("Please enter"))        return new HttpsError("invalid-argument", msg);
