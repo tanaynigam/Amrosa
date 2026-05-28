@@ -9,7 +9,7 @@ final class NotificationsViewModel {
     var isLoading: Bool = true
 
     private let socialRepository: SocialRepository
-    private var streamTask: Task<Void, Never>? = nil
+    nonisolated(unsafe) private var streamTask: Task<Void, Never>? = nil
 
     init(socialRepository: SocialRepository) {
         self.socialRepository = socialRepository
