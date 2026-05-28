@@ -33,10 +33,14 @@ targets:
         CFBundleDisplayName: Amrosa
         CFBundleVersion: "1"
         CFBundleShortVersionString: "1.0"
+        CFBundleIconName: AppIcon
         UILaunchScreen:
           UIColorName: ""
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationPortraitUpsideDown
