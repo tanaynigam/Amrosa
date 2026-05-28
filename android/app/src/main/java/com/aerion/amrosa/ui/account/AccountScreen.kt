@@ -20,19 +20,25 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.data.local.AmrosaDatabase
+import com.aerion.amrosa.domain.model.UserProfile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AccountScreen(onSignInClick: () -> Unit = {}) {
+fun AccountScreen(
+    onSignInClick: () -> Unit = {},
+    onNotificationsClick: () -> Unit = {},
+    onFindPeopleClick: () -> Unit = {}
+) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
     val viewModel: AccountViewModel = viewModel(
         factory = AccountViewModel.factory(
             authRepository = app.container.authRepository,
             repository = app.container.repository,
+            socialRepository = app.container.socialRepository,
             context = context
         )
     )
@@ -43,6 +49,28 @@ fun AccountScreen(onSignInClick: () -> Unit = {}) {
         topBar = {
             TopAppBar(
                 title = { Text("Account", style = MaterialTheme.typography.titleLarge) },
+                actions = {
+                    // Notification bell with unread badge
+                    BadgedBox(
+                        badge = {
+                            if (state.unreadNotificationCount > 0) {
+                                Badge {
+                                    Text(
+                                        if (state.unreadNotificationCount > 9) "9+"
+                                        else state.unreadNotificationCount.toString()
+                                    )
+                                }
+                            }
+                        }
+                    ) {
+                        IconButton(onClick = onNotificationsClick) {
+                            Icon(
+                                Icons.Default.Notifications,
+                                contentDescription = "Notifications"
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
@@ -161,6 +189,55 @@ fun AccountScreen(onSignInClick: () -> Unit = {}) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
+            // ── People ────────────────────────────────────────────────────────
+            if (!state.isAnonymous) {
+                AccountSectionHeader("People")
+
+                // Pending follow requests
+                if (state.pendingRequests.isNotEmpty()) {
+                    state.pendingRequests.forEach { requester ->
+                        PendingRequestCard(
+                            profile = requester,
+                            isActioning = state.pendingFollowAction == requester.uid,
+                            onAccept = { viewModel.acceptFollowRequest(requester) },
+                            onDecline = { viewModel.declineFollowRequest(requester) }
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+
+                // Following count
+                AccountRow("Following", "${state.followingCount}")
+
+                // Find People
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.PersonSearch,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    TextButton(
+                        onClick = onFindPeopleClick,
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text(
+                            "Find People to Follow",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+            }
+
             // ── Sync & Storage ────────────────────────────────────────────────
             AccountSectionHeader("Sync & Storage")
             AccountRow("Recipes on this device", "${state.recipeCount}")
@@ -218,6 +295,79 @@ fun AccountScreen(onSignInClick: () -> Unit = {}) {
                 TextButton(onClick = { showSignOutDialog = false }) { Text("Cancel") }
             }
         )
+    }
+}
+
+// ── Pending follow request card ───────────────────────────────────────────────
+
+@Composable
+private fun PendingRequestCard(
+    profile: UserProfile,
+    isActioning: Boolean,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Avatar initial
+            Surface(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape),
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        profile.displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    profile.displayName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "wants to follow you",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (isActioning) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+            } else {
+                IconButton(onClick = onAccept, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = "Accept",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                IconButton(onClick = onDecline, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Decline",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        }
     }
 }
 

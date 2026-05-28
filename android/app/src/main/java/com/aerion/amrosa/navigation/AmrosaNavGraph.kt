@@ -31,6 +31,9 @@ import com.aerion.amrosa.ui.home.RecipeFilter
 import com.aerion.amrosa.ui.import_recipe.ImportScreen
 import com.aerion.amrosa.ui.shared.SharedRecipeDetailScreen
 import com.aerion.amrosa.ui.shared.SharedScreen
+import com.aerion.amrosa.ui.social.NotificationsScreen
+import com.aerion.amrosa.ui.social.ReceivedRecipeScreen
+import com.aerion.amrosa.ui.social.UserSearchScreen
 
 private sealed class BottomTab(val route: String, val label: String, val icon: ImageVector) {
     data object All     : BottomTab("all_tab",    "All",           Icons.AutoMirrored.Filled.MenuBook)
@@ -58,8 +61,6 @@ fun AmrosaNavGraph() {
 
     if (!isSignedIn) {
         // ── Auth gate ─────────────────────────────────────────────────────────
-        // Shown as root — no back button, no top bar.
-        // Auth state change automatically recomposes this to the main app.
         AuthScreen()
     } else {
         // ── Main app ──────────────────────────────────────────────────────────
@@ -123,7 +124,7 @@ private fun MainAppScaffold() {
                 )
             }
 
-            // ── Tab: Your Recipes (personal + imported merged) ────────────────
+            // ── Tab: Your Recipes ─────────────────────────────────────────────
             composable(BottomTab.Yours.route) {
                 HomeScreen(
                     filter = RecipeFilter.YOURS,
@@ -144,8 +145,52 @@ private fun MainAppScaffold() {
 
             // ── Tab: Account ──────────────────────────────────────────────────
             composable(BottomTab.Account.route) {
-                // onSignInClick not needed — user is always signed in when this tab is visible
-                AccountScreen()
+                AccountScreen(
+                    onNotificationsClick = { navController.navigate("notifications") },
+                    onFindPeopleClick = { navController.navigate("user_search") }
+                )
+            }
+
+            // ── Notifications ─────────────────────────────────────────────────
+            composable("notifications") {
+                NotificationsScreen(
+                    onBack = { navController.popBackStack() },
+                    onFollowNotification = {
+                        // Navigate back to Account tab so the user can see/handle requests
+                        navController.navigate(BottomTab.Account.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    onRecipeShared = { shareId ->
+                        navController.navigate("received/$shareId")
+                    }
+                )
+            }
+
+            // ── User search / follow people ───────────────────────────────────
+            composable("user_search") {
+                UserSearchScreen(onBack = { navController.popBackStack() })
+            }
+
+            // ── Received recipe (shared directly to me) ───────────────────────
+            composable(
+                route = "received/{shareId}",
+                arguments = listOf(navArgument("shareId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val shareId = backStackEntry.arguments?.getString("shareId") ?: return@composable
+                ReceivedRecipeScreen(
+                    shareId = shareId,
+                    onBack = { navController.popBackStack() },
+                    onSaved = { newRecipeId ->
+                        // Pop the received screen then open the saved recipe detail
+                        navController.popBackStack()
+                        navController.navigate("recipe/$newRecipeId")
+                    }
+                )
             }
 
             // ── Freeform recipe entry ─────────────────────────────────────────
@@ -156,8 +201,7 @@ private fun MainAppScaffold() {
                 )
             }
 
-            // ── Import (push route) ───────────────────────────────────────────
-            // Optional reviewId: when present, auto-opens review sheet for that recipe
+            // ── Import ────────────────────────────────────────────────────────
             composable(
                 route = "import?reviewId={reviewId}",
                 arguments = listOf(

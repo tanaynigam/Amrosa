@@ -24,6 +24,8 @@ class AmrosaApplication : Application() {
                     container.seeder.seedIfNeeded()
                     container.syncService.sync()
                     container.syncService.syncPersonalRecipes()
+                    // Upsert public profile so other users can find / follow this user
+                    container.socialRepository.upsertProfile()
                 }
             }
         }

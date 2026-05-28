@@ -226,9 +226,10 @@ Comments are stored in Firestore only (`shared_recipes/{recipeId}/comments/{comm
 | `personal_recipes/{uid}/recipes/{recipeId}` | User's personal recipes — push on save, pull on sign-in |
 | `shared_recipes/{recipeId}` | Community-shared recipes (visibility = "public") |
 | `shared_recipes/{recipeId}/comments/{commentId}` | Comments on shared recipes |
-| `users/{uid}` | Public user profile — display name, photo URL, recipe count (planned F9) |
-| `friendships/{id}` | Friendship records — `id = [uid_a, uid_b].sorted().join("_")` (planned F9) |
-| `notifications/{uid}/items/{notifId}` | Per-user notifications — friend requests, accepted, recipe shares (planned F9) |
+| `users/{uid}` | Public user profile — displayName, photoUrl, updatedAt. Created/merged on each sign-in via `SocialRepository.upsertProfile()`. Used for user search. |
+| `follows/{followerId}_{followeeId}` | Follow relationship. Fields: followerId, followerName, followeeId, followeeName, status ("pending"\|"accepted"), createdAt. Composite indexes required: (followeeId, status) and (followerId, status). |
+| `notifications/{uid}/items/{notifId}` | Per-user notification inbox. Fields: type, fromUid, fromDisplayName, shareId?, recipeName?, createdAt, read. |
+| `shared_to/{recipientUid}/recipes/{shareId}` | Recipes shared directly to a specific user. Full recipe data + fromUid + fromDisplayName + sharedAt. Only the sender can write; only the recipient can read. |
 
 **Sync behaviour:**
 - **Pull sync** on app launch (if signed in): fetches `personal_recipes/{uid}/recipes/` where `updatedAt > lastSyncTimestamp`, upserts into Room.
@@ -903,12 +904,19 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F8 — Comments** | `Comment` domain model; post/delete; Firestore subcollection; delete by commenter or recipe owner |
 | **F8 — Security rules** | Full Firestore rules deployed; per-UID personal access; `shared_recipes` public read; comment create/delete moderation |
 | **Seeder disabled** | `seedIfNeeded()` is a no-op; fresh installs start blank |
+| **F9 — Follow system** | Request-and-accept following; `users/`, `follows/`, `notifications/`, `shared_to/` Firestore collections; `SocialRepository.kt`; `UserProfile` + `SocialNotification` domain models |
+| **F9 — User search** | `UserSearchScreen` + `UserSearchViewModel`; prefix search by display name; Follow/Unfollow/Requested states per user |
+| **F9 — Account tab social** | Pending follow requests inline with Accept/Decline; Following count; "Find People" link; Notification bell with unread badge |
+| **F9 — Notifications** | `NotificationsScreen` + `NotificationsViewModel`; live unread count stream; mark-as-read / mark-all-read; relative timestamp display |
+| **F9 — Direct recipe sharing** | "Send to follower" icon in Recipe Detail top bar (owners only); `FollowerPickerSheet` bottom sheet; stores full recipe data in `shared_to/{recipientUid}/recipes/{shareId}`; delivers `recipe_shared` notification to recipient |
+| **F9 — Received recipe** | `ReceivedRecipeScreen` + `ReceivedRecipeViewModel`; loads from `shared_to/{uid}/recipes/{shareId}`; shows sender name; read-only detail with scaling; "Save to My Recipes" → Room copy → navigate to saved recipe |
+| **F9 — Notification nav** | `follow_request` / `follow_accepted` → Account tab; `recipe_shared` → `received/{shareId}` route |
 
 ### Planned — In Priority Order
 
 | # | Feature | Description |
 |---|---|---|
-| **F9** | Friends & In-App Sharing | Friends list in Profile tab; search/add friends; send recipes directly to friends; notifications (friend_request, friend_accepted, recipe_shared); FCM push notifications |
+| — | FCM push notifications | Background push for `follow_request` / `recipe_shared` via Cloud Function triggered on Firestore write |
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil display |
 | — | Shopping List | Dedicated screen; add ingredients from recipe detail |
 | — | iOS gaps (see below) | Auth gate, sign-out data clear, Shared tab, share/visibility, comments, Universal Links |
@@ -1032,17 +1040,34 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 - **Auth gate**: `AmrosaNavGraph` collects `authStateFlow()`. `isSignedIn = currentUser?.isAnonymous == false`. When false → renders `AuthScreen()` (root, no back). When true → renders `MainAppScaffold()`.
 - **MainAppScaffold** is a separate private composable with its own `rememberNavController()`. Created fresh on each sign-in.
 - Tab routes: `"all_tab"`, `"yours_tab"`, `"shared_tab"`, `"account_tab"`
-- Push routes: `"recipe/{recipeId}"`, `"recipe/edit/{recipeId}"`, `"shared/{recipeId}"`, `"freeform"`, `"import?reviewId={reviewId}"`
+- Push routes: `"recipe/{recipeId}"`, `"recipe/edit/{recipeId}"`, `"shared/{recipeId}"`, `"freeform"`, `"import?reviewId={reviewId}"`, `"notifications"`, `"user_search"`, `"received/{shareId}"`
 - The `"auth"` route is **removed** from the nav graph — auth is handled at the outer `AmrosaNavGraph` level.
 - Import route uses optional query param `reviewId`; default empty string, treated as null in screen.
 - `showBottomBar` is true only when `currentDestination?.route` is one of the 4 tab routes.
 - Deep link `amrosa://shared/{recipeId}` is registered on the `"shared/{recipeId}"` composable via `navDeepLink`.
+- `"received/{shareId}"` loads from `shared_to/{uid}/recipes/{shareId}` via `SocialRepository.getReceivedRecipe()`.
+- `"notifications"` tapping a follow notification navigates to `account_tab`; recipe_shared navigates to `received/{shareId}`.
 
 ### Auth Patterns
 - Anonymous auth removed. Do not call `signInAnonymouslyIfNeeded()` — it exists in `AuthRepository` for compat but is never called.
 - Sign-out flow: always call `container.clearAllLocalData(context)` before `authRepository.signOut()`.
 - Push sync: only runs for `!authRepository.isAnonymous` users.
 - On sign-in: `AmrosaApplication.authStateFlow` observer automatically triggers seed + sync.
+
+### Social / Follow System (F9)
+- **`SocialRepository`** in `data/remote/SocialRepository.kt` — all Firestore ops for users, follows, notifications, shared_to.
+- **`UserProfile`** domain model — uid, displayName, photoUrl, createdAt.
+- **`SocialNotification`** domain model — id, type, fromUid, fromDisplayName, shareId?, recipeName?, createdAt, read.
+- **`upsertProfile()`** is called in `AmrosaApplication.authStateFlow` on every real sign-in.
+- **Follow doc ID** = `{followerId}_{followeeId}`. Composite Firestore indexes needed:
+  - `follows (followeeId ASC, status ASC)` — for pending requests query
+  - `follows (followerId ASC, status ASC)` — for following list query
+  Firestore will log the index creation URL on first query; click it.
+- **Notification delivery** = write to `notifications/{toUid}/items/{uuid}`. Done client-side; no Cloud Function required.
+- **Direct share** stores full recipe JSON in `shared_to/{recipientUid}/recipes/{shareId}` and delivers a `recipe_shared` notification. The recipient opens `ReceivedRecipeScreen` which loads from that path.
+- **`ReceivedRecipeViewModel.saveToMyRecipes()`** creates a fresh Room copy (new UUIDs) with `authorId = currentUid`, `isImported = false`, `visibility = "private"`.
+- **Notification bell badge** on Account tab top bar uses `SocialRepository.getUnreadCountFlow()`.
+- **Pending follow requests** shown inline in AccountScreen as cards with Accept/Decline buttons.
 
 ### AppContainer
 - `clearAllLocalData(context: Context)` — `database.clearAllTables()` + clears `amrosa_sync` prefs. Called on sign-out.
