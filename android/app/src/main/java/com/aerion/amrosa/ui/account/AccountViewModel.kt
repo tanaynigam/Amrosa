@@ -30,7 +30,9 @@ data class AccountUiState(
     val followingCount: Int = 0,
     val unreadNotificationCount: Int = 0,
     /** uid of pending accept/decline action. */
-    val pendingFollowAction: String? = null
+    val pendingFollowAction: String? = null,
+    /** Non-null for one snackbar display after a successful name update. */
+    val nameUpdateMessage: String? = null
 )
 
 class AccountViewModel(
@@ -103,6 +105,28 @@ class AccountViewModel(
                 )
             }
         }
+    }
+
+    /**
+     * Update the Firebase display name then re-sync the public user profile.
+     * Shows a snackbar message on success.
+     */
+    fun updateDisplayName(name: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            try {
+                authRepository.updateDisplayName(name)
+                socialRepository.upsertProfile()
+                // Reload user so the profile card reflects the new name
+                _uiState.update { it.copy(user = authRepository.currentUser, nameUpdateMessage = "Name updated") }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(nameUpdateMessage = "Failed to update name") }
+            }
+        }
+    }
+
+    fun clearNameUpdateMessage() {
+        _uiState.update { it.copy(nameUpdateMessage = null) }
     }
 
     fun signOut() {

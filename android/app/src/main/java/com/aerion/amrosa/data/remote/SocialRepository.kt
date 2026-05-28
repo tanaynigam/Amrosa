@@ -49,12 +49,15 @@ class SocialRepository(
         val user = authRepository.currentUser ?: return
         if (user.isAnonymous) return
         try {
+            val data = mutableMapOf<String, Any?>(
+                "displayName" to (user.displayName ?: user.email ?: "User"),
+                "photoUrl" to user.photoUrl?.toString(),
+                "updatedAt" to System.currentTimeMillis()
+            )
+            // Store email so users can be searched by email address
+            user.email?.let { data["email"] = it }
             firestore.collection(COL_USERS).document(user.uid).set(
-                mapOf(
-                    "displayName" to (user.displayName ?: user.email ?: "User"),
-                    "photoUrl" to user.photoUrl?.toString(),
-                    "updatedAt" to System.currentTimeMillis()
-                ),
+                data,
                 SetOptions.merge()
             ).await()
         } catch (e: Exception) {
@@ -369,6 +372,38 @@ class SocialRepository(
             Log.e(TAG, "shareRecipeTo failed", e)
             null
         }
+    }
+
+    /**
+     * Live stream of recipe summaries shared directly to the current user.
+     * Ordered by sharedAt descending. Each item contains enough info to render a list card.
+     */
+    fun getReceivedRecipesSummaryFlow(): Flow<List<ReceivedRecipeSummary>> = callbackFlow {
+        val uid = authRepository.uid
+        if (uid == null) { trySend(emptyList()); close(); return@callbackFlow }
+        var reg: ListenerRegistration? = null
+        reg = firestore.collection(COL_SHARED_TO)
+            .document(uid)
+            .collection("recipes")
+            .orderBy("sharedAt", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "getReceivedRecipesSummaryFlow error", error)
+                    trySend(emptyList())
+                    return@addSnapshotListener
+                }
+                val summaries = snapshot?.documents?.mapNotNull { doc ->
+                    val data = doc.data ?: return@mapNotNull null
+                    ReceivedRecipeSummary(
+                        shareId = doc.id,
+                        title = data["title"] as? String ?: "Untitled",
+                        fromDisplayName = data["fromDisplayName"] as? String ?: "Someone",
+                        sharedAt = (data["sharedAt"] as? Number)?.toLong() ?: 0L
+                    )
+                } ?: emptyList()
+                trySend(summaries)
+            }
+        awaitClose { reg?.remove() }
     }
 
     /**
