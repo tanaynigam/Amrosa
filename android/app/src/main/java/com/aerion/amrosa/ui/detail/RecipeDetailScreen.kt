@@ -18,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -48,6 +49,7 @@ fun RecipeDetailScreen(
             repository = app.container.repository,
             authRepository = app.container.authRepository,
             sharedRecipeService = app.container.sharedRecipeService,
+            socialRepository = app.container.socialRepository,
             recipeId = recipeId
         )
     )
@@ -60,6 +62,16 @@ fun RecipeDetailScreen(
     var commentText by remember { mutableStateOf("") }
     // Set to true after "make public" is confirmed — opens share sheet once publish completes
     var pendingShareAfterPublish by remember { mutableStateOf(false) }
+    // Follower picker sheet
+    var showFollowerPicker by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Show snackbar when a recipe is sent successfully
+    LaunchedEffect(state.shareSentToName) {
+        state.shareSentToName?.let { name ->
+            snackbarHostState.showSnackbar("Recipe sent to $name")
+        }
+    }
 
     // Helper: fire the Android share sheet for this recipe's deep link
     val openShareSheet: () -> Unit = {
@@ -89,6 +101,7 @@ fun RecipeDetailScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(state.recipe?.title ?: "", maxLines = 1) },
@@ -100,20 +113,31 @@ fun RecipeDetailScreen(
                 actions = {
                     // Share button — owners only
                     if (state.isOwner) {
+                        // Send directly to a follower
+                        IconButton(
+                            onClick = {
+                                viewModel.loadFollowing()
+                                showFollowerPicker = true
+                            }
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Send to follower"
+                            )
+                        }
+                        // Share public link
                         IconButton(
                             onClick = {
                                 if (state.isPublic) {
-                                    // Already public — just open share sheet
                                     openShareSheet()
                                 } else {
-                                    // Private — show "make public" dialog first
                                     showVisibilityDialog = true
                                 }
                             },
                             enabled = !state.isVisibilityUpdating
                         ) {
                             Icon(
-                                if (state.isPublic) Icons.Default.Share else Icons.Default.Share,
+                                Icons.Default.Share,
                                 contentDescription = "Share recipe",
                                 tint = if (state.isPublic) MaterialTheme.colorScheme.primary
                                        else LocalContentColor.current
@@ -626,6 +650,103 @@ fun RecipeDetailScreen(
                 TextButton(onClick = { showVisibilityDialog = false }) { Text("Cancel") }
             }
         )
+    }
+
+    // ── Follower picker bottom sheet ──────────────────────────────────────────
+    if (showFollowerPicker) {
+        FollowerPickerSheet(
+            following = state.following,
+            isLoading = state.isFollowingLoading,
+            onDismiss = { showFollowerPicker = false },
+            onSend = { uid, name ->
+                viewModel.shareToFollower(uid, name)
+                showFollowerPicker = false
+            }
+        )
+    }
+}
+
+// ── Follower picker sheet ─────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FollowerPickerSheet(
+    following: List<com.aerion.amrosa.domain.model.UserProfile>,
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+    onSend: (uid: String, name: String) -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+        ) {
+            Text(
+                "Send to a Follower",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+            )
+            HorizontalDivider()
+
+            if (isLoading) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(40.dp),
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator() }
+            } else if (following.isEmpty()) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(40.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "You're not following anyone yet.\nFind people from the Account tab.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            } else {
+                following.forEach { user ->
+                    ListItem(
+                        headlineContent = { Text(user.displayName) },
+                        leadingContent = {
+                            Surface(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        user.displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                        },
+                        trailingContent = {
+                            IconButton(onClick = { onSend(user.uid, user.displayName) }) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Send to ${user.displayName}",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        },
+                        modifier = Modifier.clickable { onSend(user.uid, user.displayName) }
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+        }
     }
 }
 

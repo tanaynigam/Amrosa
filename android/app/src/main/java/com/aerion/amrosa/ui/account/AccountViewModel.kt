@@ -6,7 +6,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.data.auth.AuthRepository
+import com.aerion.amrosa.data.remote.SocialRepository
 import com.aerion.amrosa.data.repository.RecipeRepository
+import com.aerion.amrosa.domain.model.UserProfile
 import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,12 +24,19 @@ data class AccountUiState(
     val isSigningIn: Boolean = false,
     val signInError: String? = null,
     val recipeCount: Int = 0,
-    val lastSyncTimestamp: Long = 0L
+    val lastSyncTimestamp: Long = 0L,
+    // Social
+    val pendingRequests: List<UserProfile> = emptyList(),
+    val followingCount: Int = 0,
+    val unreadNotificationCount: Int = 0,
+    /** uid of pending accept/decline action. */
+    val pendingFollowAction: String? = null
 )
 
 class AccountViewModel(
     private val authRepository: AuthRepository,
     private val repository: RecipeRepository,
+    private val socialRepository: SocialRepository,
     private val context: Context
 ) : ViewModel() {
 
@@ -35,19 +44,54 @@ class AccountViewModel(
     val uiState: StateFlow<AccountUiState> = _uiState.asStateFlow()
 
     init {
-        // Reflect auth state changes in real-time
         viewModelScope.launch {
             authRepository.authStateFlow().collect { user ->
-                _uiState.update { it.copy(
-                    user = user,
-                    isAnonymous = user?.isAnonymous != false
-                )}
+                _uiState.update {
+                    it.copy(
+                        user = user,
+                        isAnonymous = user?.isAnonymous != false
+                    )
+                }
             }
         }
         loadStats()
+        observeSocial()
     }
 
-    /** Called when Google Sign-In returns a token from the launcher. */
+    private fun observeSocial() {
+        viewModelScope.launch {
+            socialRepository.getPendingRequestsFlow().collect { requests ->
+                _uiState.update { it.copy(pendingRequests = requests) }
+            }
+        }
+        viewModelScope.launch {
+            socialRepository.getFollowingFlow().collect { following ->
+                _uiState.update { it.copy(followingCount = following.size) }
+            }
+        }
+        viewModelScope.launch {
+            socialRepository.getUnreadCountFlow().collect { count ->
+                _uiState.update { it.copy(unreadNotificationCount = count) }
+            }
+        }
+    }
+
+    fun acceptFollowRequest(profile: UserProfile) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(pendingFollowAction = profile.uid) }
+            socialRepository.acceptFollowRequest(profile.uid)
+            _uiState.update { it.copy(pendingFollowAction = null) }
+        }
+    }
+
+    fun declineFollowRequest(profile: UserProfile) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(pendingFollowAction = profile.uid) }
+            socialRepository.declineFollowRequest(profile.uid)
+            _uiState.update { it.copy(pendingFollowAction = null) }
+        }
+    }
+
     fun signInWithGoogle(idToken: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isSigningIn = true, signInError = null) }
@@ -63,13 +107,11 @@ class AccountViewModel(
 
     fun signOut() {
         viewModelScope.launch {
-            // Wipe all local data first so the next user starts clean
             val app = context.applicationContext as AmrosaApplication
             withContext(Dispatchers.IO) {
                 app.container.clearAllLocalData(context)
             }
             authRepository.signOut()
-            // Auth state change triggers AmrosaNavGraph to show AuthScreen automatically
         }
     }
 
@@ -81,10 +123,12 @@ class AccountViewModel(
         viewModelScope.launch {
             val count = withContext(Dispatchers.IO) { repository.count() }
             val syncPrefs = context.getSharedPreferences("amrosa_sync", Context.MODE_PRIVATE)
-            _uiState.update { it.copy(
-                recipeCount = count,
-                lastSyncTimestamp = syncPrefs.getLong("last_sync_timestamp", 0L)
-            )}
+            _uiState.update {
+                it.copy(
+                    recipeCount = count,
+                    lastSyncTimestamp = syncPrefs.getLong("last_sync_timestamp", 0L)
+                )
+            }
         }
     }
 
@@ -92,11 +136,12 @@ class AccountViewModel(
         fun factory(
             authRepository: AuthRepository,
             repository: RecipeRepository,
+            socialRepository: SocialRepository,
             context: Context
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                AccountViewModel(authRepository, repository, context) as T
+                AccountViewModel(authRepository, repository, socialRepository, context) as T
         }
     }
 }

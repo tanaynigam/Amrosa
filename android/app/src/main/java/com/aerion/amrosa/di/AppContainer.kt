@@ -7,6 +7,7 @@ import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.AmrosaDatabase
 import com.aerion.amrosa.data.remote.RecipeSyncService
 import com.aerion.amrosa.data.remote.SharedRecipeService
+import com.aerion.amrosa.data.remote.SocialRepository
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
@@ -43,4 +44,5 @@ class AppContainer(context: Context) {
     val seeder = DatabaseSeeder(context, repository, gson)
     val syncService = RecipeSyncService(context, repository, authRepository, gson)
     val sharedRecipeService = SharedRecipeService(authRepository, gson)
+    val socialRepository = SocialRepository(authRepository)
 }

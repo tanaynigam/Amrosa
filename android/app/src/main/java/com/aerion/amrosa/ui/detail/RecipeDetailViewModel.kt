@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.entity.RecipeNoteEntity
 import com.aerion.amrosa.data.remote.SharedRecipeService
+import com.aerion.amrosa.data.remote.SocialRepository
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.domain.model.*
 import kotlinx.coroutines.Job
@@ -27,6 +28,11 @@ data class RecipeDetailUiState(
     // Comments (populated when recipe is public)
     val comments: List<Comment> = emptyList(),
     val isVisibilityUpdating: Boolean = false,
+    // Direct sharing to follower
+    val following: List<UserProfile> = emptyList(),
+    val isFollowingLoading: Boolean = false,
+    /** Non-null for one compose frame after a successful direct share. */
+    val shareSentToName: String? = null,
 ) {
     val isPublic: Boolean get() = recipe?.visibility == "public"
 
@@ -89,6 +95,7 @@ class RecipeDetailViewModel(
     private val repository: RecipeRepository,
     private val authRepository: AuthRepository,
     private val sharedRecipeService: SharedRecipeService,
+    private val socialRepository: SocialRepository,
     private val recipeId: String
 ) : ViewModel() {
 
@@ -263,17 +270,43 @@ class RecipeDetailViewModel(
         viewModelScope.launch { repository.deleteNote(noteId) }
     }
 
+    // ── Direct sharing ────────────────────────────────────────────────────────
+
+    /** Load accepted following list for the follower picker sheet. */
+    fun loadFollowing() {
+        if (_uiState.value.following.isNotEmpty() || _uiState.value.isFollowingLoading) return
+        _uiState.update { it.copy(isFollowingLoading = true) }
+        viewModelScope.launch {
+            socialRepository.getFollowingFlow().collect { following ->
+                _uiState.update { it.copy(following = following, isFollowingLoading = false) }
+            }
+        }
+    }
+
+    /** Share this recipe directly to a follower. */
+    fun shareToFollower(recipientUid: String, recipientName: String) {
+        val recipe = _uiState.value.recipe ?: return
+        viewModelScope.launch {
+            socialRepository.shareRecipeTo(recipientUid, recipe)
+            _uiState.update { it.copy(shareSentToName = recipientName) }
+            // Clear the toast after one frame
+            kotlinx.coroutines.delay(3000)
+            _uiState.update { it.copy(shareSentToName = null) }
+        }
+    }
+
     companion object {
         fun factory(
             repository: RecipeRepository,
             authRepository: AuthRepository,
             sharedRecipeService: SharedRecipeService,
+            socialRepository: SocialRepository,
             recipeId: String
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    RecipeDetailViewModel(repository, authRepository, sharedRecipeService, recipeId) as T
+                    RecipeDetailViewModel(repository, authRepository, sharedRecipeService, socialRepository, recipeId) as T
             }
     }
 }

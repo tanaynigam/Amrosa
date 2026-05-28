@@ -4,8 +4,8 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ── Shared / seeded recipes ─────────────────────────────────────────────
-    // Read-only for any authenticated user (anonymous or named).
-    // Only writable via the Firebase Admin SDK (backend scripts, Cloud Functions).
+    // Read-only for any authenticated user.
+    // Only writable via Firebase Admin SDK (backend scripts, Cloud Functions).
     match /recipes/{recipeId} {
       allow read: if request.auth != null;
       allow write: if false;
@@ -13,17 +13,15 @@ service cloud.firestore {
 
     // ── Personal recipes ────────────────────────────────────────────────────
     // Each user's recipes at personal_recipes/{uid}/recipes/{recipeId}.
-    // Only the owner can read or write their own subcollection.
+    // Only the owner can read or write.
     match /personal_recipes/{uid}/recipes/{recipeId} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 
     // ── Shared (public) recipes ─────────────────────────────────────────────
-    // Publicly readable — these are intentionally shared recipes.
-    // Only the recipe's author (authorId field) can create, update, or delete
-    // the recipe document itself.
+    // Publicly readable. Only the recipe's author can create, update, or delete.
     match /shared_recipes/{recipeId} {
-      allow read: if true;  // public recipes are public — readable by anyone (web + app)
+      allow read: if true;  // public — readable by anyone (web + app)
 
       allow create: if request.auth != null
         && request.auth.uid == request.resource.data.authorId;
@@ -35,10 +33,6 @@ service cloud.firestore {
         && request.auth.uid == resource.data.authorId;
 
       // ── Comments ──────────────────────────────────────────────────────────
-      // Any authenticated (non-anonymous) user may read or add comments.
-      // Delete is allowed for:
-      //   • the commenter (their own comment)
-      //   • the recipe author (any comment on their recipe)
       match /comments/{commentId} {
         allow read: if request.auth != null;
 
@@ -54,8 +48,70 @@ service cloud.firestore {
           request.auth.uid == get(/databases/$(database)/documents/shared_recipes/$(recipeId)).data.authorId
         );
 
-        allow update: if false; // Comments are immutable once posted
+        allow update: if false; // comments are immutable once posted
       }
+    }
+
+    // ── Public user profiles ────────────────────────────────────────────────
+    // Readable by any signed-in user (for search + follow).
+    // Only the profile owner can write their own document.
+    match /users/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ── Follow relationships ────────────────────────────────────────────────
+    // Document ID = {followerId}_{followeeId}.
+    //
+    // Create: the followerId field must match the requester's UID.
+    // Update: only the followee can update (to accept/reject).
+    // Delete: either party can remove the follow.
+    //
+    // Required composite indexes (create via Firestore console or the emitted error URL):
+    //   Collection: follows  Fields: followeeId ASC, status ASC
+    //   Collection: follows  Fields: followerId ASC, status ASC
+    match /follows/{followId} {
+      allow read: if request.auth != null
+        && (request.auth.uid == resource.data.followerId
+            || request.auth.uid == resource.data.followeeId);
+
+      allow create: if request.auth != null
+        && request.auth.uid == request.resource.data.followerId;
+
+      allow update: if request.auth != null
+        && request.auth.uid == resource.data.followeeId;
+
+      allow delete: if request.auth != null
+        && (request.auth.uid == resource.data.followerId
+            || request.auth.uid == resource.data.followeeId);
+    }
+
+    // ── Per-user notification inbox ─────────────────────────────────────────
+    // Only the inbox owner can read or mark-as-read their own items.
+    // Any signed-in user may write a notification TO someone else.
+    //   (delivery = write to someone else's inbox)
+    match /notifications/{uid}/items/{notifId} {
+      allow read, update: if request.auth != null && request.auth.uid == uid;
+
+      allow create: if request.auth != null
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.type in ['follow_request', 'follow_accepted', 'recipe_shared'];
+
+      allow delete: if false; // notifications are never deleted by the client
+    }
+
+    // ── Directly shared recipes ─────────────────────────────────────────────
+    // A recipe shared privately to a specific user.
+    // Sender can create; recipient can read.
+    match /shared_to/{recipientUid}/recipes/{shareId} {
+      allow read: if request.auth != null && request.auth.uid == recipientUid;
+
+      allow create: if request.auth != null
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.fromUid == request.auth.uid;
+
+      allow update, delete: if false; // shared recipes are immutable
     }
 
     // ── Deny everything else ────────────────────────────────────────────────
