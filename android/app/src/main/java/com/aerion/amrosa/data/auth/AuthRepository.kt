@@ -115,6 +115,20 @@ class AuthRepository {
         authResult.user!!
     }
 
+    // ─── Profile update ───────────────────────────────────────────────────────
+
+    /**
+     * Update the display name on the current Firebase user profile.
+     * Throws if the user is not signed in or the update fails.
+     */
+    suspend fun updateDisplayName(name: String) {
+        val user = auth.currentUser ?: return
+        val profileUpdate = UserProfileChangeRequest.Builder()
+            .setDisplayName(name.trim())
+            .build()
+        user.updateProfile(profileUpdate).await()
+    }
+
     // ─── Sign-out ─────────────────────────────────────────────────────────────
 
     /** Signs out the current user. Anonymous sessions are discarded. */

@@ -2,10 +2,10 @@ package com.aerion.amrosa.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -24,28 +24,29 @@ import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.ui.account.AccountScreen
 import com.aerion.amrosa.ui.auth.AuthScreen
 import com.aerion.amrosa.ui.detail.RecipeDetailScreen
+import com.aerion.amrosa.ui.discover.DiscoverScreen
 import com.aerion.amrosa.ui.edit.RecipeEditorScreen
 import com.aerion.amrosa.ui.freeform.FreeformEntryScreen
 import com.aerion.amrosa.ui.home.HomeScreen
 import com.aerion.amrosa.ui.home.RecipeFilter
 import com.aerion.amrosa.ui.import_recipe.ImportScreen
 import com.aerion.amrosa.ui.shared.SharedRecipeDetailScreen
-import com.aerion.amrosa.ui.shared.SharedScreen
 import com.aerion.amrosa.ui.social.NotificationsScreen
 import com.aerion.amrosa.ui.social.ReceivedRecipeScreen
+import com.aerion.amrosa.ui.social.SharedInboxScreen
 import com.aerion.amrosa.ui.social.UserSearchScreen
 
 private sealed class BottomTab(val route: String, val label: String, val icon: ImageVector) {
-    data object All     : BottomTab("all_tab",    "All",           Icons.AutoMirrored.Filled.MenuBook)
-    data object Yours   : BottomTab("yours_tab",  "Your Recipes",  Icons.Default.Bookmarks)
-    data object Shared  : BottomTab("shared_tab", "Shared",        Icons.Default.Public)
-    data object Account : BottomTab("account_tab","Account",       Icons.Default.Person)
+    data object Yours    : BottomTab("yours_tab",    "Your Recipes", Icons.Default.Bookmarks)
+    data object Shared   : BottomTab("shared_tab",   "Shared",       Icons.Default.Inbox)
+    data object Discover : BottomTab("discover_tab", "Discover",     Icons.Default.AutoAwesome)
+    data object Account  : BottomTab("account_tab",  "Account",      Icons.Default.Person)
 }
 
 private val bottomTabs = listOf(
-    BottomTab.All,
     BottomTab.Yours,
     BottomTab.Shared,
+    BottomTab.Discover,
     BottomTab.Account
 )
 
@@ -103,27 +104,9 @@ private fun MainAppScaffold() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = BottomTab.All.route,
+            startDestination = BottomTab.Yours.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            // ── Tab: All recipes ──────────────────────────────────────────────
-            composable(BottomTab.All.route) {
-                HomeScreen(
-                    filter = RecipeFilter.ALL,
-                    onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
-                    onNeedsReviewClick = { recipeId -> navController.navigate("import?reviewId=$recipeId") },
-                    onSettingsClick = {
-                        navController.navigate(BottomTab.Account.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    }
-                )
-            }
-
             // ── Tab: Your Recipes ─────────────────────────────────────────────
             composable(BottomTab.Yours.route) {
                 HomeScreen(
@@ -135,12 +118,16 @@ private fun MainAppScaffold() {
                 )
             }
 
-            // ── Tab: Shared recipes ───────────────────────────────────────────
+            // ── Tab: Shared with me ───────────────────────────────────────────
             composable(BottomTab.Shared.route) {
-                SharedScreen(
-                    onOwnRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
-                    onSharedRecipeClick = { recipeId -> navController.navigate("shared/$recipeId") }
+                SharedInboxScreen(
+                    onItemClick = { shareId -> navController.navigate("received/$shareId") }
                 )
+            }
+
+            // ── Tab: Discover (placeholder) ───────────────────────────────────
+            composable(BottomTab.Discover.route) {
+                DiscoverScreen()
             }
 
             // ── Tab: Account ──────────────────────────────────────────────────
@@ -156,7 +143,6 @@ private fun MainAppScaffold() {
                 NotificationsScreen(
                     onBack = { navController.popBackStack() },
                     onFollowNotification = {
-                        // Navigate back to Account tab so the user can see/handle requests
                         navController.navigate(BottomTab.Account.route) {
                             popUpTo(navController.graph.findStartDestination().id) {
                                 saveState = true
@@ -186,7 +172,6 @@ private fun MainAppScaffold() {
                     shareId = shareId,
                     onBack = { navController.popBackStack() },
                     onSaved = { newRecipeId ->
-                        // Pop the received screen then open the saved recipe detail
                         navController.popBackStack()
                         navController.navigate("recipe/$newRecipeId")
                     }

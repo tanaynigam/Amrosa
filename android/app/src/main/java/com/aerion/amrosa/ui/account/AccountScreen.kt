@@ -1,5 +1,6 @@
 package com.aerion.amrosa.ui.account
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -44,8 +45,19 @@ fun AccountScreen(
     )
     val state by viewModel.uiState.collectAsState()
     var showSignOutDialog by remember { mutableStateOf(false) }
+    var showEditNameDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Show snackbar when name update completes
+    LaunchedEffect(state.nameUpdateMessage) {
+        state.nameUpdateMessage?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
+            viewModel.clearNameUpdateMessage()
+        }
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Account", style = MaterialTheme.typography.titleLarge) },
@@ -86,7 +98,11 @@ fun AccountScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(16.dp)
+                    .then(
+                        if (!state.isAnonymous) Modifier.clickable { showEditNameDialog = true }
+                        else Modifier
+                    ),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -155,6 +171,11 @@ fun AccountScreen(
                                     )
                                 }
                             }
+                            Text(
+                                "Tap to edit name",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
                     }
                 }
@@ -275,6 +296,37 @@ fun AccountScreen(
             )
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+
+    // ── Edit name dialog ──────────────────────────────────────────────────────
+    if (showEditNameDialog) {
+        var nameInput by remember { mutableStateOf(state.user?.displayName ?: "") }
+        AlertDialog(
+            onDismissRequest = { showEditNameDialog = false },
+            icon = { Icon(Icons.Default.Edit, contentDescription = null) },
+            title = { Text("Edit Name") },
+            text = {
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text("Display name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.updateDisplayName(nameInput)
+                        showEditNameDialog = false
+                    },
+                    enabled = nameInput.isNotBlank()
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditNameDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 
     // ── Sign-out dialog ───────────────────────────────────────────────────────

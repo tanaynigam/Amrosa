@@ -62,7 +62,9 @@ fun RecipeDetailScreen(
     var commentText by remember { mutableStateOf("") }
     // Set to true after "make public" is confirmed — opens share sheet once publish completes
     var pendingShareAfterPublish by remember { mutableStateOf(false) }
-    // Follower picker sheet
+    // Share options sheet (merged: send to follower + share link)
+    var showShareOptions by remember { mutableStateOf(false) }
+    // Follower picker sheet (opened after selecting "Send to follower")
     var showFollowerPicker by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -111,36 +113,18 @@ fun RecipeDetailScreen(
                     }
                 },
                 actions = {
-                    // Share button — owners only
+                    // Single share button — owners only; opens ShareOptionsSheet
                     if (state.isOwner) {
-                        // Send directly to a follower
                         IconButton(
                             onClick = {
                                 viewModel.loadFollowing()
-                                showFollowerPicker = true
-                            }
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Send to follower"
-                            )
-                        }
-                        // Share public link
-                        IconButton(
-                            onClick = {
-                                if (state.isPublic) {
-                                    openShareSheet()
-                                } else {
-                                    showVisibilityDialog = true
-                                }
+                                showShareOptions = true
                             },
                             enabled = !state.isVisibilityUpdating
                         ) {
                             Icon(
                                 Icons.Default.Share,
-                                contentDescription = "Share recipe",
-                                tint = if (state.isPublic) MaterialTheme.colorScheme.primary
-                                       else LocalContentColor.current
+                                contentDescription = "Share recipe"
                             )
                         }
                     }
@@ -652,6 +636,25 @@ fun RecipeDetailScreen(
         )
     }
 
+    // ── Share options sheet ───────────────────────────────────────────────────
+    if (showShareOptions) {
+        ShareOptionsSheet(
+            onDismiss = { showShareOptions = false },
+            onSendToFollower = {
+                showShareOptions = false
+                showFollowerPicker = true
+            },
+            onShareLink = {
+                showShareOptions = false
+                if (state.isPublic) {
+                    openShareSheet()
+                } else {
+                    showVisibilityDialog = true
+                }
+            }
+        )
+    }
+
     // ── Follower picker bottom sheet ──────────────────────────────────────────
     if (showFollowerPicker) {
         FollowerPickerSheet(
@@ -663,6 +666,88 @@ fun RecipeDetailScreen(
                 showFollowerPicker = false
             }
         )
+    }
+}
+
+// ── Share options sheet ───────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ShareOptionsSheet(
+    onDismiss: () -> Unit,
+    onSendToFollower: () -> Unit,
+    onShareLink: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+        ) {
+            Text(
+                "Share Recipe",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+            )
+            HorizontalDivider()
+
+            // Option A: Send to follower (default — shown first)
+            ListItem(
+                modifier = Modifier.clickable(onClick = onSendToFollower),
+                headlineContent = {
+                    Text(
+                        "Send to a follower",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        "Share directly — only that person will see it",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                leadingContent = {
+                    Icon(
+                        Icons.Default.PersonAdd,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                colors = ListItemDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                )
+            )
+
+            // Option B: Share link
+            ListItem(
+                modifier = Modifier.clickable(onClick = onShareLink),
+                headlineContent = {
+                    Text(
+                        "Share link",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        "Anyone with the link can view this recipe",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                leadingContent = {
+                    Icon(
+                        Icons.Default.Link,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            )
+
+            Spacer(Modifier.height(8.dp))
+        }
     }
 }
 
