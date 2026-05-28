@@ -1026,14 +1026,6 @@ The HTTPS share URL (`https://amrosa-2ec82.web.app/shared/{recipeId}`) does not 
 - **IO dispatcher**: all DB and network on `Dispatchers.IO`, never on Main
 - **Room is source of truth**: UI never reads Firestore directly (except `SharedRecipeDetailScreen` which loads from Firestore since the recipe is not in Room)
 
-### Platform scope — IMPORTANT
-**Do NOT touch anything inside `ios/`.**
-All implementation work is Android-only. The iOS port is maintained separately by the developer.
-- ✅ `android/` — all changes go here
-- ✅ `backend/` — Cloud Functions, Firestore rules, shared backend
-- ✅ `hosting/` — Firebase Hosting web pages
-- ✅ `CLAUDE.md`, `firebase.json`, `firestore.rules` — shared config and docs
-- ❌ `ios/` — never modify, never create files here, never suggest iOS-specific code changes
 
 ### Database
 - **DB versioning**: `fallbackToDestructiveMigration()`. Always bump `AmrosaDatabase.DB_VERSION` and `DatabaseSeeder` seeder key (`seeded_vN`) together. **Current: DB v9, seeder `seeded_v11`**.
