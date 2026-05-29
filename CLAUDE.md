@@ -87,8 +87,8 @@ Amrosa/
 
 ```
 Auth Gate       (🔐)  Full-screen login wall — shown when not signed in; no back button
-Tab 1 — Your Recipes   (🔖)  All your recipes (personal + imported); Add Recipe FAB
-Tab 2 — Shared         (📩)  Recipes directly shared with you by followers
+Tab 1 — My Recipes     (🔖)  Your recipes (personal + imported) + Shared filter; Add Recipe FAB
+Tab 2 — Shared         (📩)  Recipes directly shared with you by co-chefs (recipe cards)
 Tab 3 — Discover       (✨)  Recommendations — planned; placeholder screen for now
 Tab 4 — Account        (👤)  Profile, co-chef system, sync, sign-out
 ```
@@ -97,12 +97,15 @@ Tab 4 — Account        (👤)  Profile, co-chef system, sync, sign-out
 - **Auth is mandatory.** `AmrosaNavGraph` observes `authStateFlow()`. When `currentUser == null` or anonymous, the full-screen `AuthScreen` is shown (no back button, no bottom bar). The main `Scaffold` + `NavHost` don't render until sign-in.
 - **Sign-out deletes all local data.** `AccountViewModel.signOut()` calls `container.clearAllLocalData(context)` (Room `clearAllTables()` + sync prefs cleared) before `authRepository.signOut()`. Auth state change recomposes the nav graph back to the auth gate automatically.
 - **Sign-in triggers seed + sync.** `AmrosaApplication` observes `authStateFlow()` and calls `seeder.seedIfNeeded()` + `syncService.sync()` + `syncService.syncPersonalRecipes()` whenever a real (non-anonymous) user is detected.
-- **"All" tab is removed.** Your Recipes is the primary tab. Filter chips (`All | Personal | Imported`) provide in-tab filtering.
+- **"All" tab is removed.** My Recipes (route `"yours_tab"`, title "My Recipes") is the primary tab. Filter chips (`All | Personal | Imported | Shared`) provide in-tab filtering.
+- **Filter chips scroll with the list.** On My Recipes, the chips are the first item *inside* the `LazyColumn` (not a fixed header row), so they scroll away as you browse — maximising vertical space for recipe cards. Author/source chips and category chips share a single horizontally-scrollable row separated by a thin vertical divider. The search bar above is a compact rounded field with a clear (✕) button.
+- **"Shared" filter chip (My Recipes tab):** selecting it switches the list to show recipes shared *with* you (live `shared_to/{uid}/recipes/` feed) using the same card design. Category chips and the Add Recipe FAB hide in Shared mode. Tapping a shared card → `received/{shareId}` review screen.
+- **Search scoping:** in `All/Personal/Imported` mode search filters local recipes; in `Shared` mode search filters the shared feed by title/tags. Switching the chip resets the selected category.
 - **In-app notification screen removed.** Replaced by Android push notifications via FCM. `NotificationsScreen` and `SocialNotification` model are deleted. Notification bell and unread badge are removed from Account tab.
 - `isImported` controls **author display when sharing** (`false` = real name, `true` = "Imported"), not which filter chip it appears under.
 - **Import** is a push route (`"import?reviewId=..."`) accessible from the Add Recipe FAB, not a tab.
-- Pending-review recipes float to the top of Your Recipes with a "Needs review — tap to confirm" badge; tapping opens the import screen with the review sheet pre-loaded.
-- **"Shared" tab (Tab 2) = "Shared with me"** — shows only recipes other users have directly sent to you (from `shared_to/{uid}/recipes/`). Does NOT show all public recipes or a community browse feed.
+- Pending-review recipes float to the top of My Recipes with a "Needs review — tap to confirm" badge; tapping opens the import screen with the review sheet pre-loaded.
+- **"Shared" tab (Tab 2) = "Shared Recipes"** — shows recipes other users have directly sent to you (from `shared_to/{uid}/recipes/`) as full recipe cards (title, times, tags, original author + sender). Same feed as the My Recipes "Shared" chip. Does NOT show all public recipes or a community browse feed.
 - **"Discover" tab (Tab 3) = Recommendations placeholder** — renders a simple "Coming soon" screen. Implementation deferred.
 - **Public recipes are NOT auto-listed anywhere.** `visibility = "public"` only means the recipe is mirrored to `shared_recipes` in Firestore so it can be accessed via a shareable link or a future profile view. It does not appear in any in-app browse tab.
 - **Tab 4 is "Account"** (route `"account_tab"`, composable `AccountScreen`) — contains both account management and social/follow features.
@@ -264,7 +267,7 @@ All functions: `gemini-2.5-flash`, `thinkingBudget: 0`, `application/json` respo
 
 #### Import screen (push route — not a tab)
 
-`ImportScreen` is a **push route** accessed from the Add Recipe FAB in Your Recipes. Route: `"import?reviewId={reviewId}"`. Optional `reviewId` param auto-opens the review sheet for a specific recipe.
+`ImportScreen` is a **push route** accessed from the Add Recipe FAB in My Recipes. Route: `"import?reviewId={reviewId}"`. Optional `reviewId` param auto-opens the review sheet for a specific recipe.
 
 The screen contains:
 - URL import card + Import button
@@ -282,7 +285,7 @@ The screen contains:
    - `My Recipe` → on confirm, `isImported = false` → real user name shown as author when shared
 5. **Confirm** → clears `needsReview`, applies `isImported` from author toggle
 6. Back gesture → recipe stays in Room with `needsReview = true` — no data lost
-7. Your Recipes tab shows pending recipes first with "Needs review" badge; tapping re-opens the review sheet
+7. My Recipes tab shows pending recipes first with "Needs review" badge; tapping re-opens the review sheet
 
 #### `RecipeReviewSheet` (shared composable — `ui/import_recipe/RecipeReviewSheet.kt`)
 
@@ -320,7 +323,7 @@ The author field is an **`ExposedDropdownMenuBox`** with two options:
 - **Imported** — saves `isImported = true`, `authorDisplayName = "Imported"`. Default for any recipe opened from an URL/file import.
 - **Personal — [User's Name]** — saves `isImported = false`, `authorDisplayName = authRepository.displayName ?: email`. Default for freeform-typed recipes.
 
-Changing the dropdown on save also updates `isImported` in Room, keeping the Your Recipes filter chips in sync.
+Changing the dropdown on save also updates `isImported` in Room, keeping the My Recipes filter chips in sync.
 
 `RecipeEditorViewModel` exposes:
 - `val personalAuthorName: String` — the signed-in user's display name (used for the "Personal" option label)
@@ -332,7 +335,7 @@ Changing the dropdown on save also updates `isImported` in Room, keeping the You
 
 ### F5 — Freeform Recipe Entry ✅
 
-FAB on Your Recipes tab → ModalBottomSheet → two options:
+FAB on My Recipes tab → ModalBottomSheet → two options:
 - **"Type it out"** → `FreeformEntryScreen` (pushed)
 - **"Import from URL or file"** → `ImportScreen` (pushed route)
 
@@ -543,14 +546,32 @@ Author is stamped when a recipe is first created:
 - **Imported**: same UID/name saved in Room; overridden to "Imported" only at publish time
 - **Editor fork** (seeded recipe with `authorId == null`): stamped with current user on first save
 
-#### Shared tab (Tab 2) — "Shared with me"
+#### Shared tab (Tab 2) — "Shared Recipes"
 
-Shows recipes that other users have directly sent to the current user via `shared_to/{uid}/recipes/`. This is a **personal inbox**, not a community browse.
+Shows recipes that other users have directly sent to the current user via `shared_to/{uid}/recipes/`. This is a **personal inbox**, not a community browse. The same feed also appears under the My Recipes "Shared" filter chip.
 
-- Loaded from `shared_to/{uid}/recipes/` via `SocialRepository` (live stream or paginated fetch)
-- Each card: recipe title · sender name · "Sent X ago" timestamp
-- Tap → `ReceivedRecipeScreen` (read-only, with "Save to My Recipes")
+- Loaded from `shared_to/{uid}/recipes/` via `SocialRepository.getReceivedRecipesSummaryFlow()` (live snapshot stream)
+- `SharedInboxScreen` renders **full recipe cards** (same visual language as My Recipes): title, prep/cook times, tag chips, author row, relative timestamp
+- **Author attribution:** the card shows the recipe's *original author* (`authorDisplayName`), with "· from [sender]" appended only when the sender differs from the author. e.g. User A shares a recipe authored "User A" → User B sees author "User A"; if the recipe's author is "Imported", User B sees "Imported".
+- Tap → `ReceivedRecipeScreen` (review screen with "Save Recipe")
 - Empty state: "No recipes shared with you yet"
+
+##### `ReceivedRecipeSummary` (card model)
+```kotlin
+data class ReceivedRecipeSummary(
+    val shareId: String,
+    val title: String,
+    val authorDisplayName: String,   // original recipe author (e.g. "Tanay" or "Imported")
+    val fromDisplayName: String,     // who sent it to you
+    val sharedAt: Long,
+    val prepTimeMinutes: Int?,
+    val cookTimeMinutes: Int?,
+    val tags: List<String>
+)
+data class ReceivedRecipeData(val recipe: Recipe, val fromDisplayName: String)
+```
+
+**`shared_to/{uid}/recipes/{shareId}` doc** stores both `authorDisplayName` (original recipe author, preserved by `buildSharedToDocument()`) and `fromDisplayName` (sender). Old docs missing `authorDisplayName` fall back to `fromDisplayName`.
 
 #### `SharedRecipeDetailScreen` (visitor view — Firestore-based, deep links only)
 
@@ -711,13 +732,15 @@ No notification bell. Push notifications are Android system notifications delive
 - Lists all accepted co-chefs (from `getFriendsFlow()`) with initial avatar circle
 - **Remove** button → confirmation dialog (“Remove Co-Chef?”) → `unfriend()` → batch-deletes both direction docs
 
-#### ReceivedRecipeScreen (push route `"received/{shareId}"`)
+#### ReceivedRecipeScreen (push route `"received/{shareId}"`) — review screen
 
-- Loads from `shared_to/{uid}/recipes/{shareId}` via `SocialRepository.getReceivedRecipe()`
-- “From: [sender name]” banner in `tertiaryContainer`
-- Read-only detail: yield adjuster, unit toggle (if conversions exist), sections/ingredients/steps
-- “Save to My Recipes” bottom bar: fresh Room copy (new UUIDs), `authorId = currentUid`, `isImported = false`, `visibility = "private"`, `needsReview = false`
-- On save → navigates to `"recipe/{newRecipeId}"`
+This is a **review screen**, mirroring the import pending-review pattern: the shared recipe stays in the Shared feed until the user explicitly saves a copy to My Recipes.
+
+- Loads via `SocialRepository.getReceivedRecipe()` → returns `ReceivedRecipeData(recipe, fromDisplayName)`
+- “Shared by [sender]” banner in `tertiaryContainer` (uses `fromDisplayName`, not the recipe author)
+- Read-only detail: yield adjuster, unit toggle (if conversions exist), sections/ingredients/steps, **Sources section** (clickable underlined URLs, same as RecipeDetailScreen)
+- **“Save Recipe”** bottom bar (renamed from "Save to My Recipes"): fresh Room copy (new UUIDs), `authorId = currentUid`, `isImported = false`, `visibility = "private"`, `needsReview = false`
+- On save → `popBackStack()` back to the Shared tab (the shared card remains in the feed; the saved copy now appears in My Recipes). `onSaved` is a no-arg callback `() -> Unit`.
 
 #### Direct recipe sharing (from RecipeDetailScreen)
 
@@ -741,16 +764,20 @@ AuthScreen  (full-screen, no back button, no bottom bar)
   ├── Email + password form (+ name in Create Account mode)
   └── "Use phone number" → phone entry → OTP entry → verify
 
-── Bottom Tab 1: Your Recipes ─────────────────────────────────────────
-HomeScreen (RecipeFilter.YOURS — all user recipes: personal + imported)
-  ├── Search bar
-  ├── Author filter chips: [ All ] [ Personal ] [ Imported ]
+── Bottom Tab 1: My Recipes ───────────────────────────────────────────
+HomeScreen (RecipeFilter.YOURS — title "My Recipes")
+  ├── Compact rounded search bar (clear ✕ button); placeholder adapts to mode
+  ├── Filter chips (FIRST item INSIDE LazyColumn — scroll away with content):
+  │     [ All ] [ Personal ] [ Imported ] [ Shared ]  | (divider) | [All categories] [tags…]
   │     Personal = isImported:false; Imported = isImported:true
-  ├── Category filter chips
+  │     Shared = live shared_to/ feed; category chips + FAB hidden in Shared mode
   ├── Recipe list sorted: needsReview DESC → updatedAt DESC
   │     Each card: title · time · tags · author row · Shared pill (if public)
+  │     Shared mode: SharedInboxCard (title · time · tags · author · "from sender" · timestamp)
+  │       → tap → received/{shareId}
+  ├── Search: filters local recipes (All/Personal/Imported) OR shared feed (Shared)
   ├── needsReview cards → ImportScreen (review sheet)
-  └── FAB "Add Recipe" → ModalBottomSheet
+  └── FAB "Add Recipe" (hidden in Shared mode) → ModalBottomSheet
         ├── "Type it out"            → FreeformEntryScreen (pushed)
         └── "Import from URL or file" → ImportScreen (pushed)
 
@@ -771,11 +798,12 @@ ImportScreen  (pushed route "import?reviewId=...")
               on confirm → updateIsImported() in Room
 
 ── Bottom Tab 2: Shared ──────────────────────────────────────────────
-SharedScreen  (route "shared_tab" — "Shared with me")
-  ├── List of recipes directly sent to you by followers
-  │     Each card: recipe title · "From: [sender]" · "Sent X ago"
+SharedInboxScreen  (route "shared_tab" — "Shared Recipes")
+  ├── Full recipe cards (same visual as My Recipes), live shared_to/ feed
+  │     Each card: title · prep/cook time · tag chips · author row
+  │       (original authorDisplayName · "from sender" if differs) · timestamp
   ├── Empty state: "No recipes shared with you yet"
-  └── Tap → ReceivedRecipeScreen
+  └── Tap → ReceivedRecipeScreen (review → "Save Recipe")
 
 ── Bottom Tab 3: Discover ────────────────────────────────────────────
 DiscoverScreen  (route "discover_tab" — placeholder)
@@ -835,13 +863,14 @@ FollowerPickerSheet  (ModalBottomSheet — from "Send to co-chef")
   └── Tap Send → shareToFollower() → writes to shared_to/ + delivers recipe_shared notif → FCM push
         Snackbar: "Recipe sent to [Name]"
 
-ReceivedRecipeScreen  (pushed route "received/{shareId}")
-  ├── "From: [sender name]" banner (tertiaryContainer)
+ReceivedRecipeScreen  (pushed route "received/{shareId}") — review screen
+  ├── "Shared by [sender]" banner (tertiaryContainer; uses fromDisplayName)
   ├── Read-only recipe detail: yield adjuster, unit toggle (if conversions exist)
   ├── Sections / ingredients / steps
-  └── Bottom bar: "Save to My Recipes" Button (BookmarkAdd icon)
+  ├── Sources section (clickable underlined URLs)
+  └── Bottom bar: "Save Recipe" Button (BookmarkAdd icon)
         → new Room copy (new UUIDs) with authorId=currentUid, isImported=false, visibility=private
-        → navigates to "recipe/{newRecipeId}"
+        → popBackStack() to Shared tab (card stays in feed; copy now in My Recipes)
 
 RecipeEditorScreen  (pushed route "recipe/edit/{recipeId}")
   ├── Fork dialog (seeded/shared-copied recipes)
@@ -929,8 +958,9 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **RecipeReviewSheet** | Shared composable; parse notes banner (tertiaryContainer, dismissible); onEdit pencil icon; author toggle for imports |
 | **F5 — Freeform** | FreeformEntryScreen, FAB bottom sheet, `formatRecipeText` CF, save/saveAndEdit flow |
 | **F6 — Unit conversions** | 6 IngredientEntity fields, `QuantityScaler`, `UnitMode`, unit toggle on detail screen |
-| **4-tab navigation** | Your Recipes · Shared (with me) · Discover (placeholder) · Account (All tab removed) |
-| **Your Recipes filter chips** | `[All] [Personal] [Imported]` chips filter by `isImported` within the tab |
+| **4-tab navigation** | My Recipes · Shared · Discover (placeholder) · Account (All tab removed) |
+| **My Recipes filter chips** | `[All] [Personal] [Imported] [Shared]` chips; scroll inside LazyColumn (first item) so they free up vertical space; author + category chips share one scrollable row; compact search bar with clear button |
+| **My Recipes "Shared" chip** | Shows live `shared_to/` feed in-tab (same cards); search filters shared feed; FAB + category chips hidden in Shared mode; tap → `received/{shareId}` |
 | **Recipe cards** | Author row (person icon + name) + Shared pill on all cards |
 | **F7 — Mandatory auth gate** | Auth required at launch; `AuthScreen` shown as root when not signed in (no back button); main app only renders after real sign-in |
 | **F7 — Sign-out clears data** | `clearAllLocalData()` in `AppContainer` wipes Room + sync prefs; called before `signOut()` |
@@ -940,7 +970,8 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F8 — Share button** | Top bar icon (owners only); if public → Android share sheet with `amrosa://shared/{id}`; if private → dialog → publish → share sheet |
 | **F8 — Deep links + App Links** | HTTPS App Links (`https://amrosa-2ec82.web.app/shared/{id}`) + `amrosa://` fallback; `assetlinks.json` in Firebase Hosting; `navDeepLink` for both patterns in NavGraph |
 | **F8 — Firebase Hosting** | `shared.html` recipe viewer (browser fallback); `index.html` landing page; deployed at `amrosa-2ec82.web.app` |
-| **F8 — Shared tab (reworked)** | Tab 2 now shows received recipes from `shared_to/{uid}/` — not community browse. Community browse removed. |
+| **F8 — Shared tab (reworked)** | Tab 2 (`SharedInboxScreen`, "Shared Recipes") shows received recipes from `shared_to/{uid}/` as full recipe cards (title/times/tags/author). Not community browse. Same feed as My Recipes "Shared" chip. |
+| **Shared recipe author fix** | `buildSharedToDocument()` stores `authorDisplayName` (original author) separately from `fromDisplayName` (sender); recipient sees the original author, not the sender. Old docs fall back to sender. |
 | **F8 — Shared detail** | `SharedRecipeDetailScreen`; read-only; yield adjuster; unit toggle; "Copy to My Recipes"; deep link entry point only |
 | **F8 — Comments** | `Comment` domain model; post/delete; Firestore subcollection; delete by commenter or recipe owner |
 | **F8 — Security rules** | Full Firestore rules deployed; per-UID personal access; `shared_recipes` public read; comment create/delete moderation |
@@ -951,7 +982,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F9 — FriendsScreen** | Lists accepted co-chefs; Remove button → confirmation → `unfriend()` batch delete |
 | **F9 — Direct recipe sharing** | Single Share icon → `ShareOptionsSheet`; "Send to co-chef" → `FollowerPickerSheet`; stores full recipe in `shared_to/{recipientUid}/recipes/{shareId}`; delivers notification → FCM push |
 | **F9 — FCM push notifications** | `AmrosaMessagingService` (`onNewToken` stores token, `onMessageReceived` shows foreground notification); `sendPushNotification` Cloud Function triggered on `notifications/{uid}/items` creation; channel `"amrosa_social"` created on app start; Co-Chef / recipe share push text |
-| **F9 — Received recipe** | `ReceivedRecipeScreen` + `ReceivedRecipeViewModel`; loads from `shared_to/{uid}/recipes/{shareId}`; sender banner; read-only detail with scaling; "Save to My Recipes" → Room copy → navigate to saved recipe |
+| **F9 — Received recipe (review)** | `ReceivedRecipeScreen` + `ReceivedRecipeViewModel`; `getReceivedRecipe()` returns `ReceivedRecipeData(recipe, fromDisplayName)`; "Shared by [sender]" banner; read-only detail with scaling + Sources section; **"Save Recipe"** → Room copy → `popBackStack()` to Shared tab (card stays in feed) |
 | **Delete recipe** | Red "Delete Recipe" button at bottom of editor; confirmation dialog; calls `repository.deleteFullRecipe(recipeId)` then navigates back |
 | **URL import reliability** | `extractJsonLdRecipe()` extracts `schema.org/Recipe` JSON-LD from raw HTML (before cleanHtml strips scripts) — major recipe sites include this for SEO; realistic browser headers; 402/403 → actionable error message suggesting freeform entry |
 | **Imperial unit fix** | Gemini only populates metric fields; `computeImperialFromMetric()` in Cloud Function computes imperial from metric with exact math: g/kg → oz (< 453.6g) or lb; ml/L → fl oz (1 fl oz = 29.574 ml) |
@@ -1069,7 +1100,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 ### Author Attribution
 - `authorId` + `authorDisplayName` are stamped at creation time (freeform, import, editor fork of seeded recipe).
-- `isImported` controls two things: (1) which author name appears when shared, (2) which filter chip it appears under in Your Recipes.
+- `isImported` controls two things: (1) which author name appears when shared, (2) which filter chip it appears under in My Recipes.
   - `isImported = false` → `authorDisplayName` (real user name) shown on shared recipe; appears under "Personal" chip
   - `isImported = true` → always "Imported" shown (override applied in `SharedRecipeService.buildDocument()`); appears under "Imported" chip
 - `authorId` is always the real UID regardless of `isImported` — required for Firestore security rules.
@@ -1097,14 +1128,14 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 - **Auth gate**: `AmrosaNavGraph` collects `authStateFlow()`. `isSignedIn = currentUser?.isAnonymous == false`. When false → renders `AuthScreen()` (root, no back). When true → renders `MainAppScaffold()`.
 - **MainAppScaffold** is a separate private composable with its own `rememberNavController()`. Created fresh on each sign-in.
 - Tab routes: `"yours_tab"`, `"shared_tab"`, `"discover_tab"`, `"account_tab"` (All tab removed)
-- Push routes: `"recipe/{recipeId}"`, `"recipe/edit/{recipeId}"`, `"shared/{recipeId}"`, `"freeform"`, `"import?reviewId={reviewId}"`, `"notifications"`, `"user_search"`, `"received/{shareId}"`
+- Push routes: `"recipe/{recipeId}"`, `"recipe/edit/{recipeId}"`, `"shared/{recipeId}"`, `"freeform"`, `"import?reviewId={reviewId}"`, `"user_search"`, `"friends"`, `"received/{shareId}"` (the `"notifications"` route is removed — push is OS-level via FCM)
 - The `"auth"` route is **removed** from the nav graph — auth is handled at the outer `AmrosaNavGraph` level.
 - Import route uses optional query param `reviewId`; default empty string, treated as null in screen.
 - `showBottomBar` is true only when `currentDestination?.route` is one of the 4 tab routes.
 - Deep link `amrosa://shared/{recipeId}` is registered on the `"shared/{recipeId}"` composable via `navDeepLink`.
-- `"received/{shareId}"` loads from `shared_to/{uid}/recipes/{shareId}` via `SocialRepository.getReceivedRecipe()`.
-- `"notifications"` tapping a follow notification navigates to `account_tab`; recipe_shared navigates to `received/{shareId}`.
-- `"shared_tab"` shows received recipes from `shared_to/{uid}/recipes/` — NOT a community browse.
+- `"received/{shareId}"` is a **review screen**: loads via `SocialRepository.getReceivedRecipe()` (returns `ReceivedRecipeData`); "Save Recipe" → Room copy → `popBackStack()` to Shared tab. `onSaved` is `() -> Unit`.
+- `"shared_tab"` (`SharedInboxScreen`) shows received recipes from `shared_to/{uid}/recipes/` as recipe cards — NOT a community browse. Same feed surfaced by the My Recipes "Shared" filter chip.
+- The My Recipes tab (`"yours_tab"`) also passes `onSharedRecipeClick = { navigate("received/$shareId") }` for its Shared chip.
 - `"discover_tab"` is a placeholder screen — no navigation to sub-routes yet.
 
 ### Auth Patterns
@@ -1127,13 +1158,16 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 - **Notification delivery** = write to `notifications/{toUid}/items/{uuid}`. Client-side. The `sendPushNotification` Cloud Function trigger reads this and sends FCM push.
 - **FCM token** — `AmrosaMessagingService.onNewToken()` stores token in `users/{uid}.fcmToken`. `refreshFcmToken()` in `AmrosaApplication` fetches current token on each sign-in. `updateFcmToken(token)` in `SocialRepository` writes the field.
 - **No in-app notification screen** — `NotificationsScreen`, `NotificationsViewModel`, `getNotificationsFlow()`, `getUnreadCountFlow()`, `markNotificationRead()`, `markAllNotificationsRead()` are all deleted.
-- **Direct share** stores full recipe JSON in `shared_to/{recipientUid}/recipes/{shareId}` + delivers `recipe_shared` notification → FCM push.
-- **`ReceivedRecipeViewModel.saveToMyRecipes()`** creates a fresh Room copy (new UUIDs) with `authorId = currentUid`, `isImported = false`, `visibility = "private"`.
+- **Direct share** stores full recipe JSON in `shared_to/{recipientUid}/recipes/{shareId}` + delivers `recipe_shared` notification → FCM push. `buildSharedToDocument()` writes BOTH `fromDisplayName` (sender) and `authorDisplayName` (original recipe author) so the recipient sees the correct author.
+- **`getReceivedRecipe(shareId)`** returns `ReceivedRecipeData(recipe, fromDisplayName)`. `parseSharedRecipe()` reads `authorDisplayName` for the recipe's author (falls back to `fromDisplayName` for old docs missing it).
+- **`getReceivedRecipesSummaryFlow()`** returns `ReceivedRecipeSummary` with `authorDisplayName`, `fromDisplayName`, prep/cook times, and tags — enough to render full recipe cards.
+- **`ReceivedRecipeViewModel.saveToMyRecipes()`** creates a fresh Room copy (new UUIDs) with `authorId = currentUid`, `isImported = false`, `visibility = "private"`. After save → `popBackStack()` to Shared tab (the shared card stays in the feed). This is the review-screen pattern, mirroring imports.
 - **Pending co-chef requests** shown inline in AccountScreen as cards with Accept/Decline buttons; text "wants to be co-chefs".
 - **User search** — `searchUsers(query)`: if `query.contains('@')` → exact `whereEqualTo("email", ...)` lookup; else displayName prefix range query with `` sentinel. Results show name + email. Buttons: "Add Co-Chef" / "Requested" / "Co-Chef ✓".
 - **Edit display name**: `AccountViewModel.updateDisplayName(name)` calls `authRepository.updateDisplayName(name)` then `socialRepository.upsertProfile()`. Snackbar "Name updated".
 - **Merged share button**: single Share icon → `ShareOptionsSheet` with "Send to co-chef" and "Share link".
-- **Shared tab (Tab 2)** = inbox of received recipes. Load from `shared_to/{uid}/recipes/` — NOT `shared_recipes` community collection.
+- **Shared tab (Tab 2, `SharedInboxScreen`)** = inbox of received recipes as full recipe cards. Load from `shared_to/{uid}/recipes/` — NOT `shared_recipes` community collection. The same feed is reachable via the My Recipes "Shared" filter chip (`HomeViewModel` loads it via `getReceivedRecipesSummaryFlow()` only when `filter == YOURS`).
+- **`HomeViewModel`** — `YourRecipesFilter` enum now `{ ALL, PERSONAL, IMPORTED, SHARED }`. `filteredRecipes` returns empty in SHARED mode; `filteredSharedRecipes` returns the shared feed (search-filtered) only in SHARED mode. Switching chip resets `selectedCategory`.
 - **Delete recipe**: `RecipeEditorViewModel.deleteRecipe()` calls `repository.deleteFullRecipe(recipeId)` on IO dispatcher, sets `deleteComplete = true` → screen navigates back.
 
 ### AppContainer
