@@ -258,7 +258,7 @@ final class RecipeDetailViewModel {
         guard followingTask == nil else { return }
         isFollowingLoading = true
         followingTask = Task {
-            for await profiles in socialRepository.followingStream() {
+            for await profiles in socialRepository.friendsStream() {
                 guard !Task.isCancelled else { break }
                 following = profiles
                 isFollowingLoading = false

@@ -64,7 +64,7 @@ struct AccountView: View {
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(profile.displayName).font(.subheadline)
-                                    Text("Wants to follow you")
+                                    Text("Wants to be Co-Chefs")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -91,7 +91,7 @@ struct AccountView: View {
                         }
                     }
 
-                    LabeledContent("Following", value: "\(vm.followingCount) people")
+                    LabeledContent("Co-Chefs", value: "\(vm.followingCount)")
 
                     Button {
                         showUserSearch = true

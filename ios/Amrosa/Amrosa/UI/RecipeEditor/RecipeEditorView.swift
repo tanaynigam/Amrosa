@@ -8,6 +8,7 @@ struct RecipeEditorView: View {
     @Environment(AppContainer.self) private var container
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: RecipeEditorViewModel?
+    @State private var showDeleteConfirm = false
 
     init(recipe: RecipeModel? = nil, forking: Bool = false) {
         self.recipe = recipe
@@ -17,13 +18,20 @@ struct RecipeEditorView: View {
     var body: some View {
         Group {
             if let vm = viewModel {
-                RecipeEditorContent(viewModel: vm, dismiss: { dismiss() })
+                RecipeEditorContent(viewModel: vm, dismiss: { dismiss() }, showDelete: $showDeleteConfirm)
             } else {
                 ProgressView()
             }
         }
         .navigationTitle(navTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Delete Recipe?", isPresented: $showDeleteConfirm) {
+            Button("Delete", role: .destructive) { viewModel?.deleteRecipe() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("\"\(viewModel?.title ?? "")\" will be permanently deleted. This cannot be undone.")
+        }
+        .onChange(of: viewModel?.deleteComplete) { _, done in if done == true { dismiss() } }
         .onAppear {
             if viewModel == nil {
                 if let r = recipe {
@@ -56,6 +64,7 @@ struct RecipeEditorView: View {
 private struct RecipeEditorContent: View {
     @Bindable var viewModel: RecipeEditorViewModel
     let dismiss: () -> Void
+    @Binding var showDelete: Bool
 
     var body: some View {
         Form {
@@ -165,6 +174,23 @@ private struct RecipeEditorContent: View {
                     }
                 }
                 .disabled(viewModel.isSaving || viewModel.title.trimmed.isEmpty)
+            }
+
+            // Delete — only shown when editing an existing recipe
+            if viewModel.existingRecipe != nil {
+                Section {
+                    Button(role: .destructive) {
+                        showDelete = true
+                    } label: {
+                        if viewModel.isDeleting {
+                            ProgressView()
+                        } else {
+                            Label("Delete Recipe", systemImage: "trash")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .disabled(viewModel.isDeleting)
+                }
             }
         }
         .toolbar {

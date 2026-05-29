@@ -53,7 +53,7 @@ final class AccountViewModel {
         })
 
         socialTasks.append(Task {
-            for await profiles in socialRepository.followingStream() {
+            for await profiles in socialRepository.friendsStream() {
                 guard !Task.isCancelled else { break }
                 followingCount = profiles.count
             }

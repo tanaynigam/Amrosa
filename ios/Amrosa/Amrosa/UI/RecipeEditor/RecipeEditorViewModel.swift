@@ -106,10 +106,12 @@ final class RecipeEditorViewModel {
     var deletedStepIds: Set<String> = []
 
     var isSaving = false
+    var isDeleting = false
     var errorMessage: String? = nil
     var savedRecipeId: String? = nil
+    var deleteComplete = false
 
-    private var existingRecipe: RecipeModel?
+    var existingRecipe: RecipeModel?
     private let repository: RecipeRepository
     private let authRepository: AuthRepository
     private let syncService: RecipeSyncService?
@@ -301,6 +303,18 @@ final class RecipeEditorViewModel {
             }
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Delete
+
+    func deleteRecipe() {
+        guard let existing = existingRecipe else { return }
+        isDeleting = true
+        Task {
+            try? repository.deleteRecipe(id: existing.id)
+            isDeleting = false
+            deleteComplete = true
         }
     }
 

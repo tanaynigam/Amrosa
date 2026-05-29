@@ -56,7 +56,7 @@ final class UserSearchViewModel {
         guard pendingAction == nil else { return }
         pendingAction = user.uid
         Task {
-            await socialRepository.unfollow(targetUid: user.uid)
+            await socialRepository.unfriend(targetUid: user.uid)
             followStatus[user.uid] = "none"
             pendingAction = nil
         }
@@ -176,7 +176,7 @@ private struct UserSearchRow: View {
             } else {
                 switch status {
                 case "accepted":
-                    Button("Following") { onUnfollow() }
+                    Button("Co-Chef ✓") { onUnfollow() }
                         .font(.subheadline)
                         .buttonStyle(.bordered)
                         .tint(.secondary)
@@ -187,7 +187,7 @@ private struct UserSearchRow: View {
                         .tint(.secondary)
                         .disabled(true)
                 default: // "none"
-                    Button("Follow") { onFollow() }
+                    Button("Add Co-Chef") { onFollow() }
                         .font(.subheadline)
                         .buttonStyle(.borderedProminent)
                 }

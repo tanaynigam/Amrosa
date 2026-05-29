@@ -36,103 +36,116 @@ final class SocialRepository {
 
     /// Prefix search for users by display name (case-sensitive prefix).
     /// Excludes the current user. Returns up to 20 results.
+    /// Search by display name prefix, or exact email if query contains '@'.
     func searchUsers(query: String) async -> [UserProfile] {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return [] }
         let currentUid = authRepository.uid ?? ""
-        let prefix = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Firestore prefix range query: field >= prefix AND field < prefix + "\u{f8ff}"
-        let end = prefix + "\u{f8ff}"
+
         do {
-            let snapshot = try await db.collection("users")
-                .whereField("displayName", isGreaterThanOrEqualTo: prefix)
-                .whereField("displayName", isLessThan: end)
-                .limit(to: 20)
-                .getDocuments()
+            let snapshot: QuerySnapshot
+            if q.contains("@") {
+                // Exact email lookup
+                snapshot = try await db.collection("users")
+                    .whereField("email", isEqualTo: q.lowercased())
+                    .limit(to: 20)
+                    .getDocuments()
+            } else {
+                // Display name prefix search
+                let end = q + "\u{f8ff}"
+                snapshot = try await db.collection("users")
+                    .whereField("displayName", isGreaterThanOrEqualTo: q)
+                    .whereField("displayName", isLessThan: end)
+                    .limit(to: 20)
+                    .getDocuments()
+            }
             return snapshot.documents.compactMap { doc -> UserProfile? in
                 let data = doc.data()
                 guard let uid = data["uid"] as? String,
                       uid != currentUid,
                       let displayName = data["displayName"] as? String else { return nil }
-                return UserProfile(
-                    id: uid,
-                    uid: uid,
-                    displayName: displayName,
-                    photoUrl: data["photoUrl"] as? String
-                )
+                return UserProfile(id: uid, uid: uid, displayName: displayName, photoUrl: data["photoUrl"] as? String)
             }
         } catch {
             return []
         }
     }
 
-    // MARK: - Follow actions
+    // MARK: - Co-Chef (mutual friendship) actions
 
-    /// Send a follow request to targetUid. Creates a "pending" follow doc and delivers a notification.
+    /// Send a Co-Chef request to targetUid. Creates a "pending" follow doc.
     func sendFollowRequest(targetUid: String, targetName: String) async {
         guard let myUid = authRepository.uid,
               let myName = authRepository.displayName ?? authRepository.email else { return }
-        let followId = "\(myUid)_\(targetUid)"
         let data: [String: Any] = [
-            "followerId": myUid,
-            "followeeId": targetUid,
+            "followerId": myUid, "followerName": myName,
+            "followeeId": targetUid, "followeeName": targetName,
             "status": "pending",
             "createdAt": Int64(Date().timeIntervalSince1970 * 1000)
         ]
-        try? await db.collection("follows").document(followId).setData(data)
-        await deliverNotification(
-            toUid: targetUid,
-            type: "follow_request",
-            fromDisplayName: myName
-        )
+        try? await db.collection("follows").document("\(myUid)_\(targetUid)").setData(data)
+        await deliverNotification(toUid: targetUid, type: "follow_request", fromDisplayName: myName)
     }
 
-    /// Accept a follow request from fromUid.
-    /// Updates the follow status to "accepted", notifies the requester, and marks the follow_request notification as read.
+    /// Accept a Co-Chef request from fromUid.
+    /// Marks the original doc accepted AND creates the reverse doc (mutual friendship).
     func acceptFollowRequest(fromUid: String) async {
         guard let myUid = authRepository.uid,
               let myName = authRepository.displayName ?? authRepository.email else { return }
-        let followId = "\(fromUid)_\(myUid)"
-        try? await db.collection("follows").document(followId).updateData(["status": "accepted"])
-        await deliverNotification(
-            toUid: fromUid,
-            type: "follow_accepted",
-            fromDisplayName: myName
-        )
-        // Mark the corresponding follow_request notification as read
+        let incomingId = "\(fromUid)_\(myUid)"
+        // Get requester name from the incoming doc
+        let requesterName: String
+        if let doc = try? await db.collection("follows").document(incomingId).getDocument(),
+           let name = doc.data()?["followerName"] as? String {
+            requesterName = name
+        } else {
+            requesterName = "Unknown"
+        }
+        // Batch: mark incoming accepted + create reverse doc
+        let batch = db.batch()
+        batch.updateData(["status": "accepted"], forDocument: db.collection("follows").document(incomingId))
+        let reverseRef = db.collection("follows").document("\(myUid)_\(fromUid)")
+        batch.setData([
+            "followerId": myUid, "followerName": myName,
+            "followeeId": fromUid, "followeeName": requesterName,
+            "status": "accepted",
+            "createdAt": Int64(Date().timeIntervalSince1970 * 1000)
+        ], forDocument: reverseRef)
+        try? await batch.commit()
+        await deliverNotification(toUid: fromUid, type: "follow_accepted", fromDisplayName: myName)
         await markFollowRequestNotificationsRead(fromUid: fromUid)
     }
 
-    /// Decline (reject) a follow request from fromUid — deletes the follow doc and marks notification read.
+    /// Decline a Co-Chef request from fromUid.
     func declineFollowRequest(fromUid: String) async {
         guard let myUid = authRepository.uid else { return }
-        let followId = "\(fromUid)_\(myUid)"
-        try? await db.collection("follows").document(followId).delete()
+        try? await db.collection("follows").document("\(fromUid)_\(myUid)").delete()
         await markFollowRequestNotificationsRead(fromUid: fromUid)
     }
 
-    /// Unfollow a user (delete the accepted follow doc).
-    func unfollow(targetUid: String) async {
+    /// Remove Co-Chef relationship with targetUid — deletes both direction docs.
+    func unfriend(targetUid: String) async {
         guard let myUid = authRepository.uid else { return }
-        let followId = "\(myUid)_\(targetUid)"
-        try? await db.collection("follows").document(followId).delete()
+        let batch = db.batch()
+        batch.deleteDocument(db.collection("follows").document("\(myUid)_\(targetUid)"))
+        batch.deleteDocument(db.collection("follows").document("\(targetUid)_\(myUid)"))
+        try? await batch.commit()
     }
 
-    /// One-shot check of follow status toward targetUid.
+    /// One-shot check of co-chef status toward targetUid.
     /// Returns "none" | "pending" | "accepted".
     func getFollowStatus(targetUid: String) async -> String {
         guard let myUid = authRepository.uid else { return "none" }
         let followId = "\(myUid)_\(targetUid)"
         guard let doc = try? await db.collection("follows").document(followId).getDocument(),
               doc.exists,
-              let status = doc.data()?["status"] as? String else {
-            return "none"
-        }
+              let status = doc.data()?["status"] as? String else { return "none" }
         return status
     }
 
     // MARK: - Live streams
 
-    /// Live stream of pending follow requests directed at the current user.
+    /// Live stream of pending Co-Chef requests directed at the current user.
     func pendingRequestsStream() -> AsyncStream<[UserProfile]> {
         guard let myUid = authRepository.uid else { return AsyncStream { $0.finish() } }
         return AsyncStream { continuation in
@@ -140,70 +153,35 @@ final class SocialRepository {
                 .whereField("followeeId", isEqualTo: myUid)
                 .whereField("status", isEqualTo: "pending")
                 .addSnapshotListener { snapshot, _ in
-                    guard let docs = snapshot?.documents else {
-                        continuation.yield([])
-                        return
+                    guard let docs = snapshot?.documents else { continuation.yield([]); return }
+                    let items = docs.compactMap { doc -> (String, String)? in
+                        let d = doc.data()
+                        guard let uid = d["followerId"] as? String,
+                              let name = d["followerName"] as? String else { return nil }
+                        return (uid, name)
                     }
-                    let followerIds = docs.compactMap { $0.data()["followerId"] as? String }
-                    if followerIds.isEmpty {
-                        continuation.yield([])
-                        return
-                    }
-                    // Fetch profiles for each pending requester
-                    Task { @MainActor in
-                        var profiles: [UserProfile] = []
-                        for uid in followerIds {
-                            if let doc = try? await self.db.collection("users").document(uid).getDocument(),
-                               let data = doc.data(),
-                               let displayName = data["displayName"] as? String {
-                                profiles.append(UserProfile(
-                                    id: uid,
-                                    uid: uid,
-                                    displayName: displayName,
-                                    photoUrl: data["photoUrl"] as? String
-                                ))
-                            }
-                        }
-                        continuation.yield(profiles)
-                    }
+                    continuation.yield(items.map { UserProfile(id: $0.0, uid: $0.0, displayName: $0.1, photoUrl: nil) })
                 }
             continuation.onTermination = { _ in listener.remove() }
         }
     }
 
-    /// Live stream of users the current user is following (accepted).
-    func followingStream() -> AsyncStream<[UserProfile]> {
+    /// Live stream of accepted Co-Chefs for the current user.
+    func friendsStream() -> AsyncStream<[UserProfile]> {
         guard let myUid = authRepository.uid else { return AsyncStream { $0.finish() } }
         return AsyncStream { continuation in
             let listener = self.db.collection("follows")
                 .whereField("followerId", isEqualTo: myUid)
                 .whereField("status", isEqualTo: "accepted")
                 .addSnapshotListener { snapshot, _ in
-                    guard let docs = snapshot?.documents else {
-                        continuation.yield([])
-                        return
+                    guard let docs = snapshot?.documents else { continuation.yield([]); return }
+                    let items = docs.compactMap { doc -> (String, String)? in
+                        let d = doc.data()
+                        guard let uid = d["followeeId"] as? String,
+                              let name = d["followeeName"] as? String else { return nil }
+                        return (uid, name)
                     }
-                    let followeeIds = docs.compactMap { $0.data()["followeeId"] as? String }
-                    if followeeIds.isEmpty {
-                        continuation.yield([])
-                        return
-                    }
-                    Task { @MainActor in
-                        var profiles: [UserProfile] = []
-                        for uid in followeeIds {
-                            if let doc = try? await self.db.collection("users").document(uid).getDocument(),
-                               let data = doc.data(),
-                               let displayName = data["displayName"] as? String {
-                                profiles.append(UserProfile(
-                                    id: uid,
-                                    uid: uid,
-                                    displayName: displayName,
-                                    photoUrl: data["photoUrl"] as? String
-                                ))
-                            }
-                        }
-                        continuation.yield(profiles)
-                    }
+                    continuation.yield(items.map { UserProfile(id: $0.0, uid: $0.0, displayName: $0.1, photoUrl: nil) })
                 }
             continuation.onTermination = { _ in listener.remove() }
         }

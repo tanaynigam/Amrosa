@@ -964,7 +964,6 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | — | Public profile view | View another user's public recipes at `"profile/{uid}"` |
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil display |
 | — | Shopping List | Dedicated screen; add ingredients from recipe detail |
-| — | iOS: Co-Chefs system | Port mutual friendship, FriendsScreen, FCM push, Co-Chefs terminology to iOS |
 | — | iOS: Universal Links | `apple-app-site-association` file + `Associated Domains` entitlement |
 
 ---
@@ -1012,6 +1011,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 |---|---|
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
+| **FCM push notifications** | Android uses FCM (AmrosaMessagingService + Cloud Function). iOS keeps in-app notification screen (NotificationsView). APNs/FCM for iOS requires separate certificate setup. |
 | **Your Recipes filter chips** | iOS uses a segmented picker; Android uses `[All] [Personal] [Imported]` filter chips — minor UX difference |
 
 ---
