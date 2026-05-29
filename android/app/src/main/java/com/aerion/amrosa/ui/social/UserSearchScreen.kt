@@ -158,7 +158,7 @@ fun UserSearchScreen(onBack: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                placeholder = { Text("Search by name or email…") },
+                placeholder = { Text("Find co-chefs by name or email…") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
                     if (state.query.isNotEmpty()) {
@@ -254,7 +254,7 @@ private fun UserSearchRow(
                 "accepted" -> OutlinedButton(
                     onClick = onUnfollow,
                     shape = RoundedCornerShape(8.dp)
-                ) { Text("Friends") }
+                ) { Text("Co-Chef ✓") }
 
                 "pending" -> OutlinedButton(
                     onClick = onUnfollow,
@@ -267,7 +267,7 @@ private fun UserSearchRow(
                 ) {
                     Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Add Friend")
+                    Text("Add Co-Chef")
                 }
             }
         }

@@ -188,11 +188,11 @@ fun AccountScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-            // ── Friends ───────────────────────────────────────────────────────
+            // ── Co-Chefs ──────────────────────────────────────────────────────
             if (!state.isAnonymous) {
-                AccountSectionHeader("Friends")
+                AccountSectionHeader("Co-Chefs")
 
-                // Pending friend requests
+                // Pending co-chef requests
                 if (state.pendingRequests.isNotEmpty()) {
                     state.pendingRequests.forEach { requester ->
                         PendingRequestCard(
@@ -205,7 +205,7 @@ fun AccountScreen(
                     Spacer(Modifier.height(4.dp))
                 }
 
-                // Friends count (tappable → friends list)
+                // Co-Chefs count (tappable → co-chefs list)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -214,7 +214,7 @@ fun AccountScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Friends", style = MaterialTheme.typography.bodyLarge)
+                    Text("Co-Chefs", style = MaterialTheme.typography.bodyLarge)
                     Text(
                         "${state.friendCount}",
                         style = MaterialTheme.typography.bodyMedium,
@@ -222,7 +222,7 @@ fun AccountScreen(
                     )
                 }
 
-                // Find Friends
+                // Find Co-Chefs
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -241,7 +241,7 @@ fun AccountScreen(
                         contentPadding = PaddingValues(0.dp)
                     ) {
                         Text(
-                            "Find Friends",
+                            "Find Co-Chefs",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -388,7 +388,7 @@ private fun PendingRequestCard(
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    "wants to be friends",
+                    "wants to be co-chefs",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

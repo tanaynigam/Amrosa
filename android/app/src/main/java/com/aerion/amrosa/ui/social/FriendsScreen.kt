@@ -88,8 +88,8 @@ fun FriendsScreen(onBack: () -> Unit) {
         val friend = state.friends.find { it.uid == uid }
         AlertDialog(
             onDismissRequest = { confirmRemoveUid = null },
-            title = { Text("Remove Friend?") },
-            text = { Text("Remove ${friend?.displayName ?: "this person"} from your friends list?") },
+            title = { Text("Remove Co-Chef?") },
+            text = { Text("Remove ${friend?.displayName ?: "this person"} from your co-chefs?") },
             confirmButton = {
                 Button(
                     onClick = { viewModel.removeFriend(uid); confirmRemoveUid = null },
@@ -108,7 +108,7 @@ fun FriendsScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Friends") },
+                title = { Text("Co-Chefs") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
@@ -144,12 +144,12 @@ fun FriendsScreen(onBack: () -> Unit) {
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        "No friends yet",
+                        "No co-chefs yet",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        "Add friends from the Account page.",
+                        "Add co-chefs from the Account page.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
