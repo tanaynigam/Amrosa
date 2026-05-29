@@ -368,11 +368,22 @@ class SocialRepository(
                 }
                 val summaries = snapshot?.documents?.mapNotNull { doc ->
                     val data = doc.data ?: return@mapNotNull null
+                    val rawTags = data["tags"]
+                    val tags = when (rawTags) {
+                        is List<*> -> rawTags.filterIsInstance<String>()
+                        else -> emptyList()
+                    }
                     ReceivedRecipeSummary(
                         shareId = doc.id,
                         title = data["title"] as? String ?: "Untitled",
+                        // authorDisplayName = original recipe author; fall back to sender for old docs
+                        authorDisplayName = data["authorDisplayName"] as? String
+                            ?: data["fromDisplayName"] as? String ?: "Someone",
                         fromDisplayName = data["fromDisplayName"] as? String ?: "Someone",
-                        sharedAt = (data["sharedAt"] as? Number)?.toLong() ?: 0L
+                        sharedAt = (data["sharedAt"] as? Number)?.toLong() ?: 0L,
+                        prepTimeMinutes = (data["prepTimeMinutes"] as? Number)?.toInt(),
+                        cookTimeMinutes = (data["cookTimeMinutes"] as? Number)?.toInt(),
+                        tags = tags
                     )
                 } ?: emptyList()
                 trySend(summaries)
@@ -382,9 +393,10 @@ class SocialRepository(
 
     /**
      * Load a recipe that was shared directly to the current user.
+     * Returns the full recipe + the sender's display name.
      * Fetches from shared_to/{currentUid}/recipes/{shareId}.
      */
-    suspend fun getReceivedRecipe(shareId: String): Recipe? {
+    suspend fun getReceivedRecipe(shareId: String): ReceivedRecipeData? {
         val uid = authRepository.uid ?: return null
         return try {
             val doc = firestore.collection(COL_SHARED_TO)
@@ -393,7 +405,9 @@ class SocialRepository(
                 .document(shareId)
                 .get().await()
             val data = doc.data ?: return null
-            parseSharedRecipe(doc.id, data)
+            val recipe = parseSharedRecipe(doc.id, data)
+            val fromDisplayName = data["fromDisplayName"] as? String ?: "Someone"
+            ReceivedRecipeData(recipe = recipe, fromDisplayName = fromDisplayName)
         } catch (e: Exception) {
             Log.e(TAG, "getReceivedRecipe $shareId failed", e)
             null
@@ -518,7 +532,9 @@ class SocialRepository(
             createdAt = (data["createdAt"] as? Number)?.toLong() ?: now,
             updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: now,
             authorId = data["fromUid"] as? String,
-            authorDisplayName = data["fromDisplayName"] as? String,
+            // Use original recipe author; fall back to sender for old docs that don't store it
+            authorDisplayName = data["authorDisplayName"] as? String
+                ?: data["fromDisplayName"] as? String,
             visibility = "private"
         )
     }
@@ -568,6 +584,8 @@ class SocialRepository(
         return mapOf(
             "fromUid" to fromUid,
             "fromDisplayName" to fromName,
+            // Original recipe author — preserved so recipients see the right author name
+            "authorDisplayName" to recipe.authorDisplayName,
             "sharedAt" to System.currentTimeMillis(),
             "title" to recipe.title,
             "description" to recipe.description,

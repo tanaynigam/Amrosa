@@ -1,5 +1,6 @@
 package com.aerion.amrosa.ui.social
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -36,6 +37,7 @@ import java.util.UUID
 
 data class ReceivedRecipeUiState(
     val recipe: Recipe? = null,
+    val fromDisplayName: String? = null,  // who shared this recipe with you
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
     val savedRecipeId: String? = null,   // non-null once saved to Room
@@ -62,13 +64,14 @@ class ReceivedRecipeViewModel(
 
     init {
         viewModelScope.launch {
-            val recipe = socialRepository.getReceivedRecipe(shareId)
+            val data = socialRepository.getReceivedRecipe(shareId)
             _uiState.update {
                 it.copy(
-                    recipe = recipe,
-                    selectedServings = recipe?.baseServings ?: 1,
+                    recipe = data?.recipe,
+                    fromDisplayName = data?.fromDisplayName,
+                    selectedServings = data?.recipe?.baseServings ?: 1,
                     isLoading = false,
-                    error = if (recipe == null) "Recipe not found" else null
+                    error = if (data == null) "Recipe not found" else null
                 )
             }
         }
@@ -318,7 +321,7 @@ fun ReceivedRecipeScreen(
                 ) {
                     // ── From banner ─────────────────────────────────────────────
                     item(key = "from_banner") {
-                        recipe.authorDisplayName?.let { sender ->
+                        state.fromDisplayName?.let { sender ->
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -520,6 +523,37 @@ fun ReceivedRecipeScreen(
                                     }
                                     Text(step.instruction, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                                 }
+                            }
+                        }
+                    }
+
+                    // ── Sources ─────────────────────────────────────────────────
+                    if (recipe.sourceUrls.isNotEmpty()) {
+                        item(key = "sources") {
+                            val context = LocalContext.current
+                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                            Text(
+                                "Sources",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            )
+                            recipe.sourceUrls.forEach { url ->
+                                Text(
+                                    text = "• $url",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp, vertical = 2.dp)
+                                        .clickable {
+                                            val intent = android.content.Intent(
+                                                android.content.Intent.ACTION_VIEW,
+                                                android.net.Uri.parse(url)
+                                            )
+                                            context.startActivity(intent)
+                                        }
+                                )
                             }
                         }
                     }

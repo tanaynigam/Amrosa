@@ -37,7 +37,7 @@ import com.aerion.amrosa.ui.social.SharedInboxScreen
 import com.aerion.amrosa.ui.social.UserSearchScreen
 
 private sealed class BottomTab(val route: String, val label: String, val icon: ImageVector) {
-    data object Yours    : BottomTab("yours_tab",    "Your Recipes", Icons.Default.Bookmarks)
+    data object Yours    : BottomTab("yours_tab",    "My Recipes",   Icons.Default.Bookmarks)
     data object Shared   : BottomTab("shared_tab",   "Shared",       Icons.Default.Inbox)
     data object Discover : BottomTab("discover_tab", "Discover",     Icons.Default.AutoAwesome)
     data object Account  : BottomTab("account_tab",  "Account",      Icons.Default.Person)

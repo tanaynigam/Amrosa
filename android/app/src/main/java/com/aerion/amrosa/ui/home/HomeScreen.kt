@@ -47,7 +47,7 @@ fun HomeScreen(
                 title = {
                     Text(
                         when (filter) {
-                            RecipeFilter.YOURS -> "Your Recipes"
+                            RecipeFilter.YOURS -> "My Recipes"
                             RecipeFilter.PERSONAL -> "My Recipes"
                             else -> "Amrita & Ambrosia"
                         },
