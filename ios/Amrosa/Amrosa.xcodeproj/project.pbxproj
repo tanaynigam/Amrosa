@@ -450,7 +450,7 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					155FCBFD017E9043F34ACC28 = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 7S2FY6WF5V;
 					};
 				};
 			};
@@ -574,7 +574,7 @@
 				CODE_SIGN_ENTITLEMENTS = Amrosa/Amrosa.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 7S2FY6WF5V;
 				INFOPLIST_FILE = Amrosa/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -670,7 +670,7 @@
 				CODE_SIGN_ENTITLEMENTS = Amrosa/Amrosa.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 7S2FY6WF5V;
 				INFOPLIST_FILE = Amrosa/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (

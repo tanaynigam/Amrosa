@@ -62,7 +62,7 @@ targets:
         SWIFT_VERSION: "5.0"
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: "7S2FY6WF5V"
         CODE_SIGN_ENTITLEMENTS: Amrosa/Amrosa.entitlements
     dependencies:
       - package: Firebase
