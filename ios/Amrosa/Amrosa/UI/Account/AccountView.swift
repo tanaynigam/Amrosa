@@ -48,11 +48,9 @@ struct AccountView: View {
 
                 // People section
                 Section("People") {
-                    // Pending follow requests
                     if !vm.pendingRequests.isEmpty {
                         ForEach(vm.pendingRequests) { profile in
                             HStack {
-                                // Avatar
                                 ZStack {
                                     Circle()
                                         .fill(Color.accentColor.opacity(0.12))
@@ -64,8 +62,7 @@ struct AccountView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(profile.displayName).font(.subheadline)
                                     Text("Wants to be Co-Chefs")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 if vm.pendingFollowAction == profile.uid {
@@ -75,15 +72,12 @@ struct AccountView: View {
                                         Button("Accept") {
                                             Task { await vm.acceptFollowRequest(profile) }
                                         }
-                                        .font(.caption)
-                                        .buttonStyle(.borderedProminent)
+                                        .font(.caption).buttonStyle(.borderedProminent)
 
                                         Button("Decline") {
                                             Task { await vm.declineFollowRequest(profile) }
                                         }
-                                        .font(.caption)
-                                        .buttonStyle(.bordered)
-                                        .tint(.secondary)
+                                        .font(.caption).buttonStyle(.bordered).tint(.secondary)
                                     }
                                 }
                             }
@@ -151,7 +145,6 @@ struct AccountView: View {
         } message: {
             Text("All recipes will be removed from this device. They'll sync back automatically when you sign in again.")
         }
-        .sheet(isPresented: $showNotifications) {
         .sheet(isPresented: $showUserSearch) {
             UserSearchView()
         }
@@ -159,11 +152,11 @@ struct AccountView: View {
             if let shareId = notifShareId {
                 NavigationStack {
                     ReceivedRecipeView(shareId: shareId)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") { showReceivedRecipe = false }
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") { showReceivedRecipe = false }
+                            }
                         }
-                    }
                 }
             }
         }
@@ -180,7 +173,6 @@ struct AccountView: View {
         }
         .onChange(of: viewModel?.nameUpdateMessage) { _, msg in
             if msg != nil {
-                // Auto-clear after 2 seconds
                 Task {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                     viewModel?.clearNameUpdateMessage()
