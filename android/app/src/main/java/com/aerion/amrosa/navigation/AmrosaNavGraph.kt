@@ -157,10 +157,9 @@ private fun MainAppScaffold() {
                 ReceivedRecipeScreen(
                     shareId = shareId,
                     onBack = { navController.popBackStack() },
-                    onSaved = { newRecipeId ->
-                        navController.popBackStack()
-                        navController.navigate("recipe/$newRecipeId")
-                    }
+                    // After saving, go back to the Shared tab — the card stays there,
+                    // and the saved copy is now also in My Recipes
+                    onSaved = { navController.popBackStack() }
                 )
             }
 

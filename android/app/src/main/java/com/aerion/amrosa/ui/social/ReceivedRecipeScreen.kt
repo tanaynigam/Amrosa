@@ -218,14 +218,14 @@ class ReceivedRecipeViewModel(
  * Provides a "Save to My Recipes" button.
  *
  * @param onBack back nav
- * @param onSaved called with the new local recipeId after saving
+ * @param onSaved called once the recipe has been saved to My Recipes
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReceivedRecipeScreen(
     shareId: String,
     onBack: () -> Unit,
-    onSaved: (newRecipeId: String) -> Unit
+    onSaved: () -> Unit
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
@@ -242,9 +242,9 @@ fun ReceivedRecipeScreen(
     val state by viewModel.uiState.collectAsState()
     var selectedUnit by remember { mutableStateOf(UnitMode.ORIGINAL) }
 
-    // Navigate to saved recipe once save completes
+    // Navigate back (to Shared tab) once save completes
     LaunchedEffect(state.savedRecipeId) {
-        state.savedRecipeId?.let { onSaved(it) }
+        if (state.savedRecipeId != null) onSaved()
     }
 
     Scaffold(
@@ -286,7 +286,7 @@ fun ReceivedRecipeScreen(
                             Icon(Icons.Default.BookmarkAdd, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
                         }
-                        Text("Save to My Recipes", fontWeight = FontWeight.SemiBold)
+                        Text("Save Recipe", fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
