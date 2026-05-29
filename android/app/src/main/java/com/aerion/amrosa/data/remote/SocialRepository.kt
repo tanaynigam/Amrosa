@@ -96,6 +96,7 @@ class SocialRepository(
                     UserProfile(
                         uid = doc.id,
                         displayName = data["displayName"] as? String ?: return@mapNotNull null,
+                        email = data["email"] as? String,
                         photoUrl = data["photoUrl"] as? String,
                         createdAt = (data["updatedAt"] as? Number)?.toLong() ?: 0L
                     )
@@ -141,21 +142,45 @@ class SocialRepository(
     }
 
     /**
-     * Accept a pending follow request from [fromUid].
-     * Marks the follow as accepted and notifies the requester.
+     * Accept a pending friend request from [fromUid].
+     * Marks the existing doc accepted AND creates the reverse doc so both
+     * users see each other as friends (mutual/bidirectional friendship).
      */
     suspend fun acceptFollowRequest(fromUid: String) {
-        val uid = authRepository.uid ?: return
-        val docId = followDocId(fromUid, uid)
+        val uid  = authRepository.uid ?: return
+        val myName = authRepository.currentUser?.displayName ?: authRepository.email ?: "Someone"
+        val incomingDocId = followDocId(fromUid, uid)
         try {
-            firestore.collection(COL_FOLLOWS).document(docId)
-                .update(mapOf("status" to "accepted"))
-                .await()
+            // Read the incoming request to get the requester's name
+            val incomingDoc = firestore.collection(COL_FOLLOWS).document(incomingDocId).get().await()
+            val requesterName = incomingDoc.getString("followerName") ?: "Unknown"
+
+            val batch = firestore.batch()
+
+            // 1. Mark the original request as accepted
+            batch.update(firestore.collection(COL_FOLLOWS).document(incomingDocId),
+                mapOf("status" to "accepted"))
+
+            // 2. Create the reverse doc so the requester also sees us as a friend
+            val reverseDocId = followDocId(uid, fromUid)
+            batch.set(
+                firestore.collection(COL_FOLLOWS).document(reverseDocId),
+                mapOf(
+                    "followerId"   to uid,
+                    "followerName" to myName,
+                    "followeeId"   to fromUid,
+                    "followeeName" to requesterName,
+                    "status"       to "accepted",
+                    "createdAt"    to System.currentTimeMillis()
+                )
+            )
+
+            batch.commit().await()
+
             deliverNotification(
                 toUid = fromUid,
                 type = "follow_accepted",
-                fromDisplayName = authRepository.currentUser?.displayName
-                    ?: authRepository.email ?: "Someone"
+                fromDisplayName = myName
             )
         } catch (e: Exception) {
             Log.e(TAG, "acceptFollowRequest failed", e)
@@ -163,7 +188,7 @@ class SocialRepository(
     }
 
     /**
-     * Decline (and delete) a pending follow request from [fromUid].
+     * Decline (and delete) a pending friend request from [fromUid].
      */
     suspend fun declineFollowRequest(fromUid: String) {
         val uid = authRepository.uid ?: return
@@ -176,15 +201,20 @@ class SocialRepository(
         }
     }
 
-    /** Stop following [targetUid]. */
-    suspend fun unfollow(targetUid: String) {
+    /**
+     * Remove friendship with [targetUid] — deletes both direction docs
+     * so neither user sees the other in their friends list.
+     * Also handles cancelling a pending outgoing request (only one doc exists then).
+     */
+    suspend fun unfriend(targetUid: String) {
         val uid = authRepository.uid ?: return
         try {
-            firestore.collection(COL_FOLLOWS)
-                .document(followDocId(uid, targetUid))
-                .delete().await()
+            val batch = firestore.batch()
+            batch.delete(firestore.collection(COL_FOLLOWS).document(followDocId(uid, targetUid)))
+            batch.delete(firestore.collection(COL_FOLLOWS).document(followDocId(targetUid, uid)))
+            batch.commit().await()
         } catch (e: Exception) {
-            Log.e(TAG, "unfollow failed", e)
+            Log.e(TAG, "unfriend failed", e)
         }
     }
 
@@ -236,10 +266,12 @@ class SocialRepository(
     }
 
     /**
-     * Live stream of accepted follows — people the current user follows.
+     * Live stream of accepted friends — people the current user is friends with.
+     * Since friendship is mutual, every accepted doc with followerId == uid represents
+     * a friend (the reverse doc is also created on accept).
      * Requires composite index: follows (followerId, status).
      */
-    fun getFollowingFlow(): Flow<List<UserProfile>> = callbackFlow {
+    fun getFriendsFlow(): Flow<List<UserProfile>> = callbackFlow {
         val uid = authRepository.uid
         if (uid == null) { trySend(emptyList()); close(); return@callbackFlow }
         var reg: ListenerRegistration? = null
@@ -248,7 +280,7 @@ class SocialRepository(
             .whereEqualTo("status", "accepted")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e(TAG, "getFollowingFlow error", error)
+                    Log.e(TAG, "getFriendsFlow error", error)
                     trySend(emptyList())
                     return@addSnapshotListener
                 }

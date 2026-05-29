@@ -31,6 +31,7 @@ import com.aerion.amrosa.ui.home.HomeScreen
 import com.aerion.amrosa.ui.home.RecipeFilter
 import com.aerion.amrosa.ui.import_recipe.ImportScreen
 import com.aerion.amrosa.ui.shared.SharedRecipeDetailScreen
+import com.aerion.amrosa.ui.social.FriendsScreen
 import com.aerion.amrosa.ui.social.ReceivedRecipeScreen
 import com.aerion.amrosa.ui.social.SharedInboxScreen
 import com.aerion.amrosa.ui.social.UserSearchScreen
@@ -132,8 +133,14 @@ private fun MainAppScaffold() {
             // ── Tab: Account ──────────────────────────────────────────────────
             composable(BottomTab.Account.route) {
                 AccountScreen(
-                    onFindPeopleClick = { navController.navigate("user_search") }
+                    onFindPeopleClick = { navController.navigate("user_search") },
+                    onFriendsClick = { navController.navigate("friends") }
                 )
+            }
+
+            // ── Friends list ──────────────────────────────────────────────────
+            composable("friends") {
+                FriendsScreen(onBack = { navController.popBackStack() })
             }
 
             // ── User search / follow people ───────────────────────────────────

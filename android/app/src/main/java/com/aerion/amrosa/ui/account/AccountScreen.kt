@@ -30,7 +30,8 @@ import java.util.Locale
 @Composable
 fun AccountScreen(
     onSignInClick: () -> Unit = {},
-    onFindPeopleClick: () -> Unit = {}
+    onFindPeopleClick: () -> Unit = {},
+    onFriendsClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
@@ -187,11 +188,11 @@ fun AccountScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-            // ── People ────────────────────────────────────────────────────────
+            // ── Friends ───────────────────────────────────────────────────────
             if (!state.isAnonymous) {
-                AccountSectionHeader("People")
+                AccountSectionHeader("Friends")
 
-                // Pending follow requests
+                // Pending friend requests
                 if (state.pendingRequests.isNotEmpty()) {
                     state.pendingRequests.forEach { requester ->
                         PendingRequestCard(
@@ -204,10 +205,24 @@ fun AccountScreen(
                     Spacer(Modifier.height(4.dp))
                 }
 
-                // Following count
-                AccountRow("Following", "${state.followingCount}")
+                // Friends count (tappable → friends list)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onFriendsClick)
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Friends", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "${state.friendCount}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
 
-                // Find People
+                // Find Friends
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -226,7 +241,7 @@ fun AccountScreen(
                         contentPadding = PaddingValues(0.dp)
                     ) {
                         Text(
-                            "Find People to Follow",
+                            "Find Friends",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -373,7 +388,7 @@ private fun PendingRequestCard(
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    "wants to follow you",
+                    "wants to be friends",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

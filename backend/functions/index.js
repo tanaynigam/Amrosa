@@ -208,12 +208,12 @@ exports.sendPushNotification = onDocumentCreated(
     let title, body;
     switch (type) {
       case 'follow_request':
-        title = 'New Follow Request';
-        body  = fromDisplayName + ' wants to follow you';
+        title = 'New Friend Request';
+        body  = fromDisplayName + ' wants to be friends';
         break;
       case 'follow_accepted':
-        title = 'Follow Request Accepted';
-        body  = fromDisplayName + ' accepted your follow request';
+        title = 'Friend Request Accepted';
+        body  = fromDisplayName + ' accepted your friend request';
         break;
       case 'recipe_shared':
         title = fromDisplayName + ' shared a recipe';
