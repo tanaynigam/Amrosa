@@ -90,7 +90,7 @@ Auth Gate       (🔐)  Full-screen login wall — shown when not signed in; no 
 Tab 1 — Your Recipes   (🔖)  All your recipes (personal + imported); Add Recipe FAB
 Tab 2 — Shared         (📩)  Recipes directly shared with you by followers
 Tab 3 — Discover       (✨)  Recommendations — planned; placeholder screen for now
-Tab 4 — Account        (👤)  Profile, follow system, notifications, sync, sign-out
+Tab 4 — Account        (👤)  Profile, co-chef system, sync, sign-out
 ```
 
 **Design decisions:**
@@ -98,6 +98,7 @@ Tab 4 — Account        (👤)  Profile, follow system, notifications, sync, si
 - **Sign-out deletes all local data.** `AccountViewModel.signOut()` calls `container.clearAllLocalData(context)` (Room `clearAllTables()` + sync prefs cleared) before `authRepository.signOut()`. Auth state change recomposes the nav graph back to the auth gate automatically.
 - **Sign-in triggers seed + sync.** `AmrosaApplication` observes `authStateFlow()` and calls `seeder.seedIfNeeded()` + `syncService.sync()` + `syncService.syncPersonalRecipes()` whenever a real (non-anonymous) user is detected.
 - **"All" tab is removed.** Your Recipes is the primary tab. Filter chips (`All | Personal | Imported`) provide in-tab filtering.
+- **In-app notification screen removed.** Replaced by Android push notifications via FCM. `NotificationsScreen` and `SocialNotification` model are deleted. Notification bell and unread badge are removed from Account tab.
 - `isImported` controls **author display when sharing** (`false` = real name, `true` = "Imported"), not which filter chip it appears under.
 - **Import** is a push route (`"import?reviewId=..."`) accessible from the Add Recipe FAB, not a tab.
 - Pending-review recipes float to the top of Your Recipes with a "Needs review — tap to confirm" badge; tapping opens the import screen with the review sheet pre-loaded.
@@ -229,9 +230,9 @@ Comments are stored in Firestore only (`shared_recipes/{recipeId}/comments/{comm
 | `personal_recipes/{uid}/recipes/{recipeId}` | User's personal recipes — push on save, pull on sign-in |
 | `shared_recipes/{recipeId}` | Community-shared recipes (visibility = "public") |
 | `shared_recipes/{recipeId}/comments/{commentId}` | Comments on shared recipes |
-| `users/{uid}` | Public user profile — displayName, photoUrl, updatedAt. Created/merged on each sign-in via `SocialRepository.upsertProfile()`. Used for user search. |
-| `follows/{followerId}_{followeeId}` | Follow relationship. Fields: followerId, followerName, followeeId, followeeName, status ("pending"\|"accepted"), createdAt. Composite indexes required: (followeeId, status) and (followerId, status). |
-| `notifications/{uid}/items/{notifId}` | Per-user notification inbox. Fields: type, fromUid, fromDisplayName, shareId?, recipeName?, createdAt, read. |
+| `users/{uid}` | Public user profile — displayName, photoUrl, email, updatedAt, **fcmToken**. Created/merged on each sign-in via `SocialRepository.upsertProfile()`. Used for user search and FCM push delivery. |
+| `follows/{followerId}_{followeeId}` | Co-Chef relationship. Fields: followerId, followerName, followeeId, followeeName, status ("pending"\|"accepted"), createdAt. Composite indexes required: (followeeId, status) and (followerId, status). |
+| `notifications/{uid}/items/{notifId}` | Notification inbox — written client-side, read by `sendPushNotification` Cloud Function to dispatch FCM push. Fields: type, fromUid, fromDisplayName, shareId?, recipeName?, createdAt, read. |
 | `shared_to/{recipientUid}/recipes/{shareId}` | Recipes shared directly to a specific user. Full recipe data + fromUid + fromDisplayName + sharedAt. Only the sender can write; only the recipient can read. |
 
 **Sync behaviour:**
@@ -363,23 +364,23 @@ object QuantityScaler {
 #### Detail screen
 Unit toggle (`SingleChoiceSegmentedButtonRow`: Original | Metric | Imperial) shown only when ≥1 ingredient has conversion data. Session-level — not persisted. Scaling and unit conversion computed together in parallel.
 
-#### Gemini conversion constants and Imperial rules
+#### Gemini conversion — metric only; imperial computed in code
 
-**Metric** (straightforward volume/weight SI):
-- 1 cup = 240 ml, 1 tbsp = 15 ml, 1 tsp = 5 ml, 1 fl oz = 30 ml
-- 1 oz = 28.35 g, 1 lb = 453.6 g, 1 kg = 2.205 lb
+**Gemini only produces metric fields.** Imperial is never computed by Gemini — it is computed deterministically by `computeImperialFromMetric()` in `parseRecipe.js` after Gemini returns.
 
-**Imperial** (must be weight or volume in US customary, NOT cups/tbsp/tsp):
-- Dry / weight ingredients: cups or grams → **oz or lbs** (use oz for < 1 lb, lbs for ≥ 1 lb)
-  - e.g. "2¼ cups flour" → `quantityValueImperial = 10.0`, `quantityUnitImperial = "oz"`, `quantityDisplayImperial = "10 oz"`
-- Liquid ingredients: cups/ml → **fl oz**
-  - e.g. "1 cup milk" → `quantityValueImperial = 8.0`, `quantityUnitImperial = "fl oz"`, `quantityDisplayImperial = "8 fl oz"`
-- Items already in imperial weight (oz/lbs): copy as-is
-- Non-convertible (whole eggs, cloves, "to taste", counts): all conversion fields → null
+**Gemini metric rules:**
+- Volume → ml or L: 1 cup = 240 ml, 1 tbsp = 15 ml, 1 tsp = 5 ml, 1 fl oz = 30 ml
+- Weight → g or kg: 1 oz = 28.35 g, 1 lb = 453.6 g
+- If original is already metric (g, kg, ml, L) → copy to metric fields as-is
+- Non-convertible (whole eggs, cloves, "to taste", counts) → all conversion fields null
 
-**Key rule:** The Imperial column must never be the same as Original when Original is in cups/tbsp/tsp. If the conversion would just repeat the cup measurement, convert to weight (dry) or fl oz (liquid) instead.
+**`computeImperialFromMetric(recipe)` logic (runs after Gemini):**
+- `g` or `kg` → grams first; if `< 453.6g` → oz (`grams / 28.35`, 1dp); if `≥ 453.6g` → lb (`grams / 453.6`, 2dp)
+- `ml` or `L` → ml first; → fl oz (`ml / 29.574`, 1dp)
+- Unknown or null metric unit → imperial = null
+- This guarantees imperial is never in cups/tbsp/tsp — only oz, lb, or fl oz
 
-All four seeded recipes (cookies, pizza, butter chicken, malai kofta) need their `quantityValueImperial/Unit/Display` fields updated in `DatabaseSeeder` to match these rules. Re-seed with correct values and bump DB version + seeder key.
+Gemini's imperial fields are **zeroed in `validateRecipe()`** before `computeImperialFromMetric()` runs, so Gemini output is completely ignored for imperial.
 
 ---
 
@@ -443,17 +444,21 @@ Tab 4. Always shows a signed-in user (auth is mandatory). Profile card · follow
 #### Launch sequence (`AmrosaApplication.onCreate()`)
 ```kotlin
 container = AppContainer(this)
+createNotificationChannel()   // creates "amrosa_social" NotificationChannel (Android 8+)
 appScope.launch {
-    // Seed + sync whenever a real user is signed in (on start or after sign-in)
     container.authRepository.authStateFlow().collect { user ->
         if (user != null && !user.isAnonymous) {
             container.seeder.seedIfNeeded()       // no-op currently
             container.syncService.sync()
             container.syncService.syncPersonalRecipes()
+            container.socialRepository.upsertProfile()
+            refreshFcmToken()   // fetches current FCM token → stores in users/{uid}.fcmToken
         }
     }
 }
 ```
+
+`refreshFcmToken()` calls `FirebaseMessaging.getInstance().token.await()` and passes it to `socialRepository.updateFcmToken(token)`. This ensures the stored token is always current on sign-in even if `onNewToken` was never triggered.
 
 #### Firebase config
 Project: `amrosa-2ec82`. Web client ID in `res/values/strings.xml` as `google_web_client_id`. SHA-1 debug fingerprint registered in Firebase Console for Google Sign-In.
@@ -596,45 +601,54 @@ shared_to/{uid}/recipes:        read = auth.uid == uid (recipient only)
 
 ---
 
-### F9 — Follow System & Direct In-App Sharing ✅
+### F9 — Co-Chefs (Friendship) System & Direct In-App Sharing ✅
 
 Two sharing modes exist in parallel:
 1. **Deep link sharing** (F8) — share an HTTPS link anyone can open; opens in app or browser
-2. **Direct in-app sharing** (F9) — share a recipe directly to a specific follower; they get an in-app notification and can review / save the recipe
+2. **Direct in-app sharing** (F9) — share a recipe directly to a specific co-chef; they get a push notification and can review / save the recipe
 
-The follow system and notifications live inside **Tab 4 (Account)** — no new tab needed.
+#### Co-Chef model (mutual bidirectional)
 
-#### Follow model
-
-**One-directional** (A follows B ≠ B follows A). Not a mutual friendship model.
+**Mutual friendship** — when B accepts A’s request, BOTH become co-chefs of each other. UI calls them “Co-Chefs” throughout (not “followers” or “friends”).
 
 **`follows/{followerId}_{followeeId}`** — document ID encodes both parties for direct lookup
+
 ```
-followerId:    String     // UID of the person who sent the request
+followerId:    String     // UID of the person who initiated
 followerName:  String     // display name snapshot
-followeeId:    String     // UID of the person being followed
+followeeId:    String     // UID of the recipient
 followeeName:  String
 status:        "pending" | "accepted"
 createdAt:     Timestamp
 ```
 
-Required composite Firestore indexes (Firestore logs a creation URL on first query; click it):
+**On `acceptFollowRequest(fromUid)`:** batch-commits two Firestore ops:
+1. Updates existing `follows/{fromUid_myUid}` → `status = "accepted"`
+2. Creates reverse doc `follows/{myUid_fromUid}` → `status = "accepted"`
+
+After this, `getFriendsFlow()` (queries `followerId == uid AND status == accepted`) shows count = 1 on both sides immediately.
+
+**On `unfriend(targetUid)`:** batch-deletes both `follows/{myUid_targetUid}` AND `follows/{targetUid_myUid}`. Handles cancelling a pending outgoing request (non-existent reverse doc delete is a no-op in Firestore).
+
+Required composite Firestore indexes:
 - `follows (followeeId ASC, status ASC)` — for pending requests query
-- `follows (followerId ASC, status ASC)` — for accepted following list
+- `follows (followerId ASC, status ASC)` — for co-chef list query
 
 **`users/{uid}`** — public user profile (written on every sign-in via `SocialRepository.upsertProfile()`)
 ```
 displayName:  String
 photoUrl:     String?
+email:        String      // required for email-based user search
+fcmToken:     String?     // FCM device token for push notifications
 updatedAt:    Timestamp
 ```
 
-**`notifications/{uid}/items/{notifId}`** — per-user notification inbox (client-delivered, no Cloud Function)
+**`notifications/{uid}/items/{notifId}`** — written client-side; triggers `sendPushNotification` Cloud Function
 ```
 type:              "follow_request" | "follow_accepted" | "recipe_shared"
 fromUid:           String
 fromDisplayName:   String
-shareId:           String?     // doc ID in shared_to — populated for recipe_shared
+shareId:           String?     // populated for recipe_shared
 recipeName:        String?     // populated for recipe_shared
 read:              Boolean
 createdAt:         Timestamp
@@ -652,57 +666,67 @@ sharedAt:          Timestamp
 
 ```
 AccountScreen (route "account_tab")
-  ├── Profile card: display name · email
-  ├── Notifications bell (top bar) — BadgedBox with unread count; taps → NotificationsScreen
-  ├── People section (signed-in only):
-  │     PendingRequestCards (one per pending follow request, with Accept ✓ / Decline ✗)
-  │     "Following: N" row
-  │     "Find People to Follow" button → UserSearchScreen
-  ├── Sync & Storage: last synced · recipe count · Force Sync
+  ├── Profile card: display name · email  [tap → edit name AlertDialog]
+  ├── Co-Chefs section (signed-in only):
+  │     PendingRequestCards — "X wants to be co-chefs" · Accept ✓ / Decline ✗
+  │     "Co-Chefs: N" row (tappable) → FriendsScreen
+  │     PersonSearch icon + "Find Co-Chefs" → UserSearchScreen
+  ├── Sync & Storage: last synced · recipe count
   ├── About: DB version · Aerion
-  └── [Sign Out] → confirmation dialog → clears data + signs out
+  └── [Sign Out] → dialog → clears data + signs out
 ```
+
+No notification bell. Push notifications are Android system notifications delivered via FCM.
+
+#### Push notifications (FCM — implemented ✅)
+
+**`AmrosaMessagingService`** (`service/AmrosaMessagingService.kt`) — extends `FirebaseMessagingService`:
+- `onNewToken(token)` — saves token to `users/{uid}.fcmToken` in Firestore
+- `onMessageReceived(message)` — shows system notification when app is foreground (background handled automatically by OS)
+- Notification channel ID: `"amrosa_social"`, name: `"Amrosa"`, importance: DEFAULT
+- Registered in `AndroidManifest.xml` with `com.google.firebase.MESSAGING_EVENT` intent filter
+- `POST_NOTIFICATIONS` permission declared (required Android 13+)
+
+**`sendPushNotification` Cloud Function** — Firestore `onDocumentCreated` trigger on `notifications/{uid}/items/{notifId}`:
+1. Reads `users/{uid}.fcmToken`; skips silently if missing
+2. Sends FCM via `admin.messaging().send()` with `android.notification.channelId = "amrosa_social"`
+
+| type | title | body |
+|---|---|---|
+| `follow_request` | "New Co-Chef Request" | "[Name] wants to be co-chefs" |
+| `follow_accepted` | "Co-Chef Request Accepted" | "[Name] accepted your co-chef request" |
+| `recipe_shared` | "[Name] shared a recipe" | `"“[Recipe Title]”"` |
 
 #### UserSearchScreen (push route `"user_search"`)
 
-- `OutlinedTextField` with 300ms debounce + `distinctUntilChanged` on `queryFlow`; placeholder “Search by name or email…”
-- Search strategy: run two Firestore prefix range queries in parallel and merge results (deduplicated by uid, capped at 20):
-  1. `displayName >= query` and `displayName <= query + ""` — name prefix search
-  2. `email >= query` and `email <= query + ""` — email prefix search
-- **`users/{uid}` must store `email` field** — written in `SocialRepository.upsertProfile()` so email search works
-- Excludes self from results
-- Each result row: avatar initial circle · display name (bold, `bodyLarge`) · email address (secondary, `bodySmall`, `onSurfaceVariant`) · Follow / Requested / Following button
-- Follow status pre-populated for all results on each search
+- `OutlinedTextField` with 300ms debounce; placeholder “Find co-chefs by name or email…”
+- If query contains `@` → exact `whereEqualTo("email", query.trim().lowercase())` lookup
+- Otherwise → displayName prefix range query (`displayName >= query AND <= query + ""`, capped at 20)
+- `UserProfile` domain model: uid, displayName, email?, photoUrl?, createdAt
+- Each result row: avatar initial circle · display name (`bodyLarge`) · email (`bodySmall`, `onSurfaceVariant`) · **Add Co-Chef** / **Requested** / **Co-Chef ✓** button
 
-#### NotificationsScreen (push route `"notifications"`)
+#### FriendsScreen (push route `"friends"`)
 
-- Live `getNotificationsFlow()` stream (latest 50, ordered by `createdAt DESC`)
-- `NotificationRow`: tinted icon circle (primaryContainer when unread) · bold sender · action label · relative timestamp · unread dot
-- Tap `follow_request` or `follow_accepted` → navigates to `account_tab`
-- Tap `recipe_shared` → navigates to `received/{shareId}`
-- "Mark all read" TextButton in TopAppBar when any unread
+- Accessible by tapping the “Co-Chefs: N” row on Account page
+- Lists all accepted co-chefs (from `getFriendsFlow()`) with initial avatar circle
+- **Remove** button → confirmation dialog (“Remove Co-Chef?”) → `unfriend()` → batch-deletes both direction docs
 
 #### ReceivedRecipeScreen (push route `"received/{shareId}"`)
 
 - Loads from `shared_to/{uid}/recipes/{shareId}` via `SocialRepository.getReceivedRecipe()`
-- "From: [sender name]" banner in `tertiaryContainer`
+- “From: [sender name]” banner in `tertiaryContainer`
 - Read-only detail: yield adjuster, unit toggle (if conversions exist), sections/ingredients/steps
-- "Save to My Recipes" bottom bar: creates fresh Room copy (new UUIDs for recipe + sections + ingredients + steps + refs), `authorId = currentUid`, `isImported = false`, `visibility = "private"`, `needsReview = false`
-- On save: `LaunchedEffect(savedRecipeId)` → `onSaved(newRecipeId)` → `navController.navigate("recipe/$newRecipeId")`
+- “Save to My Recipes” bottom bar: fresh Room copy (new UUIDs), `authorId = currentUid`, `isImported = false`, `visibility = "private"`, `needsReview = false`
+- On save → navigates to `"recipe/{newRecipeId}"`
 
 #### Direct recipe sharing (from RecipeDetailScreen)
 
-- **Send icon** (AutoMirrored.Send) in top bar (owners only, separate from the public Share icon)
-- Tap → `viewModel.loadFollowing()` + opens `FollowerPickerSheet`
-- `FollowerPickerSheet` (`ModalBottomSheet`): list of accepted followers; each row has a Send IconButton
-- Send → `viewModel.shareToFollower(recipientUid, recipientName)` → `SocialRepository.shareRecipeTo()`:
+- Single **Share icon** in top bar (owners only) → `ShareOptionsSheet` (ModalBottomSheet)
+- “Send to co-chef” → `FollowerPickerSheet`: list of accepted co-chefs with Send icon per row
+- Send → `SocialRepository.shareRecipeTo()`:
   1. Writes full recipe JSON to `shared_to/{recipientUid}/recipes/{shareId}`
-  2. Delivers `recipe_shared` notification to recipient's inbox
-- Snackbar shown: "Recipe sent to [Name]"
-
-#### Push notifications (FCM — planned)
-
-Background/foreground push via Firebase Cloud Messaging. Token stored in `users/{uid}.fcmToken`. Notification types mirror the in-app inbox: `follow_request`, `follow_accepted`, `recipe_shared`.
+  2. Delivers `recipe_shared` notification → triggers FCM push
+- Snackbar: “Recipe sent to [Name]”
 
 ---
 
@@ -759,28 +783,26 @@ DiscoverScreen  (route "discover_tab" — placeholder)
 
 ── Bottom Tab 4: Account ──────────────────────────────────────────────
 AccountScreen  (route "account_tab")
-  ├── TopAppBar: "Account" title · Bell icon (BadgedBox with unread count) → NotificationsScreen
+  ├── TopAppBar: "Account" title (no notification bell — push notifications are OS-level)
   ├── Profile card: display name · email  [tap to edit name → AlertDialog with OutlinedTextField]
-  ├── People section (signed-in only):
-  │     PendingRequestCard per pending follow request
-  │       avatar initial · "X wants to follow you" · Accept ✓ / Decline ✗ buttons
+  ├── Co-Chefs section (signed-in only):
+  │     PendingRequestCard per pending request
+  │       avatar initial · "X wants to be co-chefs" · Accept ✓ / Decline ✗ buttons
   │       CircularProgressIndicator while action is in-flight
-  │     "Following: N" stat row
-  │     PersonSearch icon + "Find People to Follow" TextButton → UserSearchScreen
-  ├── Sync & Storage: last synced · recipe count · Force Sync button
+  │     "Co-Chefs: N" stat row (tappable) → FriendsScreen
+  │     PersonSearch icon + "Find Co-Chefs" TextButton → UserSearchScreen
+  ├── Sync & Storage: last synced · recipe count
   ├── About: DB version · Aerion
   └── [Sign Out] → dialog: "Recipes removed from device..." → clears data + signs out
 
-NotificationsScreen  (pushed route "notifications")
-  ├── "Mark all read" TextButton in TopAppBar (when any unread)
-  ├── Full notification history (read + unread), latest first
-  ├── follow_request → tap → navigates to account_tab
-  ├── follow_accepted → tap → navigates to account_tab
-  └── recipe_shared → tap → navigates to received/{shareId}
+FriendsScreen  (pushed route "friends")
+  ├── List of accepted co-chefs: avatar initial · display name · [Remove] button
+  ├── Remove → confirmation dialog ("Remove Co-Chef?") → unfriend() batch delete
+  └── Empty state: "No co-chefs yet"
 
 UserSearchScreen  (pushed route "user_search")
-  ├── OutlinedTextField (300ms debounce, "Search by name or email…")
-  └── Results: avatar initial · display name (bold) · email (secondary) · [Follow] / "Requested" / "Following" button
+  ├── OutlinedTextField (300ms debounce, "Find co-chefs by name or email…")
+  └── Results: avatar initial · display name · email (secondary) · [Add Co-Chef] / "Requested" / "Co-Chef ✓" button
 
 ── Push routes (from any tab) ─────────────────────────────────────────
 RecipeDetailScreen  (pushed route "recipe/{recipeId}")
@@ -807,10 +829,10 @@ ShareOptionsSheet  (ModalBottomSheet — from Share icon)
   ├── "Send to follower" ListItem (default — highlighted) → dismisses sheet, opens FollowerPickerSheet
   └── "Share link" ListItem → dismisses sheet, triggers share link flow
 
-FollowerPickerSheet  (ModalBottomSheet — from "Send to follower")
-  ├── Accepted followers list: avatar initial circle · display name · Send IconButton per row
-  ├── Empty state: "You're not following anyone yet"
-  └── Tap Send → shareToFollower() → writes to shared_to/ + delivers recipe_shared notif
+FollowerPickerSheet  (ModalBottomSheet — from "Send to co-chef")
+  ├── Accepted co-chefs list: avatar initial circle · display name · Send IconButton per row
+  ├── Empty state: "You have no co-chefs yet"
+  └── Tap Send → shareToFollower() → writes to shared_to/ + delivers recipe_shared notif → FCM push
         Snackbar: "Recipe sent to [Name]"
 
 ReceivedRecipeScreen  (pushed route "received/{shareId}")
@@ -829,7 +851,8 @@ RecipeEditorScreen  (pushed route "recipe/edit/{recipeId}")
   │     [Personal — Name]  — isImported=false, authorDisplayName=user's name
   │     Default: Imported for imported recipes; Personal for freeform recipes
   ├── Sections with ingredients + steps (add/reorder/delete)
-  └── Save → Room (updates isImported + authorDisplayName) + push to personal_recipes Firestore
+  ├── Save → Room (updates isImported + authorDisplayName) + push to personal_recipes Firestore
+  └── "Delete Recipe" button (red outlined, bottom) → confirmation dialog → deleteFullRecipe() → navigate back
 
 CookingModeScreen  (pushed from RecipeDetailScreen)
   ├── Fullscreen, one step at a time, large text
@@ -922,28 +945,27 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F8 — Comments** | `Comment` domain model; post/delete; Firestore subcollection; delete by commenter or recipe owner |
 | **F8 — Security rules** | Full Firestore rules deployed; per-UID personal access; `shared_recipes` public read; comment create/delete moderation |
 | **Seeder disabled** | `seedIfNeeded()` is a no-op; fresh installs start blank |
-| **F9 — Follow system** | Request-and-accept following; `users/`, `follows/`, `notifications/`, `shared_to/` Firestore collections; `SocialRepository.kt`; `UserProfile` + `SocialNotification` domain models |
-| **F9 — User search** | `UserSearchScreen` + `UserSearchViewModel`; prefix search by display name; Follow/Unfollow/Requested states per user |
-| **F9 — Account tab social** | Pending follow requests inline with Accept/Decline; Following count; "Find People" link; Notification bell with unread badge |
-| **F9 — Direct recipe sharing** | `FollowerPickerSheet`; stores full recipe in `shared_to/`; delivers `recipe_shared` notification |
-| **F9 — Notifications** | `NotificationsScreen` + `NotificationsViewModel`; live unread count stream; mark-as-read / mark-all-read; relative timestamp display |
-| **F9 — Direct recipe sharing** | "Send to follower" icon in Recipe Detail top bar (owners only); `FollowerPickerSheet` bottom sheet; stores full recipe data in `shared_to/{recipientUid}/recipes/{shareId}`; delivers `recipe_shared` notification to recipient |
-| **F9 — Received recipe** | `ReceivedRecipeScreen` + `ReceivedRecipeViewModel`; loads from `shared_to/{uid}/recipes/{shareId}`; shows sender name; read-only detail with scaling; "Save to My Recipes" → Room copy → navigate to saved recipe |
-| **F9 — Notification nav** | `follow_request` / `follow_accepted` → Account tab; `recipe_shared` → `received/{shareId}` route |
+| **F9 — Co-Chefs (mutual friends)** | Bidirectional friendship: `acceptFollowRequest()` batch-creates reverse doc so both see count = 1; `unfriend()` batch-deletes both docs; `getFriendsFlow()` queries `followerId == uid AND status == accepted` |
+| **F9 — User search** | `UserSearchScreen`; email lookup (`@` in query → exact match) or displayName prefix; shows name + email; "Add Co-Chef" / "Co-Chef ✓" / "Requested" states |
+| **F9 — Account tab social** | Co-Chefs section: pending requests inline with Accept/Decline; "Co-Chefs: N" tappable row → FriendsScreen; "Find Co-Chefs" link |
+| **F9 — FriendsScreen** | Lists accepted co-chefs; Remove button → confirmation → `unfriend()` batch delete |
+| **F9 — Direct recipe sharing** | Single Share icon → `ShareOptionsSheet`; "Send to co-chef" → `FollowerPickerSheet`; stores full recipe in `shared_to/{recipientUid}/recipes/{shareId}`; delivers notification → FCM push |
+| **F9 — FCM push notifications** | `AmrosaMessagingService` (`onNewToken` stores token, `onMessageReceived` shows foreground notification); `sendPushNotification` Cloud Function triggered on `notifications/{uid}/items` creation; channel `"amrosa_social"` created on app start; Co-Chef / recipe share push text |
+| **F9 — Received recipe** | `ReceivedRecipeScreen` + `ReceivedRecipeViewModel`; loads from `shared_to/{uid}/recipes/{shareId}`; sender banner; read-only detail with scaling; "Save to My Recipes" → Room copy → navigate to saved recipe |
+| **Delete recipe** | Red "Delete Recipe" button at bottom of editor; confirmation dialog; calls `repository.deleteFullRecipe(recipeId)` then navigates back |
+| **URL import reliability** | `extractJsonLdRecipe()` extracts `schema.org/Recipe` JSON-LD from raw HTML (before cleanHtml strips scripts) — major recipe sites include this for SEO; realistic browser headers; 402/403 → actionable error message suggesting freeform entry |
+| **Imperial unit fix** | Gemini only populates metric fields; `computeImperialFromMetric()` in Cloud Function computes imperial from metric with exact math: g/kg → oz (< 453.6g) or lb; ml/L → fl oz (1 fl oz = 29.574 ml) |
 
 ### Planned — In Priority Order
 
 | # | Feature | Description |
 |---|---|---|
-| **next** | User search by email | Add `email` field to `users/{uid}`; parallel name+email prefix query; show email in result rows |
-| **next** | Imperial unit fix | Dry ingredients → oz/lbs; liquids → fl oz; update seeded recipes in DatabaseSeeder + Gemini prompt |
-| **next** | Imperial unit fix | Dry ingredients → oz/lbs; liquids → fl oz; update seeded recipes in DatabaseSeeder + Gemini prompt |
-| — | FCM push notifications | Background push for `follow_request` / `recipe_shared` via Cloud Function triggered on Firestore write |
 | — | Discover / Recommendations tab | Personalised recipe suggestions (Gemini-powered); replaces placeholder |
 | — | Public profile view | View another user's public recipes at `"profile/{uid}"` |
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil display |
 | — | Shopping List | Dedicated screen; add ingredients from recipe detail |
-| — | iOS gaps (see below) | Imperial unit fix, user search by email |
+| — | iOS: Co-Chefs system | Port mutual friendship, FriendsScreen, FCM push, Co-Chefs terminology to iOS |
+| — | iOS: Universal Links | `apple-app-site-association` file + `Associated Domains` entitlement |
 
 ---
 
@@ -1010,7 +1032,6 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 ## Out of Scope (permanently removed)
 
-- Mutual "friendship" model (two-way) — the follow system is one-directional ✅ in scope; bidirectional friending is ❌
 - Meal planning / calendar integration — ❌
 - Nutritional information — ❌
 - Voice input / hands-free mode — ❌
@@ -1085,24 +1106,28 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 - Push sync: only runs for `!authRepository.isAnonymous` users.
 - On sign-in: `AmrosaApplication.authStateFlow` observer automatically triggers seed + sync.
 
-### Social / Follow System (F9)
+### Social / Co-Chefs System (F9)
 - **`SocialRepository`** in `data/remote/SocialRepository.kt` — all Firestore ops for users, follows, notifications, shared_to.
-- **`UserProfile`** domain model — uid, displayName, photoUrl, createdAt.
-- **`SocialNotification`** domain model — id, type, fromUid, fromDisplayName, shareId?, recipeName?, createdAt, read.
-- **`upsertProfile()`** writes `displayName`, `photoUrl`, **`email`**, and `updatedAt` to `users/{uid}` on every real sign-in (and after display name changes). The `email` field is required for email-based user search.
-- **Follow doc ID** = `{followerId}_{followeeId}`. Composite Firestore indexes needed:
+- **`UserProfile`** domain model — uid, displayName, email?, photoUrl?, createdAt.
+- **`SocialNotification` model is deleted** — in-app notification screen removed. Notifications write to Firestore to trigger FCM push only.
+- **`upsertProfile()`** writes `displayName`, `photoUrl`, `email`, `fcmToken` (partial via `updateFcmToken`), and `updatedAt` to `users/{uid}` on every real sign-in.
+- **Co-chef doc ID** = `{followerId}_{followeeId}`. Composite Firestore indexes needed:
   - `follows (followeeId ASC, status ASC)` — for pending requests query
-  - `follows (followerId ASC, status ASC)` — for following list query
-  Firestore will log the index creation URL on first query; click it.
-- **Notification delivery** = write to `notifications/{toUid}/items/{uuid}`. Done client-side; no Cloud Function required.
-- **Direct share** stores full recipe JSON in `shared_to/{recipientUid}/recipes/{shareId}` and delivers a `recipe_shared` notification. The recipient opens `ReceivedRecipeScreen` which loads from that path.
+  - `follows (followerId ASC, status ASC)` — for co-chef list query
+- **`acceptFollowRequest(fromUid)`** — batch-commits: (1) updates existing `follows/{fromUid_uid}` to accepted; (2) creates reverse `follows/{uid_fromUid}` as accepted. Both sides now see count = 1.
+- **`unfriend(targetUid)`** — batch-deletes both `follows/{uid_target}` and `follows/{target_uid}`. No-op for non-existent doc. Also handles cancelling pending outgoing requests.
+- **`getFriendsFlow()`** — queries `followerId == uid AND status == accepted`. Returns correct friend list because acceptance creates both direction docs.
+- **Notification delivery** = write to `notifications/{toUid}/items/{uuid}`. Client-side. The `sendPushNotification` Cloud Function trigger reads this and sends FCM push.
+- **FCM token** — `AmrosaMessagingService.onNewToken()` stores token in `users/{uid}.fcmToken`. `refreshFcmToken()` in `AmrosaApplication` fetches current token on each sign-in. `updateFcmToken(token)` in `SocialRepository` writes the field.
+- **No in-app notification screen** — `NotificationsScreen`, `NotificationsViewModel`, `getNotificationsFlow()`, `getUnreadCountFlow()`, `markNotificationRead()`, `markAllNotificationsRead()` are all deleted.
+- **Direct share** stores full recipe JSON in `shared_to/{recipientUid}/recipes/{shareId}` + delivers `recipe_shared` notification → FCM push.
 - **`ReceivedRecipeViewModel.saveToMyRecipes()`** creates a fresh Room copy (new UUIDs) with `authorId = currentUid`, `isImported = false`, `visibility = "private"`.
-- **Notification bell badge** on Account tab top bar uses `SocialRepository.getUnreadCountFlow()`.
-- **Pending follow requests** shown inline in AccountScreen as cards with Accept/Decline buttons.
-- **User search** queries both `displayName` and `email` fields with prefix range queries; results show both name and email; deduplicate by uid.
-- **Edit display name**: `AccountViewModel.updateDisplayName(name)` calls `authRepository.updateDisplayName(name)` (Firebase `updateProfile`) then `socialRepository.upsertProfile()`. Shows snackbar "Name updated".
-- **Merged share button**: single Share icon in `RecipeDetailScreen` top bar → `ShareOptionsSheet` with "Send to follower" (default, top) and "Share link" options. The old separate Send icon is removed.
-- **Shared tab (Tab 2)** = inbox of received recipes. Load from `shared_to/{uid}/recipes/` — NOT from `shared_recipes` community collection.
+- **Pending co-chef requests** shown inline in AccountScreen as cards with Accept/Decline buttons; text "wants to be co-chefs".
+- **User search** — `searchUsers(query)`: if `query.contains('@')` → exact `whereEqualTo("email", ...)` lookup; else displayName prefix range query with `` sentinel. Results show name + email. Buttons: "Add Co-Chef" / "Requested" / "Co-Chef ✓".
+- **Edit display name**: `AccountViewModel.updateDisplayName(name)` calls `authRepository.updateDisplayName(name)` then `socialRepository.upsertProfile()`. Snackbar "Name updated".
+- **Merged share button**: single Share icon → `ShareOptionsSheet` with "Send to co-chef" and "Share link".
+- **Shared tab (Tab 2)** = inbox of received recipes. Load from `shared_to/{uid}/recipes/` — NOT `shared_recipes` community collection.
+- **Delete recipe**: `RecipeEditorViewModel.deleteRecipe()` calls `repository.deleteFullRecipe(recipeId)` on IO dispatcher, sets `deleteComplete = true` → screen navigates back.
 
 ### AppContainer
 - `clearAllLocalData(context: Context)` — `database.clearAllTables()` + clears `amrosa_sync` prefs. Called on sign-out.
