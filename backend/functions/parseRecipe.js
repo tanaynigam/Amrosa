@@ -10,12 +10,12 @@ const IMPORT_SYSTEM_INSTRUCTION =
   "Given text content from a recipe source (web page, spreadsheet, document, or plain text), " +
   "extract the recipe into the exact JSON schema provided. Be thorough — capture every " +
   "ingredient, every step, and link ingredients to steps where mentioned. " +
-  "Populate the metric and imperial conversion fields for every ingredient where a sensible " +
-  "conversion exists. " +
-  "METRIC: convert volumes (cups/tbsp/tsp/fl oz) → ml or L; weights (oz/lb) → g or kg. " +
-  "IMPERIAL: dry or weight ingredients → oz (if under 1 lb) or lbs; liquid ingredients → fl oz. " +
-  "NEVER use cups, tbsp, tsp, or any volume measure in the imperial fields — imperial is weight-first. " +
-  "Leave conversion fields null for uncountable quantities (e.g. 'to taste', 'a pinch', counts like '2 cloves'). " +
+  "Populate ONLY the metric conversion fields for every ingredient where a sensible conversion exists: " +
+  "volumes (cups/tbsp/tsp/fl oz) → ml or L; weights (oz/lb) → g or kg. " +
+  "If the original unit is already metric (g, kg, ml, L), copy it into the metric fields as-is. " +
+  "Leave ALL imperial fields (quantityValueImperial, quantityUnitImperial, quantityDisplayImperial) as null — " +
+  "they are computed automatically from metric. " +
+  "Leave ALL conversion fields null for uncountable quantities (e.g. 'to taste', 'a pinch', '2 cloves', '3 eggs'). " +
   "If any important field is genuinely unclear, add a brief note in the parseNotes field. " +
   "Return ONLY valid JSON, no markdown, no explanation.";
 
@@ -24,12 +24,13 @@ const FREEFORM_SYSTEM_INSTRUCTION =
   "The user has typed a recipe from memory — it may be incomplete, informal, partial, or unstructured. " +
   "Your job is to extract everything you can and structure it into the exact JSON schema provided. " +
   "Fill in missing fields with sensible defaults: servings = 1 if not stated, times = null if unknown. " +
-  "Populate the metric and imperial conversion fields for every ingredient where a sensible " +
-  "conversion exists. " +
-  "METRIC: convert volumes (cups/tbsp/tsp/fl oz) → ml or L; weights (oz/lb) → g or kg. " +
-  "IMPERIAL: dry or weight ingredients → oz (if under 1 lb) or lbs; liquid ingredients → fl oz. " +
+  "Populate ONLY the metric conversion fields for every ingredient where a sensible conversion exists: " +
+  "volumes (cups/tbsp/tsp/fl oz) → ml or L; weights (oz/lb) → g or kg. " +
+  "If the original unit is already metric (g, kg, ml, L), copy it into the metric fields as-is. " +
+  "Leave ALL imperial fields (quantityValueImperial, quantityUnitImperial, quantityDisplayImperial) as null — " +
+  "they are computed automatically from metric. " +
+  "Leave ALL conversion fields null for uncountable quantities (e.g. 'to taste', 'a pinch', '2 cloves', '3 eggs'). " +
   "NEVER use cups, tbsp, tsp, or any volume measure in the imperial fields — imperial is weight-first. " +
-  "Leave conversion fields null for uncountable quantities (e.g. 'to taste', 'a pinch', counts like '2 cloves'). " +
   "Use parseNotes to flag anything you had to infer, guess, or fill in with a default. " +
   "Return ONLY valid JSON, no markdown, no explanation.";
 
@@ -383,6 +384,68 @@ async function callGemini(content, sourceHint, apiKey, systemInstruction) {
   }
 }
 
+// ─── Imperial computation ─────────────────────────────────────────────────────
+
+/**
+ * Format a number removing needless trailing zeros.
+ * 2.0 → "2",  2.50 → "2.5",  0.25 → "0.25"
+ */
+function fmtNum(n) {
+  return parseFloat(n.toFixed(2)).toString();
+}
+
+/**
+ * Compute imperial fields deterministically from metric fields.
+ * Rules:
+ *   g / kg  → oz  (< 453.6 g)  or lb  (≥ 453.6 g)
+ *   ml / L  → fl oz
+ *   anything else or null metric → imperial stays null
+ *
+ * Called after validateRecipe so every metric field is already null-defaulted.
+ */
+function computeImperialFromMetric(recipe) {
+  for (const ing of recipe.ingredients) {
+    const val  = ing.quantityValueMetric;
+    const unit = (ing.quantityUnitMetric || "").toLowerCase().trim();
+
+    if (val == null || !unit) {
+      ing.quantityValueImperial   = null;
+      ing.quantityUnitImperial    = null;
+      ing.quantityDisplayImperial = null;
+      continue;
+    }
+
+    if (unit === "g" || unit === "kg") {
+      const grams  = unit === "kg" ? val * 1000 : val;
+      if (grams >= 453.6) {
+        const lb     = grams / 453.6;
+        const rounded = Math.round(lb * 100) / 100;
+        ing.quantityValueImperial   = rounded;
+        ing.quantityUnitImperial    = "lb";
+        ing.quantityDisplayImperial = `${fmtNum(rounded)} lb`;
+      } else {
+        const oz     = grams / 28.35;
+        const rounded = Math.round(oz * 10) / 10;
+        ing.quantityValueImperial   = rounded;
+        ing.quantityUnitImperial    = "oz";
+        ing.quantityDisplayImperial = `${fmtNum(rounded)} oz`;
+      }
+    } else if (unit === "ml" || unit === "l") {
+      const ml     = unit === "l" ? val * 1000 : val;
+      const floz   = ml / 29.574;
+      const rounded = Math.round(floz * 10) / 10;
+      ing.quantityValueImperial   = rounded;
+      ing.quantityUnitImperial    = "fl oz";
+      ing.quantityDisplayImperial = `${fmtNum(rounded)} fl oz`;
+    } else {
+      // Unknown or non-numeric metric unit (shouldn't happen, but be safe)
+      ing.quantityValueImperial   = null;
+      ing.quantityUnitImperial    = null;
+      ing.quantityDisplayImperial = null;
+    }
+  }
+}
+
 // ─── Validation ───────────────────────────────────────────────────────────────
 
 function validateRecipe(recipe) {
@@ -417,15 +480,19 @@ function validateRecipe(recipe) {
   recipe.description       = recipe.description || null;
   recipe.parseNotes        = recipe.parseNotes || null;
 
-  // Ensure conversion fields default to null if omitted by Gemini
+  // Null-default metric fields if Gemini omitted them
   for (const ing of recipe.ingredients) {
-    ing.quantityValueMetric    = ing.quantityValueMetric    ?? null;
-    ing.quantityUnitMetric     = ing.quantityUnitMetric     ?? null;
-    ing.quantityDisplayMetric  = ing.quantityDisplayMetric  ?? null;
-    ing.quantityValueImperial  = ing.quantityValueImperial  ?? null;
-    ing.quantityUnitImperial   = ing.quantityUnitImperial   ?? null;
-    ing.quantityDisplayImperial = ing.quantityDisplayImperial ?? null;
+    ing.quantityValueMetric   = ing.quantityValueMetric   ?? null;
+    ing.quantityUnitMetric    = ing.quantityUnitMetric    ?? null;
+    ing.quantityDisplayMetric = ing.quantityDisplayMetric ?? null;
+    // Imperial is always null here — computeImperialFromMetric fills them below
+    ing.quantityValueImperial   = null;
+    ing.quantityUnitImperial    = null;
+    ing.quantityDisplayImperial = null;
   }
+
+  // Compute imperial from metric with exact math — never trust Gemini for this
+  computeImperialFromMetric(recipe);
 }
 
 module.exports = { parseRecipeFromUrl, parseRecipeFromContent, formatRecipeFromText };
