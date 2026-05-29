@@ -10,6 +10,7 @@ final class AppContainer {
     let syncService: RecipeSyncService
     let cloudFunctions: CloudFunctionsService
     let sharedRecipeService: SharedRecipeService
+    let socialRepository: SocialRepository
 
     init() {
         let schema = Schema([
@@ -30,17 +31,20 @@ final class AppContainer {
         let functions = CloudFunctionsService()
         let sync = RecipeSyncService(repository: repo, authRepository: auth)
         let shared = SharedRecipeService(authRepository: auth, repository: repo)
+        let social = SocialRepository(authRepository: auth)
 
         self.recipeRepository = repo
         self.authRepository = auth
         self.cloudFunctions = functions
         self.syncService = sync
         self.sharedRecipeService = shared
+        self.socialRepository = social
     }
 
     /// Called after Firebase is configured and user is signed in.
-    /// Syncs personal recipes from Firestore.
+    /// Upserts the user profile and syncs personal recipes from Firestore.
     func onSignIn() async {
+        await socialRepository.upsertProfile()
         await syncService.sync()
     }
 

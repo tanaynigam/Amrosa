@@ -326,7 +326,13 @@ final class RecipeEditorViewModel {
                     quantityDisplay: edIng.quantityDisplay.isEmpty ? nil : edIng.quantityDisplay,
                     groupLabel: edIng.groupLabel.isEmpty ? nil : edIng.groupLabel,
                     isOptional: edIng.isOptional,
-                    orderIndex: iIdx
+                    orderIndex: iIdx,
+                    quantityValueMetric: nil,
+                    quantityUnitMetric: nil,
+                    quantityDisplayMetric: nil,
+                    quantityValueImperial: nil,
+                    quantityUnitImperial: nil,
+                    quantityDisplayImperial: nil
                 ))
             }
             for (stIdx, edStep) in edSec.steps.enumerated() {

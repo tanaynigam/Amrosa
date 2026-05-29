@@ -8,6 +8,9 @@ struct RecipeDetailView: View {
     @State private var navigateToEditor = false
     @State private var showForkAlert = false
     @State private var isForkMode = false
+    @State private var showShareOptions = false
+    @State private var showFollowerPicker = false
+    @State private var showSentConfirmation = false
 
     var body: some View {
         Group {
@@ -25,10 +28,11 @@ struct RecipeDetailView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                // Share button — owners only
+                // Single share button — owners only; opens ShareOptionsSheet
                 if viewModel?.isOwner == true {
                     Button {
-                        viewModel?.handleShareTap()
+                        viewModel?.loadFollowing()
+                        showShareOptions = true
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
@@ -70,6 +74,36 @@ struct RecipeDetailView: View {
         } message: {
             Text("This recipe will be visible to anyone with the link. You can make it private again at any time.")
         }
+        .sheet(isPresented: $showShareOptions) {
+            if let vm = viewModel {
+                ShareOptionsSheet(
+                    isPresented: $showShareOptions,
+                    onSendToFollower: {
+                        showShareOptions = false
+                        showFollowerPicker = true
+                    },
+                    onShareLink: {
+                        showShareOptions = false
+                        vm.handleShareTap()
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showFollowerPicker) {
+            if let vm = viewModel {
+                FollowerPickerSheet(viewModel: vm, isPresented: $showFollowerPicker)
+            }
+        }
+        .alert("Sent!", isPresented: $showSentConfirmation) {
+            Button("OK", role: .cancel) { viewModel?.shareSentToName = nil }
+        } message: {
+            if let name = viewModel?.shareSentToName {
+                Text("Recipe sent to \(name).")
+            }
+        }
+        .onChange(of: viewModel?.shareSentToName) { _, newVal in
+            if newVal != nil { showSentConfirmation = true }
+        }
         .alert("Fork Recipe?", isPresented: $showForkAlert) {
             Button("Fork") { isForkMode = true; navigateToEditor = true }
             Button("Cancel", role: .cancel) {}
@@ -82,7 +116,8 @@ struct RecipeDetailView: View {
                     recipe: recipe,
                     repository: container.recipeRepository,
                     authRepository: container.authRepository,
-                    sharedRecipeService: container.sharedRecipeService
+                    sharedRecipeService: container.sharedRecipeService,
+                    socialRepository: container.socialRepository
                 )
                 // Start comment listener if recipe is already public
                 viewModel?.startCommentListener()
@@ -564,6 +599,147 @@ private struct RecipeCommentsSection: View {
                 }
             }
             .padding(.horizontal)
+        }
+    }
+}
+
+// MARK: - Share options sheet
+
+private struct ShareOptionsSheet: View {
+    @Binding var isPresented: Bool
+    let onSendToFollower: () -> Void
+    let onShareLink: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Handle
+            Capsule()
+                .fill(Color(.systemFill))
+                .frame(width: 36, height: 4)
+                .padding(.top, 12)
+
+            Text("Share Recipe")
+                .font(.headline)
+                .padding(.vertical, 16)
+
+            Divider()
+
+            // Option A: Send to follower (highlighted)
+            Button(action: onSendToFollower) {
+                HStack(spacing: 14) {
+                    Image(systemName: "paperplane.fill")
+                        .font(.title3)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Send to a follower")
+                            .font(.body)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.primary)
+                        Text("Share directly — only that person will see it")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .background(Color.accentColor.opacity(0.07))
+            }
+            .buttonStyle(.plain)
+
+            Divider()
+                .padding(.leading, 66)
+
+            // Option B: Share link
+            Button(action: onShareLink) {
+                HStack(spacing: 14) {
+                    Image(systemName: "link")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Share link")
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                        Text("Anyone with the link can view this recipe")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+            }
+            .buttonStyle(.plain)
+
+            Spacer().frame(minHeight: 20)
+        }
+        .presentationDetents([.height(240)])
+        .presentationDragIndicator(.hidden)
+    }
+}
+
+// MARK: - Follower picker sheet
+
+private struct FollowerPickerSheet: View {
+    @Bindable var viewModel: RecipeDetailViewModel
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if viewModel.isFollowingLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if viewModel.following.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "person.2.slash")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.secondary)
+                        Text("You're not following anyone yet")
+                            .foregroundStyle(.secondary)
+                        Text("Follow people from the Account tab to share recipes with them.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(viewModel.following) { person in
+                        HStack {
+                            // Avatar
+                            ZStack {
+                                Circle()
+                                    .fill(Color.accentColor.opacity(0.12))
+                                    .frame(width: 40, height: 40)
+                                Text(String(person.displayName.prefix(1)).uppercased())
+                                    .font(.headline)
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                            Text(person.displayName)
+                                .font(.body)
+                            Spacer()
+                            Button("Send") {
+                                viewModel.shareToFollower(uid: person.uid, name: person.displayName)
+                                isPresented = false
+                            }
+                            .font(.subheadline)
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle("Send Recipe")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { isPresented = false }
+                }
+            }
         }
     }
 }

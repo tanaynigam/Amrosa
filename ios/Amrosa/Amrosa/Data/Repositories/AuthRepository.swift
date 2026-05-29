@@ -38,7 +38,7 @@ final class AuthRepository {
 
     func signInAnonymouslyIfNeeded() async {
         guard auth.currentUser == nil else { return }
-        try? await auth.signInAnonymously()
+        _ = try? await auth.signInAnonymously()
     }
 
     // MARK: - Google
@@ -121,6 +121,15 @@ final class AuthRepository {
         } catch {
             return .failure(error)
         }
+    }
+
+    // MARK: - Profile update
+
+    func updateDisplayName(_ name: String) async throws {
+        guard let user = auth.currentUser else { return }
+        let request = user.createProfileChangeRequest()
+        request.displayName = name.trimmingCharacters(in: .whitespaces)
+        try await request.commitChanges()
     }
 
     // MARK: - Sign Out

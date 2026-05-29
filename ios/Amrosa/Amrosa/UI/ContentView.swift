@@ -55,19 +55,19 @@ private struct MainAppView: View {
     var body: some View {
         TabView {
             NavigationStack {
-                AllRecipesView()
-            }
-            .tabItem { Label("All", systemImage: "book.open") }
-
-            NavigationStack {
                 YourRecipesView()
             }
             .tabItem { Label("Your Recipes", systemImage: "bookmark") }
 
             NavigationStack {
-                SharedRecipesView(deepLinkRecipeId: $deepLinkRecipeId)
+                SharedInboxView()
             }
-            .tabItem { Label("Shared", systemImage: "globe") }
+            .tabItem { Label("Shared", systemImage: "tray") }
+
+            NavigationStack {
+                DiscoverView()
+            }
+            .tabItem { Label("Discover", systemImage: "sparkles") }
 
             NavigationStack {
                 AccountView()
