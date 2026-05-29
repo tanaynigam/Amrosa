@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		01600A5A1AE04FEEADCBD01C /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35DE5A5FDE9B5749BAE51750 /* AppDelegate.swift */; };
 		016559535A3E4F36A9490EAA /* SharedRecipeDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 356CE035A2F5D33FB8375930 /* SharedRecipeDetailView.swift */; };
 		065C4321EC6217B66A9BB187 /* ImportViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43F5529CD66E002D66C50F9A /* ImportViewModel.swift */; };
 		11A048E4B3D6B9039E4442FA /* RecipeDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 962CD3D6DE0869F0A0D7FFAC /* RecipeDetailView.swift */; };
@@ -23,7 +24,7 @@
 		316D86CEEB80CE03F7EB877C /* ReceivedRecipeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30129D1C7369FBE2238CCDF /* ReceivedRecipeView.swift */; };
 		36B5D19C418119BBE0507C21 /* RecipeDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60494666244275FAD1EDFD14 /* RecipeDetailViewModel.swift */; };
 		47372214248102AB1A9FF176 /* StepModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8EA712966F37787B422B017 /* StepModel.swift */; };
-		4D255AE3ABD954B00FABD663 /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 0346C6000134951409CD8279 /* Kingfisher */; };
+		4D255AE3ABD954B00FABD663 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 702396BB1261F9EC052A6931 /* GoogleSignIn */; };
 		5B856AF237F4DE0D0C56FF6E /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5BAB215538DE97F5F21243F /* AuthView.swift */; };
 		5C263C8A4307A5EAF24A2A5B /* RecipeNoteModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41C71065B68DE958DC65F19C /* RecipeNoteModel.swift */; };
 		6A11C7786709EFA3FC7D8232 /* AccountViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94D4377EB49AA9DBC9BA5605 /* AccountViewModel.swift */; };
@@ -50,7 +51,7 @@
 		D1C1979BAFAC649332E27EBD /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A62C74A95949EA2C4D6096F /* AppContainer.swift */; };
 		D3DAC251DD4A9796127CE147 /* NotificationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A97B8F3F75DA6B01E1EDA4B /* NotificationsView.swift */; };
 		D58A49D66B27854CE0A850AC /* RecipeReviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DBB3085AD0A466A41D2F8A /* RecipeReviewSheet.swift */; };
-		D8E970665C7F1B51A43E88E8 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 702396BB1261F9EC052A6931 /* GoogleSignIn */; };
+		D8E970665C7F1B51A43E88E8 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 7DC716E25C15739F74B7686E /* FirebaseMessaging */; };
 		DB81577245389BE685EAC0D5 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = C97CA4955DBC0B3EC6E80FCA /* FirebaseFirestore */; };
 		DBA887E690B2F0DB33C5619C /* RecipeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E7BDFCD472813185D69085 /* RecipeCard.swift */; };
 		DE2A32F8152AED40A322ACC1 /* AmrosaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B651CAEFC9F7CC85EDD13FAE /* AmrosaTests.swift */; };
@@ -63,6 +64,7 @@
 		F5558310876B1AF34DF7F181 /* ReceivedRecipeSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B9F58D556EDEC241EC090D1 /* ReceivedRecipeSummary.swift */; };
 		F94FC31423D9CD92C38E08AD /* SharedRecipesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F757ADF897A9123B4891DCA0 /* SharedRecipesViewModel.swift */; };
 		F9D4B4726A1F03A861D60ADF /* AmrosaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B8469CC13DE9050F4218D4A /* AmrosaApp.swift */; };
+		FABA2A34B91BAFDD29796593 /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 0346C6000134951409CD8279 /* Kingfisher */; };
 		FEEBC3E509170CC31C591C58 /* RecipeRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B78CFA17DD71B75C3BF7A2A /* RecipeRepository.swift */; };
 /* End PBXBuildFile section */
 
@@ -91,6 +93,7 @@
 		2B9F58D556EDEC241EC090D1 /* ReceivedRecipeSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceivedRecipeSummary.swift; sourceTree = "<group>"; };
 		2CC76E521A7C1E67DB54C861 /* Amrosa.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Amrosa.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		356CE035A2F5D33FB8375930 /* SharedRecipeDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedRecipeDetailView.swift; sourceTree = "<group>"; };
+		35DE5A5FDE9B5749BAE51750 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		3B8FC9CAC1EE41E1C53784B1 /* AllRecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllRecipesView.swift; sourceTree = "<group>"; };
 		41C71065B68DE958DC65F19C /* RecipeNoteModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeNoteModel.swift; sourceTree = "<group>"; };
 		425D6FD17661A16A164C124A /* RecipeSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeSyncService.swift; sourceTree = "<group>"; };
@@ -131,6 +134,7 @@
 		F610DCBD0BFE5231A23E1FED /* YourRecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YourRecipesView.swift; sourceTree = "<group>"; };
 		F757ADF897A9123B4891DCA0 /* SharedRecipesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedRecipesViewModel.swift; sourceTree = "<group>"; };
 		F8EA712966F37787B422B017 /* StepModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepModel.swift; sourceTree = "<group>"; };
+		FA87FC2144D8965BFD8C9A17 /* Amrosa.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Amrosa.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -142,8 +146,9 @@
 				DB81577245389BE685EAC0D5 /* FirebaseFirestore in Frameworks */,
 				F28E0694C8AEF94BD881DF88 /* FirebaseStorage in Frameworks */,
 				9EC63FAD7433D251458223A5 /* FirebaseFunctions in Frameworks */,
-				D8E970665C7F1B51A43E88E8 /* GoogleSignIn in Frameworks */,
-				4D255AE3ABD954B00FABD663 /* Kingfisher in Frameworks */,
+				D8E970665C7F1B51A43E88E8 /* FirebaseMessaging in Frameworks */,
+				4D255AE3ABD954B00FABD663 /* GoogleSignIn in Frameworks */,
+				FABA2A34B91BAFDD29796593 /* Kingfisher in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -269,8 +274,10 @@
 		A60683C2A736D7E99E8CE99D /* Amrosa */ = {
 			isa = PBXGroup;
 			children = (
+				FA87FC2144D8965BFD8C9A17 /* Amrosa.entitlements */,
 				2B8469CC13DE9050F4218D4A /* AmrosaApp.swift */,
 				2A62C74A95949EA2C4D6096F /* AppContainer.swift */,
+				35DE5A5FDE9B5749BAE51750 /* AppDelegate.swift */,
 				17C0BB8E75558D8FCBF02229 /* Assets.xcassets */,
 				D476FEE4AC19949B7C2E8FE9 /* GoogleService-Info.plist */,
 				8DAFCFC124ADAD46C9273847 /* Info.plist */,
@@ -407,6 +414,7 @@
 				C97CA4955DBC0B3EC6E80FCA /* FirebaseFirestore */,
 				364BEAE6150BC1A8F375CCA6 /* FirebaseStorage */,
 				A747C24F1F3162E54866546F /* FirebaseFunctions */,
+				7DC716E25C15739F74B7686E /* FirebaseMessaging */,
 				702396BB1261F9EC052A6931 /* GoogleSignIn */,
 				0346C6000134951409CD8279 /* Kingfisher */,
 			);
@@ -502,6 +510,7 @@
 				A2BE751B0182558631E43075 /* AllRecipesViewModel.swift in Sources */,
 				F9D4B4726A1F03A861D60ADF /* AmrosaApp.swift in Sources */,
 				D1C1979BAFAC649332E27EBD /* AppContainer.swift in Sources */,
+				01600A5A1AE04FEEADCBD01C /* AppDelegate.swift in Sources */,
 				ACA85688B506B5D861013E75 /* AuthRepository.swift in Sources */,
 				5B856AF237F4DE0D0C56FF6E /* AuthView.swift in Sources */,
 				C56CA3F9C89E83A918893CA7 /* AuthViewModel.swift in Sources */,
@@ -562,6 +571,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Amrosa/Amrosa.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -657,6 +667,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Amrosa/Amrosa.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -834,6 +845,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 68B150896EF75D33D83024FF /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignIn;
+		};
+		7DC716E25C15739F74B7686E /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B466D442E595752233F43DC8 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
 		};
 		A747C24F1F3162E54866546F /* FirebaseFunctions */ = {
 			isa = XCSwiftPackageProductDependency;

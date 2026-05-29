@@ -4,11 +4,18 @@ struct ContentView: View {
     @Environment(AppContainer.self) private var container
     @State private var isSignedIn: Bool = false
     @State private var deepLinkRecipeId: String? = nil
+    // Push notification tap navigation
+    @State private var pushShareId: String? = nil
+    @State private var pushGoToAccount = false
 
     var body: some View {
         Group {
             if isSignedIn {
-                MainAppView(deepLinkRecipeId: $deepLinkRecipeId)
+                MainAppView(
+                    deepLinkRecipeId: $deepLinkRecipeId,
+                    pushShareId: $pushShareId,
+                    pushGoToAccount: $pushGoToAccount
+                )
             } else {
                 // Auth gate — full screen, no tab bar, no back button
                 AuthView()
@@ -16,6 +23,18 @@ struct ContentView: View {
         }
         .onOpenURL { url in
             handleDeepLink(url)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pushNotificationTapped)) { note in
+            guard let info = note.userInfo else { return }
+            let type    = info["type"]    as? String ?? ""
+            let shareId = info["shareId"] as? String ?? ""
+            switch type {
+            case "follow_request", "follow_accepted":
+                pushGoToAccount = true
+            case "recipe_shared" where !shareId.isEmpty:
+                pushShareId = shareId
+            default: break
+            }
         }
         .task {
             // Observe auth state — reacts to sign-in and sign-out
@@ -50,29 +69,49 @@ struct ContentView: View {
 
 private struct MainAppView: View {
     @Binding var deepLinkRecipeId: String?
-    @State private var navigateToSharedRecipe = false
+    @Binding var pushShareId: String?
+    @Binding var pushGoToAccount: Bool
+    @State private var selectedTab = 0
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             NavigationStack {
                 YourRecipesView()
             }
             .tabItem { Label("Your Recipes", systemImage: "bookmark") }
+            .tag(0)
 
             NavigationStack {
                 SharedInboxView()
             }
             .tabItem { Label("Shared", systemImage: "tray") }
+            .tag(1)
 
             NavigationStack {
                 DiscoverView()
             }
             .tabItem { Label("Discover", systemImage: "sparkles") }
+            .tag(2)
 
             NavigationStack {
                 AccountView()
             }
             .tabItem { Label("Account", systemImage: "person") }
+            .tag(3)
+        }
+        // Deep link → Shared tab
+        .onChange(of: deepLinkRecipeId) { _, id in if id != nil { selectedTab = 1 } }
+        // Push: recipe shared → Shared tab (SharedInboxView handles the shareId)
+        .onChange(of: pushShareId) { _, id in
+            if id != nil {
+                deepLinkRecipeId = id
+                pushShareId = nil
+                selectedTab = 1
+            }
+        }
+        // Push: follow request/accepted → Account tab
+        .onChange(of: pushGoToAccount) { _, go in
+            if go { selectedTab = 3; pushGoToAccount = false }
         }
     }
 }

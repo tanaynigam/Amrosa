@@ -1,5 +1,7 @@
 import SwiftData
 import Foundation
+import UserNotifications
+import UIKit
 
 @Observable
 @MainActor
@@ -42,10 +44,23 @@ final class AppContainer {
     }
 
     /// Called after Firebase is configured and user is signed in.
-    /// Upserts the user profile and syncs personal recipes from Firestore.
+    /// Upserts the user profile, syncs recipes, and registers for push notifications.
     func onSignIn() async {
         await socialRepository.upsertProfile()
         await syncService.sync()
+        await requestPushPermission()
+    }
+
+    /// Ask the user for notification permission and register with APNs.
+    /// Safe to call multiple times — iOS only prompts once.
+    private func requestPushPermission() async {
+        let center = UNUserNotificationCenter.current()
+        let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        if granted {
+            await MainActor.run {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        }
     }
 
     /// Wipe all local SwiftData records and clear sync preferences.
