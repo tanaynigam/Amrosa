@@ -1,11 +1,18 @@
 package com.aerion.amrosa
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.os.Build
 import com.aerion.amrosa.di.AppContainer
+import com.aerion.amrosa.service.AmrosaMessagingService
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 class AmrosaApplication : Application() {
 
@@ -16,6 +23,7 @@ class AmrosaApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        createNotificationChannel()
         appScope.launch {
             // Whenever the user is signed in with a real account (on app start or after sign-in),
             // seed local data and pull from Firestore.
@@ -26,8 +34,33 @@ class AmrosaApplication : Application() {
                     container.syncService.syncPersonalRecipes()
                     // Upsert public profile so other users can find / follow this user
                     container.socialRepository.upsertProfile()
+                    // Register FCM token so we can receive push notifications
+                    refreshFcmToken()
                 }
             }
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                AmrosaMessagingService.CHANNEL_ID,
+                "Amrosa",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Follow requests and recipe shares"
+            }
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(channel)
+        }
+    }
+
+    private suspend fun refreshFcmToken() {
+        try {
+            val token = FirebaseMessaging.getInstance().token.await()
+            container.socialRepository.updateFcmToken(token)
+        } catch (e: Exception) {
+            // Non-fatal — token will be stored next time onNewToken fires
         }
     }
 }

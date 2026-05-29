@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Required on Android 13+ to show notifications -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".AmrosaApplication"
         android:allowBackup="true"
@@ -44,6 +47,15 @@
                 <data android:scheme="amrosa" android:host="shared" />
             </intent-filter>
         </activity>
+
+        <!-- FCM: receives push notifications and token refresh events -->
+        <service
+            android:name=".service.AmrosaMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
 
     </application>
 

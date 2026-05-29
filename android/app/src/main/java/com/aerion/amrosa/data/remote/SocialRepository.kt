@@ -16,15 +16,14 @@ import java.util.UUID
 /**
  * Manages all social Firestore collections:
  *
- *   users/{uid}                            — public user profiles
+ *   users/{uid}                            — public user profiles (includes fcmToken)
  *   follows/{followerId}_{followeeId}      — follow relationships (pending / accepted)
- *   notifications/{uid}/items/{notifId}    — per-user notification inbox
+ *   notifications/{uid}/items/{notifId}    — notification inbox (written here, read by Cloud Function → FCM push)
  *   shared_to/{recipientUid}/recipes/{shareId} — directly shared recipe data
  *
  * Composite indexes required (Firestore will log a link to create them on first run):
  *   follows: (followeeId ASC, status ASC)
  *   follows: (followerId ASC, status ASC)
- *   notifications/{uid}/items: (read ASC)
  */
 class SocialRepository(
     private val authRepository: AuthRepository
@@ -158,8 +157,6 @@ class SocialRepository(
                 fromDisplayName = authRepository.currentUser?.displayName
                     ?: authRepository.email ?: "Someone"
             )
-            // Auto-read any follow_request notifications from this user
-            markFollowRequestsRead(fromUid)
         } catch (e: Exception) {
             Log.e(TAG, "acceptFollowRequest failed", e)
         }
@@ -174,7 +171,6 @@ class SocialRepository(
             firestore.collection(COL_FOLLOWS)
                 .document(followDocId(fromUid, uid))
                 .delete().await()
-            markFollowRequestsRead(fromUid)
         } catch (e: Exception) {
             Log.e(TAG, "declineFollowRequest failed", e)
         }
@@ -269,85 +265,21 @@ class SocialRepository(
         awaitClose { reg?.remove() }
     }
 
-    // ── Notifications ──────────────────────────────────────────────────────────
+    // ── FCM token ──────────────────────────────────────────────────────────────
 
     /**
-     * Live stream of all notifications for the current user, newest first.
-     * Capped at 50 most recent.
+     * Stores the device's FCM token in the user's profile so Cloud Functions
+     * can send push notifications to this device.
      */
-    fun getNotificationsFlow(): Flow<List<SocialNotification>> = callbackFlow {
-        val uid = authRepository.uid
-        if (uid == null) { trySend(emptyList()); close(); return@callbackFlow }
-        var reg: ListenerRegistration? = null
-        reg = firestore.collection(COL_NOTIFICATIONS).document(uid)
-            .collection("items")
-            .orderBy("createdAt", Query.Direction.DESCENDING)
-            .limit(50)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.e(TAG, "getNotificationsFlow error", error)
-                    trySend(emptyList())
-                    return@addSnapshotListener
-                }
-                val notifs = snapshot?.documents?.mapNotNull { doc ->
-                    try {
-                        val data = doc.data ?: return@mapNotNull null
-                        SocialNotification(
-                            id = doc.id,
-                            type = data["type"] as? String ?: "",
-                            fromUid = data["fromUid"] as? String ?: "",
-                            fromDisplayName = data["fromDisplayName"] as? String ?: "",
-                            shareId = data["shareId"] as? String,
-                            recipeName = data["recipeName"] as? String,
-                            createdAt = (data["createdAt"] as? Number)?.toLong() ?: 0L,
-                            read = data["read"] as? Boolean ?: false
-                        )
-                    } catch (e: Exception) { null }
-                } ?: emptyList()
-                trySend(notifs)
-            }
-        awaitClose { reg?.remove() }
-    }
-
-    /** Live unread notification count for the current user. */
-    fun getUnreadCountFlow(): Flow<Int> = callbackFlow {
-        val uid = authRepository.uid
-        if (uid == null) { trySend(0); close(); return@callbackFlow }
-        var reg: ListenerRegistration? = null
-        reg = firestore.collection(COL_NOTIFICATIONS).document(uid)
-            .collection("items")
-            .whereEqualTo("read", false)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) { trySend(0); return@addSnapshotListener }
-                trySend(snapshot?.size() ?: 0)
-            }
-        awaitClose { reg?.remove() }
-    }
-
-    suspend fun markNotificationRead(notifId: String) {
+    suspend fun updateFcmToken(token: String) {
         val uid = authRepository.uid ?: return
         try {
-            firestore.collection(COL_NOTIFICATIONS).document(uid)
-                .collection("items").document(notifId)
-                .update("read", true).await()
+            firestore.collection(COL_USERS).document(uid)
+                .update("fcmToken", token)
+                .await()
         } catch (e: Exception) {
-            Log.e(TAG, "markNotificationRead failed", e)
-        }
-    }
-
-    suspend fun markAllNotificationsRead() {
-        val uid = authRepository.uid ?: return
-        try {
-            val docs = firestore.collection(COL_NOTIFICATIONS).document(uid)
-                .collection("items")
-                .whereEqualTo("read", false)
-                .get().await()
-            if (docs.isEmpty) return
-            val batch = firestore.batch()
-            docs.documents.forEach { doc -> batch.update(doc.reference, "read", true) }
-            batch.commit().await()
-        } catch (e: Exception) {
-            Log.e(TAG, "markAllNotificationsRead failed", e)
+            // Firestore update fails if doc doesn't exist yet; upsertProfile will create it
+            Log.w(TAG, "updateFcmToken failed (profile may not exist yet): ${e.message}")
         }
     }
 
@@ -464,24 +396,6 @@ class SocialRepository(
                 .set(data).await()
         } catch (e: Exception) {
             Log.e(TAG, "deliverNotification type=$type failed", e)
-        }
-    }
-
-    private suspend fun markFollowRequestsRead(fromUid: String) {
-        val uid = authRepository.uid ?: return
-        try {
-            val docs = firestore.collection(COL_NOTIFICATIONS).document(uid)
-                .collection("items")
-                .whereEqualTo("type", "follow_request")
-                .whereEqualTo("fromUid", fromUid)
-                .whereEqualTo("read", false)
-                .get().await()
-            if (docs.isEmpty) return
-            val batch = firestore.batch()
-            docs.documents.forEach { batch.update(it.reference, "read", true) }
-            batch.commit().await()
-        } catch (e: Exception) {
-            Log.e(TAG, "markFollowRequestsRead failed", e)
         }
     }
 

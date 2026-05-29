@@ -1,11 +1,15 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 const { setGlobalOptions } = require("firebase-functions/v2");
+const admin = require("firebase-admin");
 const {
   parseRecipeFromUrl,
   parseRecipeFromContent,
   formatRecipeFromText,
 } = require("./parseRecipe");
+
+admin.initializeApp();
 
 // Global options for cost control
 setGlobalOptions({ maxInstances: 5 });
@@ -183,6 +187,52 @@ exports.formatRecipeText = onCall(
       return { recipe };
     } catch (err) {
       throw toHttpsError(err);
+    }
+  }
+);
+
+
+// Push notifications
+exports.sendPushNotification = onDocumentCreated(
+  'notifications/{uid}/items/{notifId}',
+  async (event) => {
+    const uid = event.params.uid;
+    const data = event.data?.data();
+    if (!data) return;
+
+    const userSnap = await admin.firestore().collection('users').doc(uid).get();
+    const fcmToken = userSnap.data()?.fcmToken;
+    if (!fcmToken) { console.log('No FCM token for uid=' + uid); return; }
+
+    const { type, fromDisplayName, recipeName } = data;
+    let title, body;
+    switch (type) {
+      case 'follow_request':
+        title = 'New Follow Request';
+        body  = fromDisplayName + ' wants to follow you';
+        break;
+      case 'follow_accepted':
+        title = 'Follow Request Accepted';
+        body  = fromDisplayName + ' accepted your follow request';
+        break;
+      case 'recipe_shared':
+        title = fromDisplayName + ' shared a recipe';
+        body  = recipeName ? ('"' + recipeName + '"') : 'Tap to view it in Amrosa';
+        break;
+      default:
+        return;
+    }
+
+    try {
+      await admin.messaging().send({
+        token: fcmToken,
+        notification: { title, body },
+        data: { type: type, shareId: data.shareId ?? '' },
+        android: { notification: { channelId: 'amrosa_social', priority: 'high' } },
+      });
+      console.log('Push sent: ' + type + ' -> ' + uid);
+    } catch (err) {
+      console.error('Push failed for uid=' + uid + ':', err.message);
     }
   }
 );

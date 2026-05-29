@@ -30,7 +30,6 @@ import java.util.Locale
 @Composable
 fun AccountScreen(
     onSignInClick: () -> Unit = {},
-    onNotificationsClick: () -> Unit = {},
     onFindPeopleClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -61,28 +60,6 @@ fun AccountScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Account", style = MaterialTheme.typography.titleLarge) },
-                actions = {
-                    // Notification bell with unread badge
-                    BadgedBox(
-                        badge = {
-                            if (state.unreadNotificationCount > 0) {
-                                Badge {
-                                    Text(
-                                        if (state.unreadNotificationCount > 9) "9+"
-                                        else state.unreadNotificationCount.toString()
-                                    )
-                                }
-                            }
-                        }
-                    ) {
-                        IconButton(onClick = onNotificationsClick) {
-                            Icon(
-                                Icons.Default.Notifications,
-                                contentDescription = "Notifications"
-                            )
-                        }
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }

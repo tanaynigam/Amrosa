@@ -31,7 +31,6 @@ import com.aerion.amrosa.ui.home.HomeScreen
 import com.aerion.amrosa.ui.home.RecipeFilter
 import com.aerion.amrosa.ui.import_recipe.ImportScreen
 import com.aerion.amrosa.ui.shared.SharedRecipeDetailScreen
-import com.aerion.amrosa.ui.social.NotificationsScreen
 import com.aerion.amrosa.ui.social.ReceivedRecipeScreen
 import com.aerion.amrosa.ui.social.SharedInboxScreen
 import com.aerion.amrosa.ui.social.UserSearchScreen
@@ -133,27 +132,7 @@ private fun MainAppScaffold() {
             // ── Tab: Account ──────────────────────────────────────────────────
             composable(BottomTab.Account.route) {
                 AccountScreen(
-                    onNotificationsClick = { navController.navigate("notifications") },
                     onFindPeopleClick = { navController.navigate("user_search") }
-                )
-            }
-
-            // ── Notifications ─────────────────────────────────────────────────
-            composable("notifications") {
-                NotificationsScreen(
-                    onBack = { navController.popBackStack() },
-                    onFollowNotification = {
-                        navController.navigate(BottomTab.Account.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    onRecipeShared = { shareId ->
-                        navController.navigate("received/$shareId")
-                    }
                 )
             }
 
