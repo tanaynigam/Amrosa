@@ -13,7 +13,6 @@ final class AccountViewModel {
     // Social
     var pendingRequests: [UserProfile] = []
     var followingCount: Int = 0
-    var unreadNotificationCount: Int = 0
     var pendingFollowAction: String? = nil
 
     private let authRepository: AuthRepository
@@ -56,13 +55,6 @@ final class AccountViewModel {
             for await profiles in socialRepository.friendsStream() {
                 guard !Task.isCancelled else { break }
                 followingCount = profiles.count
-            }
-        })
-
-        socialTasks.append(Task {
-            for await count in socialRepository.unreadCountStream() {
-                guard !Task.isCancelled else { break }
-                unreadNotificationCount = count
             }
         })
     }

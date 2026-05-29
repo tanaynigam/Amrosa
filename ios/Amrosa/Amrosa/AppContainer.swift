@@ -51,6 +51,7 @@ final class AppContainer {
         await syncService.sync()
         await requestPushPermission()
         await refreshFcmToken()
+        await socialRepository.repairFriendships()
     }
 
     /// Fetch the current FCM token and write it to Firestore immediately on sign-in,

@@ -4,7 +4,6 @@ struct AccountView: View {
     @Environment(AppContainer.self) private var container
     @State private var viewModel: AccountViewModel?
     @State private var showSignOutConfirm = false
-    @State private var showNotifications = false
     @State private var showUserSearch = false
     @State private var notifShareId: String? = nil
     @State private var showReceivedRecipe = false
@@ -144,25 +143,6 @@ struct AccountView: View {
             }
         }
         .navigationTitle("Account")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                if let vm = viewModel {
-                    Button {
-                        showNotifications = true
-                    } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "bell")
-                            if vm.unreadNotificationCount > 0 {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 8, height: 8)
-                                    .offset(x: 4, y: -4)
-                            }
-                        }
-                    }
-                }
-            }
-        }
         .confirmationDialog("Sign Out?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) {
                 Task { await viewModel?.signOut() }
@@ -183,14 +163,6 @@ struct AccountView: View {
                         notifShareId = shareId
                         showReceivedRecipe = true
                     }
-                )
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { showNotifications = false }
-                    }
-                }
-            }
-        }
         .sheet(isPresented: $showUserSearch) {
             UserSearchView()
         }

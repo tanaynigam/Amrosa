@@ -196,82 +196,43 @@ final class SocialRepository {
         }
     }
 
-    // MARK: - Notifications
+    // MARK: - Data repair
 
-    /// Live stream of the last 50 notifications for the current user, newest first.
-    func notificationsStream() -> AsyncStream<[SocialNotification]> {
-        guard let myUid = authRepository.uid else { return AsyncStream { $0.finish() } }
-        return AsyncStream { continuation in
-            let listener = self.db.collection("notifications")
-                .document(myUid)
-                .collection("items")
-                .order(by: "createdAt", descending: true)
-                .limit(to: 50)
-                .addSnapshotListener { snapshot, _ in
-                    guard let docs = snapshot?.documents else {
-                        continuation.yield([])
-                        return
-                    }
-                    let notifications = docs.compactMap { doc -> SocialNotification? in
-                        let data = doc.data()
-                        guard let type = data["type"] as? String,
-                              let fromUid = data["fromUid"] as? String,
-                              let fromDisplayName = data["fromDisplayName"] as? String else { return nil }
-                        let createdAtMs = (data["createdAt"] as? Double) ?? 0
-                        return SocialNotification(
-                            id: doc.documentID,
-                            type: type,
-                            fromUid: fromUid,
-                            fromDisplayName: fromDisplayName,
-                            shareId: data["shareId"] as? String,
-                            recipeName: data["recipeName"] as? String,
-                            createdAt: Date(timeIntervalSince1970: createdAtMs / 1000),
-                            read: data["read"] as? Bool ?? false
-                        )
-                    }
-                    continuation.yield(notifications)
-                }
-            continuation.onTermination = { _ in listener.remove() }
-        }
+    /// Finds accepted follow docs where the current user is the followee but has no
+    /// reverse doc (pre-mutual-friendship data). Creates the missing reverse docs so
+    /// friendsStream() shows the correct Co-Chef count on both sides.
+    func repairFriendships() async {
+        guard let myUid = authRepository.uid,
+              let myName = authRepository.displayName ?? authRepository.email else { return }
+        do {
+            let snapshot = try await db.collection("follows")
+                .whereField("followeeId", isEqualTo: myUid)
+                .whereField("status", isEqualTo: "accepted")
+                .getDocuments()
+            for doc in snapshot.documents {
+                let d = doc.data()
+                guard let followerUid = d["followerId"] as? String else { continue }
+                let reverseId = "\(myUid)_\(followerUid)"
+                let reverseDoc = try? await db.collection("follows").document(reverseId).getDocument()
+                guard reverseDoc?.exists != true else { continue }
+                // Missing reverse doc — create it
+                let followerName = d["followerName"] as? String ?? "User"
+                try? await db.collection("follows").document(reverseId).setData([
+                    "followerId": myUid,
+                    "followerName": myName,
+                    "followeeId": followerUid,
+                    "followeeName": followerName,
+                    "status": "accepted",
+                    "createdAt": Int64(Date().timeIntervalSince1970 * 1000)
+                ])
+            }
+        } catch { /* non-critical */ }
     }
 
-    /// Live stream of unread notification count for the current user.
-    func unreadCountStream() -> AsyncStream<Int> {
-        guard let myUid = authRepository.uid else { return AsyncStream { $0.yield(0) } }
-        return AsyncStream { continuation in
-            let listener = self.db.collection("notifications")
-                .document(myUid)
-                .collection("items")
-                .whereField("read", isEqualTo: false)
-                .addSnapshotListener { snapshot, _ in
-                    continuation.yield(snapshot?.documents.count ?? 0)
-                }
-            continuation.onTermination = { _ in listener.remove() }
-        }
-    }
-
-    /// Mark a single notification as read.
-    func markNotificationRead(notifId: String) async {
-        guard let myUid = authRepository.uid else { return }
-        try? await db.collection("notifications")
-            .document(myUid)
-            .collection("items")
-            .document(notifId)
-            .updateData(["read": true])
-    }
-
-    /// Mark all notifications as read for the current user.
-    func markAllNotificationsRead() async {
-        guard let myUid = authRepository.uid else { return }
-        guard let snapshot = try? await db.collection("notifications")
-            .document(myUid)
-            .collection("items")
-            .whereField("read", isEqualTo: false)
-            .getDocuments() else { return }
-        for doc in snapshot.documents {
-            try? await doc.reference.updateData(["read": true])
-        }
-    }
+    // NOTE: In-app notification reading has been removed.
+    // Notifications are written to Firestore only to trigger the
+    // sendPushNotification Cloud Function, which delivers OS-level push
+    // notifications via FCM. The deliverNotification() helper below remains.
 
     // MARK: - Direct recipe sharing
 

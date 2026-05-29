@@ -49,7 +49,6 @@
 		C9105649F24487132621512C /* SharedRecipesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 906F7EB73F6B10369F4482FD /* SharedRecipesView.swift */; };
 		C93F4F245E10E7608EAF8618 /* DiscoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4F012BEA73ABE25D6EF5DF1 /* DiscoverView.swift */; };
 		D1C1979BAFAC649332E27EBD /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A62C74A95949EA2C4D6096F /* AppContainer.swift */; };
-		D3DAC251DD4A9796127CE147 /* NotificationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A97B8F3F75DA6B01E1EDA4B /* NotificationsView.swift */; };
 		D58A49D66B27854CE0A850AC /* RecipeReviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DBB3085AD0A466A41D2F8A /* RecipeReviewSheet.swift */; };
 		D8E970665C7F1B51A43E88E8 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 7DC716E25C15739F74B7686E /* FirebaseMessaging */; };
 		DB81577245389BE685EAC0D5 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = C97CA4955DBC0B3EC6E80FCA /* FirebaseFirestore */; };
@@ -101,7 +100,6 @@
 		43F5529CD66E002D66C50F9A /* ImportViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportViewModel.swift; sourceTree = "<group>"; };
 		4991CFFBC669934F146FAA57 /* SharedRecipe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedRecipe.swift; sourceTree = "<group>"; };
 		512E3E1ED5CCCCAB71F2A11B /* AllRecipesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllRecipesViewModel.swift; sourceTree = "<group>"; };
-		5A97B8F3F75DA6B01E1EDA4B /* NotificationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsView.swift; sourceTree = "<group>"; };
 		60494666244275FAD1EDFD14 /* RecipeDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeDetailViewModel.swift; sourceTree = "<group>"; };
 		61277F8178D8EB174359B78F /* FriendsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsView.swift; sourceTree = "<group>"; };
 		696E6D4A5155305802A53ADD /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
@@ -219,7 +217,6 @@
 			isa = PBXGroup;
 			children = (
 				61277F8178D8EB174359B78F /* FriendsView.swift */,
-				5A97B8F3F75DA6B01E1EDA4B /* NotificationsView.swift */,
 				E30129D1C7369FBE2238CCDF /* ReceivedRecipeView.swift */,
 				890EB3690AA95791DCE9A037 /* UserSearchView.swift */,
 			);
@@ -527,7 +524,6 @@
 				1D94B52DB772773020323A03 /* ImportView.swift in Sources */,
 				065C4321EC6217B66A9BB187 /* ImportViewModel.swift in Sources */,
 				E17B4D5CB6AE25D0BD57CC44 /* IngredientModel.swift in Sources */,
-				D3DAC251DD4A9796127CE147 /* NotificationsView.swift in Sources */,
 				227EBD982781750E6547E236 /* ParsedRecipeData.swift in Sources */,
 				AC9B15EAADE97F45EBA2FCDB /* QuantityScaler.swift in Sources */,
 				F5558310876B1AF34DF7F181 /* ReceivedRecipeSummary.swift in Sources */,
