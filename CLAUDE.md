@@ -1003,7 +1003,16 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 | **YourRecipesView** | All local recipes; filter chips (All/Personal/Imported); search; FAB |
 | **Account tab** | Profile card (tappable → edit name alert), sign-out + data-wipe dialog, recipe count, last sync |
 | **Profile name edit** | Tap profile card → alert with text field → `authRepository.updateDisplayName()` + `upsertProfile()`; toast on success |
-| **F9 — Follow system** | `SocialRepository`, `UserSearchView`, `NotificationsView`, `ReceivedRecipeView`; follow/unfollow/accept/decline, notification stream, direct recipe sharing |
+| **F9 — Follow system** | `SocialRepository`, `UserSearchView`, `NotificationsView`, `ReceivedRecipeView`, `FriendsView`; follow/unfollow/accept/decline, notification stream, direct recipe sharing, Co-Chefs list |
+| **F9 — FCM push notifications** | `AppDelegate` + `FirebaseMessaging`; APNs bridge; token stored in `users/{uid}.fcmToken` on sign-in; foreground banners; tap routing (follow → Account tab, recipe shared → Shared tab) |
+| **Recipe detail (flat layout)** | Ingredients flat under "Ingredients" header (all ingredients visible regardless of sectionId); steps grouped by section under "Instructions"; section jump chips scroll via `ScrollViewReader`; step-ingredient ref chips shown inline |
+| **isOwner for pre-auth recipes** | `authorId == nil` → `isOwner = true` (seeded/pre-auth recipes editable by anyone) |
+| **Author dropdown in editor** | `RecipeEditorView` has Picker("Author") — "Imported" or "Personal — [Name]"; backed by `isPersonalAuthor: Bool` in VM; applied on save |
+| **FAB bottom sheet** | `AddRecipeSheet` (presentationDetent) with descriptive options, matching Android ModalBottomSheet |
+| **setVisibility in-memory** | `recipe.visibility` updated immediately in VM after Firestore write so `isPublic` reflects without view recreation |
+| **confirmImport author toggle** | `confirmImport()` calls `updateIsImported(!isOwnRecipe)` so the RecipeReviewSheet toggle is actually persisted |
+| **reimport duplicate fix** | `reimport()` deletes the pending recipe before clearing state, preventing duplicate SwiftData records |
+| **Co-Chefs: N tappable** | AccountView "Co-Chefs: N" is a `NavigationLink` → `FriendsView` (list with Remove + confirmation) |
 
 ### iOS 🔶 Remaining Gaps (planned)
 
@@ -1011,8 +1020,6 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 |---|---|
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
-| **FCM push notifications** | Android uses FCM (AmrosaMessagingService + Cloud Function). iOS keeps in-app notification screen (NotificationsView). APNs/FCM for iOS requires separate certificate setup. |
-| **Your Recipes filter chips** | iOS uses a segmented picker; Android uses `[All] [Personal] [Imported]` filter chips — minor UX difference |
 
 ---
 
@@ -1262,8 +1269,6 @@ ios/Amrosa/
 |---|---|
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` but requires `Associated Domains` entitlement + `apple-app-site-association` on the hosting server for the OS to intercept them before Safari |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
-| **F9 — Friends & notifications** | ✅ Implemented: `SocialRepository`, `UserSearchView`, `NotificationsView`, `ReceivedRecipeView`; follow/unfollow/accept/decline, notification stream, direct recipe sharing |
-| **Your Recipes filter chips** | iOS uses a segmented picker; Android has `[All] [Personal] [Imported]` chips — minor UX difference |
 
 ### iOS Notes for AI Coding Assistants
 
