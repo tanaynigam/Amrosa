@@ -152,17 +152,6 @@ struct AccountView: View {
             Text("All recipes will be removed from this device. They'll sync back automatically when you sign in again.")
         }
         .sheet(isPresented: $showNotifications) {
-            NavigationStack {
-                NotificationsView(
-                    onFollowNotification: {
-                        showNotifications = false
-                        // Already on Account tab — scroll to People section is implicit
-                    },
-                    onRecipeShared: { shareId in
-                        showNotifications = false
-                        notifShareId = shareId
-                        showReceivedRecipe = true
-                    }
         .sheet(isPresented: $showUserSearch) {
             UserSearchView()
         }
