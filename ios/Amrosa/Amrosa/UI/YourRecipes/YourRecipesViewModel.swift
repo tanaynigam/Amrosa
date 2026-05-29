@@ -6,32 +6,37 @@ import Foundation
 @MainActor
 final class YourRecipesViewModel {
     var recipes: [RecipeModel] = []
+    var sharedRecipes: [ReceivedRecipeSummary] = []
     var searchText: String = ""
     var filterMode: RecipeFilter = .all
     var errorMessage: String? = nil
 
     private let repository: RecipeRepository
+    private let socialRepository: SocialRepository
+    private var sharedTask: Task<Void, Never>? = nil
 
-    init(repository: RecipeRepository) {
+    init(repository: RecipeRepository, socialRepository: SocialRepository) {
         self.repository = repository
+        self.socialRepository = socialRepository
     }
 
     enum RecipeFilter: String, CaseIterable {
         case all = "All"
         case personal = "Personal"
         case imported = "Imported"
+        case shared = "Shared"
     }
 
+    var isSharedMode: Bool { filterMode == .shared }
+
     var filteredRecipes: [RecipeModel] {
+        if filterMode == .shared { return [] }
         var result = recipes
 
         switch filterMode {
-        case .personal:
-            result = result.filter { !$0.isImported }
-        case .imported:
-            result = result.filter { $0.isImported }
-        case .all:
-            break
+        case .personal: result = result.filter { !$0.isImported }
+        case .imported: result = result.filter { $0.isImported }
+        default: break
         }
 
         if !searchText.isEmpty {
@@ -49,22 +54,41 @@ final class YourRecipesViewModel {
         }
     }
 
+    var filteredSharedRecipes: [ReceivedRecipeSummary] {
+        guard filterMode == .shared else { return [] }
+        if searchText.isEmpty { return sharedRecipes }
+        let q = searchText.lowercased()
+        return sharedRecipes.filter { r in
+            r.title.lowercased().contains(q) ||
+            r.tags.contains { $0.lowercased().contains(q) }
+        }
+    }
+
     var pendingReviewCount: Int {
         recipes.filter { $0.needsReview }.count
     }
 
     func load() {
         do {
-            // Show all recipes that belong to the user:
-            // - seeded/personal (authorId nil = pre-auth seeded, counts as yours)
-            // - any recipe the user created or imported
-            // Exclude only recipes from other users' shared copies
-            // (authorId != nil && authorId != currentUid would exclude those,
-            // but since we never store other users' shared recipes in local SwiftData
-            // except as copies with currentUid, showing all local recipes is correct)
             recipes = try repository.fetchAllRecipes()
         } catch {
             errorMessage = error.localizedDescription
         }
+        startSharedStream()
+    }
+
+    private func startSharedStream() {
+        guard sharedTask == nil else { return }
+        sharedTask = Task {
+            for await batch in socialRepository.receivedRecipesSummaryStream() {
+                guard !Task.isCancelled else { break }
+                sharedRecipes = batch
+            }
+        }
+    }
+
+    func stop() {
+        sharedTask?.cancel()
+        sharedTask = nil
     }
 }

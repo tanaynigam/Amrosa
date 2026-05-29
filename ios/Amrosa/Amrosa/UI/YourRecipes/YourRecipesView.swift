@@ -4,6 +4,7 @@ struct YourRecipesView: View {
     @Environment(AppContainer.self) private var container
     @State private var viewModel: YourRecipesViewModel?
     @State private var selectedRecipe: RecipeModel? = nil
+    @State private var selectedShareId: String? = nil
     @State private var showAddMenu = false
     @State private var navigateToImport = false
     @State private var navigateToFreeform = false
@@ -15,6 +16,7 @@ struct YourRecipesView: View {
                 YourRecipesContent(
                     viewModel: vm,
                     selectedRecipe: $selectedRecipe,
+                    selectedShareId: $selectedShareId,
                     onTapNeedsReview: { recipe in
                         navigateToImportForReview = recipe
                     }
@@ -23,13 +25,16 @@ struct YourRecipesView: View {
                 ProgressView()
             }
         }
-        .navigationTitle("Your Recipes")
+        .navigationTitle("My Recipes")
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showAddMenu = true
-                } label: {
-                    Image(systemName: "plus")
+            // FAB hidden in Shared mode (matches Android)
+            if viewModel?.isSharedMode != true {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showAddMenu = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
                 }
             }
         }
@@ -43,6 +48,9 @@ struct YourRecipesView: View {
         .navigationDestination(item: $selectedRecipe) { recipe in
             RecipeDetailView(recipe: recipe)
         }
+        .navigationDestination(item: $selectedShareId) { shareId in
+            ReceivedRecipeView(shareId: shareId)
+        }
         .navigationDestination(isPresented: $navigateToImport) {
             ImportView()
         }
@@ -54,10 +62,14 @@ struct YourRecipesView: View {
         }
         .onAppear {
             if viewModel == nil {
-                viewModel = YourRecipesViewModel(repository: container.recipeRepository)
+                viewModel = YourRecipesViewModel(
+                    repository: container.recipeRepository,
+                    socialRepository: container.socialRepository
+                )
             }
             viewModel?.load()
         }
+        .onDisappear { viewModel?.stop() }
     }
 }
 
@@ -130,61 +142,104 @@ private struct AddRecipeSheet: View {
 private struct YourRecipesContent: View {
     @Bindable var viewModel: YourRecipesViewModel
     @Binding var selectedRecipe: RecipeModel?
+    @Binding var selectedShareId: String?
     var onTapNeedsReview: (RecipeModel) -> Void
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                // Search bar
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Search your recipes…", text: $viewModel.searchText)
-                }
-                .padding(10)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-
-                // Filter chips
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(YourRecipesViewModel.RecipeFilter.allCases, id: \.self) { filter in
-                            FilterChip(label: filter.rawValue, isSelected: viewModel.filterMode == filter) {
-                                viewModel.filterMode = filter
-                            }
-                        }
+        VStack(spacing: 0) {
+            // ── Compact search bar (sticky) ──────────────────────────────
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                TextField(
+                    viewModel.isSharedMode ? "Search shared recipes…" : "Search recipes…",
+                    text: $viewModel.searchText
+                )
+                if !viewModel.searchText.isEmpty {
+                    Button { viewModel.searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.subheadline).foregroundStyle(.tertiary)
                     }
-                    .padding(.horizontal)
+                    .buttonStyle(.plain)
                 }
-                .padding(.bottom, 8)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(Capsule())
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
 
-                if viewModel.filteredRecipes.isEmpty {
-                    ContentUnavailableView(
-                        "No Recipes Yet",
-                        systemImage: "bookmark",
-                        description: Text("Tap + to add your first recipe.")
-                    )
-                    .padding(.top, 60)
-                } else {
-                    LazyVStack(spacing: 12) {
-                        ForEach(viewModel.filteredRecipes) { recipe in
-                            Button {
-                                if recipe.needsReview {
-                                    onTapNeedsReview(recipe)
-                                } else {
-                                    selectedRecipe = recipe
+            Divider()
+
+            // ── Scrolling content (chips scroll away with cards) ──────────
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    // Filter chips as the first scrollable item
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(YourRecipesViewModel.RecipeFilter.allCases, id: \.self) { filter in
+                                FilterChip(label: filter.rawValue, isSelected: viewModel.filterMode == filter) {
+                                    viewModel.filterMode = filter
                                 }
-                            } label: {
-                                RecipeCard(recipe: recipe, showNeedsReviewBanner: true)
                             }
-                            .buttonStyle(.plain)
                         }
+                        .padding(.horizontal, 16)
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom, 24)
+                    .padding(.top, 8)
+
+                    if viewModel.isSharedMode {
+                        sharedContent
+                    } else {
+                        localContent
+                    }
                 }
+                .padding(.bottom, 24)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var localContent: some View {
+        if viewModel.filteredRecipes.isEmpty {
+            ContentUnavailableView(
+                "No Recipes Yet",
+                systemImage: "bookmark",
+                description: Text("Tap + to add your first recipe.")
+            )
+            .padding(.top, 40)
+        } else {
+            ForEach(viewModel.filteredRecipes) { recipe in
+                Button {
+                    if recipe.needsReview { onTapNeedsReview(recipe) }
+                    else { selectedRecipe = recipe }
+                } label: {
+                    RecipeCard(recipe: recipe, showNeedsReviewBanner: true)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sharedContent: some View {
+        if viewModel.filteredSharedRecipes.isEmpty {
+            ContentUnavailableView(
+                "No Shared Recipes",
+                systemImage: "tray",
+                description: Text("Recipes co-chefs send you appear here.")
+            )
+            .padding(.top, 40)
+        } else {
+            ForEach(viewModel.filteredSharedRecipes) { item in
+                Button {
+                    selectedShareId = item.shareId
+                } label: {
+                    SharedRecipeCard(item: item)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
             }
         }
     }

@@ -44,8 +44,8 @@ Amrosa/
 │           ├── ContentView.swift   # Auth gate: AuthView (root) when not signed in; MainAppView (4 tabs) when signed in
 │           ├── AllRecipes/         # AllRecipesView + AllRecipesViewModel
 │           ├── YourRecipes/        # YourRecipesView + YourRecipesViewModel
-│           ├── Shared/             # SharedRecipesView + SharedRecipesViewModel (live Firestore stream)
-│           │                       # SharedRecipeDetailView + SharedRecipeDetailViewModel (visitor view)
+│           ├── Shared/             # SharedInboxView (received-recipes feed, full cards)
+│           │                       # SharedRecipeDetailView (deep-link visitor view)
 │           ├── Account/            # AccountView + AccountViewModel
 │           ├── RecipeDetail/       # RecipeDetailView + RecipeDetailViewModel
 │           ├── CookingMode/        # CookingModeView
@@ -1001,7 +1001,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 ## iOS Platform Status
 
-The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. Swift, SwiftUI, SwiftData. All core features including auth gate, shared recipes, comments, and visibility/share are implemented.
+The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. Swift, SwiftUI, SwiftData. All core features including auth gate, shared recipes, comments, and visibility/share are implemented. Notifications are push-only (no in-app notification screen).
 
 ### iOS ✅ Implemented & Matching Android
 
@@ -1028,14 +1028,16 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 | **F8 — Comments** | Post/delete in owner view + visitor view; commenter or recipe owner can delete |
 | **F8 — SharedRecipeService** | `publish/unpublish`, `sharedRecipesStream()`, `getSharedRecipeDetail`, `commentsStream`, `addComment`, `deleteComment`, `copyToMyRecipes` |
 | **Deep links** | `amrosa://shared/{id}` custom scheme + `https://amrosa-2ec82.web.app/shared/{id}` via `onOpenURL`; routes to `SharedRecipeDetailView` |
-| **Tab restructure** | All tab removed; 4 tabs: Your Recipes · Shared with Me · Discover (placeholder) · Account |
-| **Shared with Me tab** | `SharedInboxView` + `SharedInboxViewModel`; live `shared_to/{uid}/recipes/` stream; taps → `ReceivedRecipeView` |
+| **Tab restructure** | All tab removed; 4 tabs: **My Recipes** · Shared Recipes · Discover (placeholder) · Account |
+| **My Recipes Shared chip** | `YourRecipesViewModel` has `.shared` filter; loads `receivedRecipesSummaryStream()`; chip switches list to shared `SharedRecipeCard`s, hides FAB, tap → `ReceivedRecipeView`; compact capsule search bar w/ clear button + adaptive placeholder; chips scroll inside the list |
+| **Shared Recipes tab** | `SharedInboxView` + `SharedInboxViewModel`; live `shared_to/{uid}/recipes/` stream; full recipe cards (title, times, tags, author + "from sender"); taps → `ReceivedRecipeView` |
 | **Discover tab** | Placeholder screen |
-| **YourRecipesView** | All local recipes; filter chips (All/Personal/Imported); search; FAB |
 | **Account tab** | Profile card (tappable → edit name alert), sign-out + data-wipe dialog, recipe count, last sync |
 | **Profile name edit** | Tap profile card → alert with text field → `authRepository.updateDisplayName()` + `upsertProfile()`; toast on success |
-| **F9 — Follow system** | `SocialRepository`, `UserSearchView`, `NotificationsView`, `ReceivedRecipeView`, `FriendsView`; follow/unfollow/accept/decline, notification stream, direct recipe sharing, Co-Chefs list |
-| **F9 — FCM push notifications** | `AppDelegate` + `FirebaseMessaging`; APNs bridge; token stored in `users/{uid}.fcmToken` on sign-in; foreground banners; tap routing (follow → Account tab, recipe shared → Shared tab) |
+| **F9 — Follow system** | `SocialRepository`, `UserSearchView`, `ReceivedRecipeView`, `FriendsView`; follow/unfollow/accept/decline, direct recipe sharing, Co-Chefs list. In-app notifications removed (push only). |
+| **F9 — Push notifications only** | In-app `NotificationsView` + notification reading removed; Firestore notification writes remain to trigger `sendPushNotification`. `AppDelegate` + `FirebaseMessaging`; APNs bridge; token stored on sign-in; tap routing (follow → Account, recipe shared → Shared) |
+| **Shared recipe author attribution** | `buildSharedToDocument` stores `authorDisplayName` (original author) separate from `fromDisplayName` (sender); `getReceivedRecipe` returns `ReceivedRecipeData(recipe, fromDisplayName)`; `ReceivedRecipeView` "Shared by [sender]" banner + Sources section + "Save Recipe" → dismiss back |
+| **Co-Chef stale-data repair** | `repairFriendships()` on sign-in creates missing reverse follow docs for pre-mutual-friendship data |
 | **Recipe detail (flat layout)** | Ingredients flat under "Ingredients" header (all ingredients visible regardless of sectionId); steps grouped by section under "Instructions"; section jump chips scroll via `ScrollViewReader`; step-ingredient ref chips shown inline |
 | **isOwner for pre-auth recipes** | `authorId == nil` → `isOwner = true` (seeded/pre-auth recipes editable by anyone) |
 | **Author dropdown in editor** | `RecipeEditorView` has Picker("Author") — "Imported" or "Personal — [Name]"; backed by `isPersonalAuthor: Bool` in VM; applied on save |

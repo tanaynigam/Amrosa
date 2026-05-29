@@ -78,7 +78,7 @@ private struct MainAppView: View {
             NavigationStack {
                 YourRecipesView()
             }
-            .tabItem { Label("Your Recipes", systemImage: "bookmark") }
+            .tabItem { Label("My Recipes", systemImage: "bookmark") }
             .tag(0)
 
             NavigationStack {

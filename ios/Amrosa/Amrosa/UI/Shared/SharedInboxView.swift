@@ -50,7 +50,7 @@ struct SharedInboxView: View {
                 ProgressView()
             }
         }
-        .navigationTitle("Shared with Me")
+        .navigationTitle("Shared Recipes")
         .navigationDestination(item: $selectedShareId) { shareId in
             ReceivedRecipeView(shareId: shareId)
         }
@@ -93,47 +93,81 @@ private struct SharedInboxContent: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(viewModel.items) { item in
-                    Button {
-                        selectedShareId = item.shareId
-                    } label: {
-                        SharedInboxRow(item: item)
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(viewModel.items) { item in
+                            Button {
+                                selectedShareId = item.shareId
+                            } label: {
+                                SharedRecipeCard(item: item)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
-                .listStyle(.plain)
             }
         }
     }
 }
 
-// MARK: - Row
+// MARK: - Card (same visual language as My Recipes cards)
 
-private struct SharedInboxRow: View {
+struct SharedRecipeCard: View {
     let item: ReceivedRecipeSummary
 
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "tray.fill")
-                .foregroundStyle(Color.accentColor)
-                .font(.title3)
-                .frame(width: 32)
+    private var timeLabel: String {
+        var parts: [String] = []
+        if let p = item.prepTimeMinutes { parts.append("Prep \(p)min") }
+        if let c = item.cookTimeMinutes { parts.append("Cook \(c)min") }
+        return parts.joined(separator: "  ·  ")
+    }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.title)
-                    .font(.body)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.primary)
-                Text("From \(item.fromDisplayName) · \(item.sharedAt.relativeString())")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(item.title)
+                .font(.title3).fontWeight(.semibold)
+                .lineLimit(2)
+                .foregroundStyle(.primary)
+
+            if !timeLabel.isEmpty {
+                Text(timeLabel)
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            if !item.tags.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(item.tags, id: \.self) { tag in
+                            Text(tag)
+                                .font(.caption2)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(Color(.tertiarySystemFill))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+
+            // Author + "from sender" + timestamp
+            HStack(spacing: 4) {
+                Image(systemName: "person")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Text(item.authorDisplayName)
+                    .font(.caption).fontWeight(.medium).foregroundStyle(.secondary)
+                if item.fromDisplayName != item.authorDisplayName {
+                    Text("· from \(item.fromDisplayName)")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Text(item.sharedAt.relativeString())
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
         }
-        .padding(.vertical, 6)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }

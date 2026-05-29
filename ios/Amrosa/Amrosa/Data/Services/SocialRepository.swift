@@ -266,15 +266,18 @@ final class SocialRepository {
     }
 
     /// Load a directly-shared recipe from `shared_to/{currentUid}/recipes/{shareId}`.
-    func getReceivedRecipe(shareId: String) async -> SharedRecipe? {
+    /// Returns the full recipe + the sender's display name.
+    func getReceivedRecipe(shareId: String) async -> ReceivedRecipeData? {
         guard let myUid = authRepository.uid else { return nil }
         guard let doc = try? await db.collection("shared_to")
             .document(myUid)
             .collection("recipes")
             .document(shareId)
             .getDocument(),
-              let data = doc.data() else { return nil }
-        return parseReceivedRecipe(id: shareId, data: data)
+              let data = doc.data(),
+              let recipe = parseReceivedRecipe(id: shareId, data: data) else { return nil }
+        let fromDisplayName = data["fromDisplayName"] as? String ?? "Someone"
+        return ReceivedRecipeData(recipe: recipe, fromDisplayName: fromDisplayName)
     }
 
     // MARK: - Private helpers
@@ -375,6 +378,8 @@ final class SocialRepository {
             "createdAt": Int64(recipe.createdAt.timeIntervalSince1970 * 1000),
             "fromUid": fromUid,
             "fromDisplayName": fromDisplayName,
+            // Original recipe author — preserved so recipients see the right author name
+            "authorDisplayName": recipe.authorDisplayName ?? fromDisplayName,
             "tags": recipe.tags,
             "sourceUrls": recipe.sourceUrls,
             "sections": sections,
@@ -411,11 +416,18 @@ final class SocialRepository {
                         let data = doc.data()
                         guard let title = data["title"] as? String else { return nil }
                         let sharedAtMs = (data["sharedAt"] as? Double) ?? 0
+                        let sender = data["fromDisplayName"] as? String ?? "Someone"
+                        let tags = (data["tags"] as? [String]) ?? []
                         return ReceivedRecipeSummary(
                             shareId: doc.documentID,
                             title: title,
-                            fromDisplayName: data["fromDisplayName"] as? String ?? "Someone",
-                            sharedAt: Date(timeIntervalSince1970: sharedAtMs / 1000)
+                            // original author; fall back to sender for old docs
+                            authorDisplayName: (data["authorDisplayName"] as? String) ?? sender,
+                            fromDisplayName: sender,
+                            sharedAt: Date(timeIntervalSince1970: sharedAtMs / 1000),
+                            prepTimeMinutes: data["prepTimeMinutes"] as? Int,
+                            cookTimeMinutes: data["cookTimeMinutes"] as? Int,
+                            tags: tags
                         )
                     }
                     continuation.yield(summaries)
@@ -502,7 +514,8 @@ final class SocialRepository {
             imageUrl: data["imageUrl"] as? String,
             tags: tags,
             authorId: data["fromUid"] as? String,
-            authorDisplayName: data["fromDisplayName"] as? String,
+            // Original recipe author; fall back to sender for old docs that don't store it
+            authorDisplayName: (data["authorDisplayName"] as? String) ?? (data["fromDisplayName"] as? String),
             visibility: "private",
             sections: sections,
             ingredients: ingredients,
