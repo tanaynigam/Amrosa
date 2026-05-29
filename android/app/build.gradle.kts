@@ -84,6 +84,7 @@ dependencies {
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.auth)
     implementation(libs.firebase.functions)
+    implementation(libs.firebase.messaging)
 
     // Google Sign-In
     implementation(libs.play.services.auth)

@@ -277,7 +277,7 @@ class RecipeDetailViewModel(
         if (_uiState.value.following.isNotEmpty() || _uiState.value.isFollowingLoading) return
         _uiState.update { it.copy(isFollowingLoading = true) }
         viewModelScope.launch {
-            socialRepository.getFollowingFlow().collect { following ->
+            socialRepository.getFriendsFlow().collect { following ->
                 _uiState.update { it.copy(following = following, isFollowingLoading = false) }
             }
         }

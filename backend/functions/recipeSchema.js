@@ -42,9 +42,9 @@ Return a single JSON object with EXACTLY these fields (no markdown, no explanati
       "quantityUnitMetric": "string or null — metric unit: 'ml', 'L', 'g', 'kg'. null if not convertible",
       "quantityDisplayMetric": "string or null — full metric display like '240ml', '15ml', '227g', '1.1kg'. null if not convertible",
 
-      "quantityValueImperial": number or null — imperial equivalent of quantityValue. Populate for metric sources (g→oz, kg→lb, ml→fl oz). null if already imperial, non-convertible count, or 'to taste',
-      "quantityUnitImperial": "string or null — imperial unit: 'fl oz', 'oz', 'lb'. null if not convertible",
-      "quantityDisplayImperial": "string or null — full imperial display like '8 fl oz', '8 oz', '2.2 lb'. null if not convertible",
+      "quantityValueImperial": null,
+      "quantityUnitImperial": null,
+      "quantityDisplayImperial": null,
 
       "groupLabel": "string — logical grouping for display, e.g. 'Wet Ingredients', 'Dry Ingredients', 'Spices', 'Sauce', 'Garnish'",
       "isOptional": boolean — true if the recipe says 'optional',
@@ -85,16 +85,14 @@ IMPORTANT RULES:
 8. For "to taste", "as needed", "for garnish" type quantities, set quantityValue, quantityUnit, and ALL conversion fields to null.
 9. Return ONLY the JSON object. No markdown code fences, no explanation, no preamble.
 
-UNIT CONVERSION RULES (for quantityValueMetric / quantityValueImperial):
-- Volume (cups/tbsp/tsp → ml):  1 cup = 240ml, 1 tbsp = 15ml, 1 tsp = 5ml, 1 fl oz = 30ml
-- Volume (ml/L → fl oz):  1 ml = 0.0338 fl oz, 1 L = 33.8 fl oz
-- Weight (oz/lb → g/kg):  1 oz = 28.35g, 1 lb = 453.6g (or 0.4536kg)
-- Weight (g/kg → oz/lb):  1 g = 0.0353 oz, 1 kg = 2.205 lb
-- If the original unit is already metric (g, kg, ml, L), populate imperial fields and leave metric fields null.
-- If the original unit is already imperial (oz, lb, fl oz), populate metric fields and leave imperial fields null.
-- If the original unit is cups/tbsp/tsp, populate metric (ml/L) and leave imperial as null (cups are already "imperial" enough).
-- Non-convertible quantities (whole items like "2 cloves", "1 can", "3 eggs", "to taste", counts): set all conversion fields to null.
-- Round metric values sensibly: 240ml not 240.00ml, 28g not 28.35g for small amounts.
+METRIC CONVERSION RULES (quantityValueMetric / quantityUnitMetric / quantityDisplayMetric only):
+- ALWAYS leave imperial fields null — they are computed automatically from metric by the server.
+- Volume → ml or L:  1 cup = 240 ml, 1 tbsp = 15 ml, 1 tsp = 5 ml, 1 fl oz = 30 ml
+- Weight → g or kg:  1 oz = 28.35 g, 1 lb = 453.6 g
+- If the original unit is already metric (g, kg, ml, L), copy the value into the metric fields unchanged.
+- If the original unit is already imperial (oz, lb, fl oz), convert to metric and populate metric fields.
+- Non-convertible quantities (whole items like "2 cloves", "1 can", "3 eggs", "to taste", "a pinch"): set ALL conversion fields to null.
+- Round metric values sensibly: 240 ml not 240.00 ml; 28 g not 28.35 g for small amounts.
 `;
 
 module.exports = { RECIPE_SCHEMA_DESCRIPTION };

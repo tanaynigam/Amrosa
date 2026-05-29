@@ -10,8 +10,12 @@ const IMPORT_SYSTEM_INSTRUCTION =
   "Given text content from a recipe source (web page, spreadsheet, document, or plain text), " +
   "extract the recipe into the exact JSON schema provided. Be thorough — capture every " +
   "ingredient, every step, and link ingredients to steps where mentioned. " +
-  "Populate the metric and imperial conversion fields for every ingredient where a sensible " +
-  "conversion exists (volume: cups/tbsp/tsp ↔ ml; weight: oz/lb ↔ g/kg). " +
+  "Populate ONLY the metric conversion fields for every ingredient where a sensible conversion exists: " +
+  "volumes (cups/tbsp/tsp/fl oz) → ml or L; weights (oz/lb) → g or kg. " +
+  "If the original unit is already metric (g, kg, ml, L), copy it into the metric fields as-is. " +
+  "Leave ALL imperial fields (quantityValueImperial, quantityUnitImperial, quantityDisplayImperial) as null — " +
+  "they are computed automatically from metric. " +
+  "Leave ALL conversion fields null for uncountable quantities (e.g. 'to taste', 'a pinch', '2 cloves', '3 eggs'). " +
   "If any important field is genuinely unclear, add a brief note in the parseNotes field. " +
   "Return ONLY valid JSON, no markdown, no explanation.";
 
@@ -20,8 +24,13 @@ const FREEFORM_SYSTEM_INSTRUCTION =
   "The user has typed a recipe from memory — it may be incomplete, informal, partial, or unstructured. " +
   "Your job is to extract everything you can and structure it into the exact JSON schema provided. " +
   "Fill in missing fields with sensible defaults: servings = 1 if not stated, times = null if unknown. " +
-  "Populate the metric and imperial conversion fields for every ingredient where a sensible " +
-  "conversion exists (volume: cups/tbsp/tsp ↔ ml; weight: oz/lb ↔ g/kg). " +
+  "Populate ONLY the metric conversion fields for every ingredient where a sensible conversion exists: " +
+  "volumes (cups/tbsp/tsp/fl oz) → ml or L; weights (oz/lb) → g or kg. " +
+  "If the original unit is already metric (g, kg, ml, L), copy it into the metric fields as-is. " +
+  "Leave ALL imperial fields (quantityValueImperial, quantityUnitImperial, quantityDisplayImperial) as null — " +
+  "they are computed automatically from metric. " +
+  "Leave ALL conversion fields null for uncountable quantities (e.g. 'to taste', 'a pinch', '2 cloves', '3 eggs'). " +
+  "NEVER use cups, tbsp, tsp, or any volume measure in the imperial fields — imperial is weight-first. " +
   "Use parseNotes to flag anything you had to infer, guess, or fill in with a default. " +
   "Return ONLY valid JSON, no markdown, no explanation.";
 
@@ -48,7 +57,11 @@ async function parseRecipeFromUrl(url, apiKey) {
     sourceHint = `Google Docs: ${url}`;
   } else {
     const html = await fetchPage(url);
-    content = cleanHtml(html);
+    // Extract JSON-LD BEFORE cleaning — cleanHtml strips <script> tags
+    const jsonLd = extractJsonLdRecipe(html);
+    content = jsonLd
+      ? `Structured recipe data (JSON-LD schema.org/Recipe):\n${jsonLd}`
+      : cleanHtml(html);
     sourceHint = url;
   }
 
@@ -59,7 +72,7 @@ async function parseRecipeFromUrl(url, apiKey) {
     );
   }
 
-  const recipe = await callGemini(content, sourceHint, apiKey, IMPORT_SYSTEM_INSTRUCTION);
+  const recipe = await callGemini(geminiContent, sourceHint, apiKey, IMPORT_SYSTEM_INSTRUCTION);
   validateRecipe(recipe);
 
   // Ensure the original URL is captured in sourceUrls
@@ -211,26 +224,85 @@ function parseXlsxToText(base64String) {
   return sheetTexts.join("\n\n");
 }
 
+// ─── JSON-LD extraction ───────────────────────────────────────────────────────
+
+/**
+ * Attempts to extract a Recipe JSON-LD block from raw HTML.
+ * Most recipe sites embed structured data for Google rich snippets — this is
+ * much more reliable than scraping HTML, and works even on sites that otherwise
+ * block scrapers because it's part of the initial document response.
+ * Returns the JSON object as a formatted string, or null if none found.
+ */
+function extractJsonLdRecipe(html) {
+  const scriptRegex =
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = scriptRegex.exec(html)) !== null) {
+    try {
+      const raw = match[1].trim();
+      if (!raw) continue;
+      const data = JSON.parse(raw);
+      // Some sites wrap everything in a @graph array
+      const candidates = Array.isArray(data["@graph"])
+        ? data["@graph"]
+        : [data];
+      for (const item of candidates) {
+        const types = Array.isArray(item["@type"])
+          ? item["@type"]
+          : [item["@type"]];
+        if (types.includes("Recipe")) {
+          return JSON.stringify(item, null, 2);
+        }
+      }
+    } catch {
+      // Malformed JSON-LD — skip and try the next script block
+    }
+  }
+  return null;
+}
+
 // ─── HTML fetch + clean ───────────────────────────────────────────────────────
 
 async function fetchPage(url) {
   try {
     const response = await axios.get(url, {
-      timeout: 15000,
+      timeout: 20000,
       maxRedirects: 5,
+      decompress: true,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+        "Upgrade-Insecure-Requests": "1",
+        "sec-ch-ua":
+          '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "none",
+        "sec-fetch-user": "?1",
       },
     });
     return response.data;
   } catch (err) {
     if (err.response) {
-      throw new Error(`Failed to fetch URL (HTTP ${err.response.status})`);
+      const status = err.response.status;
+      if (status === 402 || status === 403) {
+        throw new Error(
+          `BLOCKED:${status}:This website blocks automated access. ` +
+          `Try copying the recipe text and using "Type it out" in the Personal tab instead.`
+        );
+      }
+      throw new Error(`Failed to fetch URL (HTTP ${status})`);
+    }
+    if (err.code === "ECONNREFUSED" || err.code === "ENOTFOUND") {
+      throw new Error(`Failed to fetch URL: Could not reach ${new URL(url).hostname}`);
     }
     throw new Error(`Failed to fetch URL: ${err.message}`);
   }
@@ -312,6 +384,68 @@ async function callGemini(content, sourceHint, apiKey, systemInstruction) {
   }
 }
 
+// ─── Imperial computation ─────────────────────────────────────────────────────
+
+/**
+ * Format a number removing needless trailing zeros.
+ * 2.0 → "2",  2.50 → "2.5",  0.25 → "0.25"
+ */
+function fmtNum(n) {
+  return parseFloat(n.toFixed(2)).toString();
+}
+
+/**
+ * Compute imperial fields deterministically from metric fields.
+ * Rules:
+ *   g / kg  → oz  (< 453.6 g)  or lb  (≥ 453.6 g)
+ *   ml / L  → fl oz
+ *   anything else or null metric → imperial stays null
+ *
+ * Called after validateRecipe so every metric field is already null-defaulted.
+ */
+function computeImperialFromMetric(recipe) {
+  for (const ing of recipe.ingredients) {
+    const val  = ing.quantityValueMetric;
+    const unit = (ing.quantityUnitMetric || "").toLowerCase().trim();
+
+    if (val == null || !unit) {
+      ing.quantityValueImperial   = null;
+      ing.quantityUnitImperial    = null;
+      ing.quantityDisplayImperial = null;
+      continue;
+    }
+
+    if (unit === "g" || unit === "kg") {
+      const grams  = unit === "kg" ? val * 1000 : val;
+      if (grams >= 453.6) {
+        const lb     = grams / 453.6;
+        const rounded = Math.round(lb * 100) / 100;
+        ing.quantityValueImperial   = rounded;
+        ing.quantityUnitImperial    = "lb";
+        ing.quantityDisplayImperial = `${fmtNum(rounded)} lb`;
+      } else {
+        const oz     = grams / 28.35;
+        const rounded = Math.round(oz * 10) / 10;
+        ing.quantityValueImperial   = rounded;
+        ing.quantityUnitImperial    = "oz";
+        ing.quantityDisplayImperial = `${fmtNum(rounded)} oz`;
+      }
+    } else if (unit === "ml" || unit === "l") {
+      const ml     = unit === "l" ? val * 1000 : val;
+      const floz   = ml / 29.574;
+      const rounded = Math.round(floz * 10) / 10;
+      ing.quantityValueImperial   = rounded;
+      ing.quantityUnitImperial    = "fl oz";
+      ing.quantityDisplayImperial = `${fmtNum(rounded)} fl oz`;
+    } else {
+      // Unknown or non-numeric metric unit (shouldn't happen, but be safe)
+      ing.quantityValueImperial   = null;
+      ing.quantityUnitImperial    = null;
+      ing.quantityDisplayImperial = null;
+    }
+  }
+}
+
 // ─── Validation ───────────────────────────────────────────────────────────────
 
 function validateRecipe(recipe) {
@@ -346,15 +480,19 @@ function validateRecipe(recipe) {
   recipe.description       = recipe.description || null;
   recipe.parseNotes        = recipe.parseNotes || null;
 
-  // Ensure conversion fields default to null if omitted by Gemini
+  // Null-default metric fields if Gemini omitted them
   for (const ing of recipe.ingredients) {
-    ing.quantityValueMetric    = ing.quantityValueMetric    ?? null;
-    ing.quantityUnitMetric     = ing.quantityUnitMetric     ?? null;
-    ing.quantityDisplayMetric  = ing.quantityDisplayMetric  ?? null;
-    ing.quantityValueImperial  = ing.quantityValueImperial  ?? null;
-    ing.quantityUnitImperial   = ing.quantityUnitImperial   ?? null;
-    ing.quantityDisplayImperial = ing.quantityDisplayImperial ?? null;
+    ing.quantityValueMetric   = ing.quantityValueMetric   ?? null;
+    ing.quantityUnitMetric    = ing.quantityUnitMetric    ?? null;
+    ing.quantityDisplayMetric = ing.quantityDisplayMetric ?? null;
+    // Imperial is always null here — computeImperialFromMetric fills them below
+    ing.quantityValueImperial   = null;
+    ing.quantityUnitImperial    = null;
+    ing.quantityDisplayImperial = null;
   }
+
+  // Compute imperial from metric with exact math — never trust Gemini for this
+  computeImperialFromMetric(recipe);
 }
 
 module.exports = { parseRecipeFromUrl, parseRecipeFromContent, formatRecipeFromText };

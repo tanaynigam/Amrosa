@@ -30,8 +30,8 @@ import java.util.Locale
 @Composable
 fun AccountScreen(
     onSignInClick: () -> Unit = {},
-    onNotificationsClick: () -> Unit = {},
-    onFindPeopleClick: () -> Unit = {}
+    onFindPeopleClick: () -> Unit = {},
+    onFriendsClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
@@ -61,28 +61,6 @@ fun AccountScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Account", style = MaterialTheme.typography.titleLarge) },
-                actions = {
-                    // Notification bell with unread badge
-                    BadgedBox(
-                        badge = {
-                            if (state.unreadNotificationCount > 0) {
-                                Badge {
-                                    Text(
-                                        if (state.unreadNotificationCount > 9) "9+"
-                                        else state.unreadNotificationCount.toString()
-                                    )
-                                }
-                            }
-                        }
-                    ) {
-                        IconButton(onClick = onNotificationsClick) {
-                            Icon(
-                                Icons.Default.Notifications,
-                                contentDescription = "Notifications"
-                            )
-                        }
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
@@ -210,11 +188,11 @@ fun AccountScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-            // ── People ────────────────────────────────────────────────────────
+            // ── Co-Chefs ──────────────────────────────────────────────────────
             if (!state.isAnonymous) {
-                AccountSectionHeader("People")
+                AccountSectionHeader("Co-Chefs")
 
-                // Pending follow requests
+                // Pending co-chef requests
                 if (state.pendingRequests.isNotEmpty()) {
                     state.pendingRequests.forEach { requester ->
                         PendingRequestCard(
@@ -227,10 +205,24 @@ fun AccountScreen(
                     Spacer(Modifier.height(4.dp))
                 }
 
-                // Following count
-                AccountRow("Following", "${state.followingCount}")
+                // Co-Chefs count (tappable → co-chefs list)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onFriendsClick)
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Co-Chefs", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "${state.friendCount}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
 
-                // Find People
+                // Find Co-Chefs
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -249,7 +241,7 @@ fun AccountScreen(
                         contentPadding = PaddingValues(0.dp)
                     ) {
                         Text(
-                            "Find People to Follow",
+                            "Find Co-Chefs",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -396,7 +388,7 @@ private fun PendingRequestCard(
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    "wants to follow you",
+                    "wants to be co-chefs",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

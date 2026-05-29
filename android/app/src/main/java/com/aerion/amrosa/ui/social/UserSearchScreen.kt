@@ -90,10 +90,10 @@ class UserSearchViewModel(
         }
     }
 
-    fun unfollow(target: UserProfile) {
+    fun unfriend(target: UserProfile) {
         viewModelScope.launch {
             _uiState.update { it.copy(pendingAction = target.uid) }
-            socialRepository.unfollow(target.uid)
+            socialRepository.unfriend(target.uid)
             _uiState.update { state ->
                 state.copy(
                     followStatus = state.followStatus + (target.uid to "none"),
@@ -158,7 +158,7 @@ fun UserSearchScreen(onBack: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                placeholder = { Text("Search by name…") },
+                placeholder = { Text("Find co-chefs by name or email…") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
                     if (state.query.isNotEmpty()) {
@@ -192,7 +192,7 @@ fun UserSearchScreen(onBack: () -> Unit) {
                             followStatus = state.followStatus[user.uid] ?: "none",
                             isLoading = state.pendingAction == user.uid,
                             onFollow = { viewModel.sendFollowRequest(user) },
-                            onUnfollow = { viewModel.unfollow(user) }
+                            onUnfollow = { viewModel.unfriend(user) }
                         )
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     }
@@ -233,11 +233,19 @@ private fun UserSearchRow(
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        Text(
-            text = user.displayName,
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.weight(1f)
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = user.displayName,
+                style = MaterialTheme.typography.bodyLarge
+            )
+            if (!user.email.isNullOrBlank()) {
+                Text(
+                    text = user.email,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
 
         if (isLoading) {
             CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
@@ -246,7 +254,7 @@ private fun UserSearchRow(
                 "accepted" -> OutlinedButton(
                     onClick = onUnfollow,
                     shape = RoundedCornerShape(8.dp)
-                ) { Text("Following") }
+                ) { Text("Co-Chef ✓") }
 
                 "pending" -> OutlinedButton(
                     onClick = onUnfollow,
@@ -259,7 +267,7 @@ private fun UserSearchRow(
                 ) {
                     Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Follow")
+                    Text("Add Co-Chef")
                 }
             }
         }

@@ -27,8 +27,7 @@ data class AccountUiState(
     val lastSyncTimestamp: Long = 0L,
     // Social
     val pendingRequests: List<UserProfile> = emptyList(),
-    val followingCount: Int = 0,
-    val unreadNotificationCount: Int = 0,
+    val friendCount: Int = 0,
     /** uid of pending accept/decline action. */
     val pendingFollowAction: String? = null,
     /** Non-null for one snackbar display after a successful name update. */
@@ -67,13 +66,8 @@ class AccountViewModel(
             }
         }
         viewModelScope.launch {
-            socialRepository.getFollowingFlow().collect { following ->
-                _uiState.update { it.copy(followingCount = following.size) }
-            }
-        }
-        viewModelScope.launch {
-            socialRepository.getUnreadCountFlow().collect { count ->
-                _uiState.update { it.copy(unreadNotificationCount = count) }
+            socialRepository.getFriendsFlow().collect { friends ->
+                _uiState.update { it.copy(friendCount = friends.size) }
             }
         }
     }
