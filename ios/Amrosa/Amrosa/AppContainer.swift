@@ -2,6 +2,7 @@ import SwiftData
 import Foundation
 import UserNotifications
 import UIKit
+import FirebaseMessaging
 
 @Observable
 @MainActor
@@ -49,6 +50,18 @@ final class AppContainer {
         await socialRepository.upsertProfile()
         await syncService.sync()
         await requestPushPermission()
+        await refreshFcmToken()
+    }
+
+    /// Fetch the current FCM token and write it to Firestore immediately on sign-in,
+    /// in case onNewToken was never called since the last install or token rotation.
+    private func refreshFcmToken() async {
+        do {
+            let token = try await Messaging.messaging().token()
+            await socialRepository.storeFcmToken(token)
+        } catch {
+            // Non-critical — the AppDelegate's MessagingDelegate will handle the next rotation
+        }
     }
 
     /// Ask the user for notification permission and register with APNs.

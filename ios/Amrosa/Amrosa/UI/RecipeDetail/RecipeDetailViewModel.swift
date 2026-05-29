@@ -141,7 +141,8 @@ final class RecipeDetailViewModel {
 
     var isOwner: Bool {
         guard let uid = authRepository.uid else { return false }
-        guard let authorId = recipe.authorId else { return false }
+        // Pre-auth / seeded recipes have no authorId — treat as owned by the signed-in user
+        guard let authorId = recipe.authorId else { return true }
         return authorId == uid
     }
 
@@ -231,6 +232,7 @@ final class RecipeDetailViewModel {
         Task {
             _ = await sharedRecipeService.publish(recipe)
             try? repository.updateVisibility(recipeId: recipe.id, visibility: "public")
+            recipe.visibility = "public"    // update in-memory
             isPublishing = false
             startCommentListener()
             openShareSheet()
@@ -240,6 +242,7 @@ final class RecipeDetailViewModel {
     func setVisibility(_ visibility: String) {
         Task {
             try? repository.updateVisibility(recipeId: recipe.id, visibility: visibility)
+            recipe.visibility = visibility   // update in-memory so isPublic reflects immediately
             if visibility == "public" {
                 _ = await sharedRecipeService.publish(recipe)
                 startCommentListener()

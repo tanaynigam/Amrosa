@@ -91,7 +91,11 @@ struct AccountView: View {
                         }
                     }
 
-                    LabeledContent("Co-Chefs", value: "\(vm.followingCount)")
+                    NavigationLink {
+                        FriendsView()
+                    } label: {
+                        LabeledContent("Co-Chefs", value: "\(vm.followingCount)")
+                    }
 
                     Button {
                         showUserSearch = true

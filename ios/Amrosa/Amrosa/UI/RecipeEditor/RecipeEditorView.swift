@@ -121,6 +121,14 @@ private struct RecipeEditorContent: View {
                 }
             }
 
+            Section("Author") {
+                Picker("Author", selection: $viewModel.isPersonalAuthor) {
+                    Text("Imported").tag(false)
+                    Text("Personal — \(viewModel.personalAuthorName)").tag(true)
+                }
+                .pickerStyle(.menu)
+            }
+
             Section("Tags") {
                 TextField("Dinner, Italian, Baking…", text: $viewModel.tagsText)
             }

@@ -113,6 +113,7 @@ private struct RecipeDetailContent: View {
     @Bindable var viewModel: RecipeDetailViewModel
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
 
@@ -157,7 +158,15 @@ private struct RecipeDetailContent: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(sections) { section in
-                                SectionJumpChip(section: section)
+                                Button(section.name) {
+                                    withAnimation { proxy.scrollTo(section.id, anchor: .top) }
+                                }
+                                .font(.caption).fontWeight(.medium)
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(Color(.secondarySystemBackground))
+                                .foregroundStyle(.primary)
+                                .clipShape(Capsule())
+                                .buttonStyle(.plain)
                             }
                         }
                         .padding(.horizontal, 16)
@@ -324,6 +333,7 @@ private struct RecipeDetailContent: View {
                 Spacer(minLength: 32)
             }
         }
+        } // ScrollViewReader
     }
 }
 
@@ -364,21 +374,6 @@ private struct YieldAdjuster: View {
                 .foregroundStyle(.secondary)
             }
         }
-    }
-}
-
-// MARK: - Section jump chip
-
-private struct SectionJumpChip: View {
-    let section: RecipeSectionModel
-
-    var body: some View {
-        // Uses ScrollViewProxy in parent — simplified to a visual chip here
-        Text(section.name)
-            .font(.caption).fontWeight(.medium)
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(Capsule())
     }
 }
 
@@ -468,9 +463,32 @@ private struct StepRow: View {
                     .foregroundStyle(Color.accentColor)
             }
             .padding(.top, 2)
-            Text(step.instruction)
-                .font(.body)
-                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(step.instruction)
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // Ingredient refs — shown as small chips below the step text
+                let refs = step.ingredientRefs
+                if !refs.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(refs, id: \.ingredient?.id) { ref in
+                                if let ing = ref.ingredient {
+                                    let display = ref.quantityDisplay ?? ing.quantityDisplay ?? ""
+                                    Text("\(display) \(ing.name)".trimmingCharacters(in: .whitespaces))
+                                        .font(.caption)
+                                        .padding(.horizontal, 8).padding(.vertical, 3)
+                                        .background(Color.accentColor.opacity(0.1))
+                                        .foregroundStyle(Color.accentColor)
+                                        .clipShape(Capsule())
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Spacer()
         }
         .padding(.horizontal, 16)

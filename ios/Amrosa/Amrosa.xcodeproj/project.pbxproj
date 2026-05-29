@@ -59,6 +59,7 @@
 		E3C48CA15A6025D69F83F232 /* YourRecipesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F610DCBD0BFE5231A23E1FED /* YourRecipesView.swift */; };
 		E7352C774EA41B121EAA8E27 /* RecipeSectionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 925B8424F95DC3A52E367D19 /* RecipeSectionModel.swift */; };
 		EA7596B98CCEF914466D9624 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = D476FEE4AC19949B7C2E8FE9 /* GoogleService-Info.plist */; };
+		ED56FD21FD70096D0806486F /* FriendsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61277F8178D8EB174359B78F /* FriendsView.swift */; };
 		F0F990AD1889DC7D5EF96D51 /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC008B63EDFD1FBB48E0B460 /* AccountView.swift */; };
 		F28E0694C8AEF94BD881DF88 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 364BEAE6150BC1A8F375CCA6 /* FirebaseStorage */; };
 		F5558310876B1AF34DF7F181 /* ReceivedRecipeSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B9F58D556EDEC241EC090D1 /* ReceivedRecipeSummary.swift */; };
@@ -102,6 +103,7 @@
 		512E3E1ED5CCCCAB71F2A11B /* AllRecipesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllRecipesViewModel.swift; sourceTree = "<group>"; };
 		5A97B8F3F75DA6B01E1EDA4B /* NotificationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsView.swift; sourceTree = "<group>"; };
 		60494666244275FAD1EDFD14 /* RecipeDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeDetailViewModel.swift; sourceTree = "<group>"; };
+		61277F8178D8EB174359B78F /* FriendsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsView.swift; sourceTree = "<group>"; };
 		696E6D4A5155305802A53ADD /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
 		72B871401338956467B2069D /* IngredientModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngredientModel.swift; sourceTree = "<group>"; };
 		7F44E83F6177880E4F56D7A0 /* FreeformEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeformEntryView.swift; sourceTree = "<group>"; };
@@ -216,6 +218,7 @@
 		3F026ADE9891895B2AEBA165 /* Social */ = {
 			isa = PBXGroup;
 			children = (
+				61277F8178D8EB174359B78F /* FriendsView.swift */,
 				5A97B8F3F75DA6B01E1EDA4B /* NotificationsView.swift */,
 				E30129D1C7369FBE2238CCDF /* ReceivedRecipeView.swift */,
 				890EB3690AA95791DCE9A037 /* UserSearchView.swift */,
@@ -520,6 +523,7 @@
 				C93F4F245E10E7608EAF8618 /* DiscoverView.swift in Sources */,
 				6A609AAD4FC10D1CD6BEFF28 /* Extensions.swift in Sources */,
 				7C6799FA0D19DED79E8D4765 /* FreeformEntryView.swift in Sources */,
+				ED56FD21FD70096D0806486F /* FriendsView.swift in Sources */,
 				1D94B52DB772773020323A03 /* ImportView.swift in Sources */,
 				065C4321EC6217B66A9BB187 /* ImportViewModel.swift in Sources */,
 				E17B4D5CB6AE25D0BD57CC44 /* IngredientModel.swift in Sources */,

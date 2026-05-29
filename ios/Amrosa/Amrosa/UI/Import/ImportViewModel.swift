@@ -104,11 +104,17 @@ final class ImportViewModel {
     func confirmImport() {
         guard let recipeId = reviewingRecipeId else { return }
         try? repository.confirmReview(recipeId: recipeId)
+        // Apply the author toggle: isOwnRecipe true → isImported false (Personal), false → isImported true
+        try? repository.updateIsImported(recipeId: recipeId, isImported: !isOwnRecipe)
         parsedRecipe = nil
         reviewingRecipeId = nil
     }
 
     func reimport() {
+        // Delete the pending recipe so we don't leave a duplicate when re-parsing
+        if let recipeId = reviewingRecipeId {
+            try? repository.deleteRecipe(id: recipeId)
+        }
         parsedRecipe = nil
         reviewingRecipeId = nil
     }

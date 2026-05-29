@@ -110,11 +110,18 @@ final class RecipeEditorViewModel {
     var errorMessage: String? = nil
     var savedRecipeId: String? = nil
     var deleteComplete = false
+    /// true = Personal (isImported=false), false = Imported (isImported=true)
+    var isPersonalAuthor: Bool = true
 
     var existingRecipe: RecipeModel?
     private let repository: RecipeRepository
     private let authRepository: AuthRepository
     private let syncService: RecipeSyncService?
+
+    /// Display name shown in the "Personal" dropdown option
+    var personalAuthorName: String {
+        authRepository.displayName ?? authRepository.email ?? "Me"
+    }
 
     // MARK: - Init for new recipe
 
@@ -133,6 +140,7 @@ final class RecipeEditorViewModel {
         self.sourceUrlsText = ""
         // Start with one unnamed section
         self.sections = [EditorSection(id: UUID().uuidString, name: "Main", ingredients: [], steps: [])]
+        self.isPersonalAuthor = true // new recipes default to Personal
     }
 
     // MARK: - Init for editing existing recipe
@@ -177,6 +185,8 @@ final class RecipeEditorViewModel {
         } else {
             self.sections = sortedSections.map { EditorSection(from: $0) }
         }
+        // Default: imported recipes start as "Imported"; personal/freeform as "Personal"
+        self.isPersonalAuthor = !recipe.isImported
     }
 
     // MARK: - Section CRUD
@@ -272,8 +282,8 @@ final class RecipeEditorViewModel {
                     prepTimeMinutes: prep,
                     cookTimeMinutes: cook,
                     tags: tags,
-                    isImported: existing.isImported,
-                    authorDisplayName: existing.authorDisplayName,
+                    isImported: !isPersonalAuthor,
+                    authorDisplayName: isPersonalAuthor ? personalAuthorName : "Imported",
                     sections: sections,
                     deletedSectionIds: Array(deletedSectionIds),
                     deletedIngredientIds: Array(deletedIngredientIds),
@@ -292,8 +302,8 @@ final class RecipeEditorViewModel {
                     recipeId: recipeId,
                     parsed: parsed,
                     authorId: authRepository.uid,
-                    authorDisplayName: authRepository.displayName ?? "Me",
-                    isImported: false,
+                    authorDisplayName: isPersonalAuthor ? personalAuthorName : "Imported",
+                    isImported: !isPersonalAuthor,
                     needsReview: false
                 )
                 savedRecipeId = recipeId

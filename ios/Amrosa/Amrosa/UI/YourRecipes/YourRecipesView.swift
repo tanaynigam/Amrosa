@@ -4,7 +4,7 @@ struct YourRecipesView: View {
     @Environment(AppContainer.self) private var container
     @State private var viewModel: YourRecipesViewModel?
     @State private var selectedRecipe: RecipeModel? = nil
-    @State private var showAddSheet = false
+    @State private var showAddMenu = false
     @State private var navigateToImport = false
     @State private var navigateToFreeform = false
     @State private var navigateToImportForReview: RecipeModel? = nil
@@ -27,16 +27,18 @@ struct YourRecipesView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
-                    showAddSheet = true
+                    showAddMenu = true
                 } label: {
                     Image(systemName: "plus")
                 }
             }
         }
-        .confirmationDialog("Add Recipe", isPresented: $showAddSheet) {
-            Button("Type it out") { navigateToFreeform = true }
-            Button("Import from URL or file") { navigateToImport = true }
-            Button("Cancel", role: .cancel) {}
+        .sheet(isPresented: $showAddMenu) {
+            AddRecipeSheet(
+                isPresented: $showAddMenu,
+                onTypeItOut: { showAddMenu = false; navigateToFreeform = true },
+                onImport: { showAddMenu = false; navigateToImport = true }
+            )
         }
         .navigationDestination(item: $selectedRecipe) { recipe in
             RecipeDetailView(recipe: recipe)
@@ -56,6 +58,72 @@ struct YourRecipesView: View {
             }
             viewModel?.load()
         }
+    }
+}
+
+// MARK: - Add recipe bottom sheet (matches Android ModalBottomSheet)
+
+private struct AddRecipeSheet: View {
+    @Binding var isPresented: Bool
+    let onTypeItOut: () -> Void
+    let onImport: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Capsule()
+                .fill(Color(.systemFill))
+                .frame(width: 36, height: 4)
+                .padding(.top, 12)
+
+            Text("Add Recipe")
+                .font(.headline)
+                .padding(.vertical, 16)
+
+            Divider()
+
+            Button(action: onTypeItOut) {
+                HStack(spacing: 14) {
+                    Image(systemName: "text.cursor")
+                        .font(.title3)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Type it out")
+                            .font(.body).fontWeight(.medium).foregroundStyle(.primary)
+                        Text("Write a recipe and format it with Gemini")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20).padding(.vertical, 14)
+                .background(Color.accentColor.opacity(0.07))
+            }
+            .buttonStyle(.plain)
+
+            Divider().padding(.leading, 66)
+
+            Button(action: onImport) {
+                HStack(spacing: 14) {
+                    Image(systemName: "link")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Import from URL or file")
+                            .font(.body).foregroundStyle(.primary)
+                        Text("Import from a website, PDF, or spreadsheet")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20).padding(.vertical, 14)
+            }
+            .buttonStyle(.plain)
+
+            Spacer().frame(minHeight: 20)
+        }
+        .presentationDetents([.height(230)])
+        .presentationDragIndicator(.hidden)
     }
 }
 
