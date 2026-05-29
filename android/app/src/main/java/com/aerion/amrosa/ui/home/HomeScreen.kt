@@ -23,6 +23,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.domain.model.Recipe
 import com.aerion.amrosa.domain.model.ReceivedRecipeSummary
+import com.aerion.amrosa.ui.components.AmrosaTopBar
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -52,30 +53,7 @@ fun HomeScreen(
     val isSharedMode = state.yourRecipesFilter == YourRecipesFilter.SHARED
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        when (filter) {
-                            RecipeFilter.YOURS -> "My Recipes"
-                            RecipeFilter.PERSONAL -> "My Recipes"
-                            else -> "Amrita & Ambrosia"
-                        },
-                        style = MaterialTheme.typography.titleLarge
-                    )
-                },
-                actions = {
-                    if (filter == RecipeFilter.ALL) {
-                        IconButton(onClick = onSettingsClick) {
-                            Icon(Icons.Default.Settings, contentDescription = "Settings")
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
-            )
-        },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         floatingActionButton = {
             if (!isSharedMode && (filter == RecipeFilter.YOURS || filter == RecipeFilter.PERSONAL)) {
                 ExtendedFloatingActionButton(
@@ -88,7 +66,22 @@ fun HomeScreen(
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
 
-            // ── Compact search bar (stays sticky) ─────────────────────────────
+            AmrosaTopBar(
+                title = when (filter) {
+                    RecipeFilter.YOURS -> "My Recipes"
+                    RecipeFilter.PERSONAL -> "My Recipes"
+                    else -> "Amrita & Ambrosia"
+                },
+                actions = {
+                    if (filter == RecipeFilter.ALL) {
+                        IconButton(onClick = onSettingsClick) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        }
+                    }
+                }
+            )
+
+            // ── Compact search bar ────────────────────────────────────────────
             OutlinedTextField(
                 value = state.searchQuery,
                 onValueChange = viewModel::onSearchQueryChange,
@@ -107,8 +100,6 @@ fun HomeScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp)
             )
-
-            HorizontalDivider(modifier = Modifier.padding(top = 4.dp))
 
             // ── Content ───────────────────────────────────────────────────────
             when {
