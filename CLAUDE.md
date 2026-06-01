@@ -105,10 +105,74 @@ Tab 4 — Account        (👤)  Profile, co-chef system, sync, sign-out
 - `isImported` controls **author display when sharing** (`false` = real name, `true` = "Imported"), not which filter chip it appears under.
 - **Import** is a push route (`"import?reviewId=..."`) accessible from the Add Recipe FAB, not a tab.
 - Pending-review recipes float to the top of My Recipes with a "Needs review — tap to confirm" badge; tapping opens the import screen with the review sheet pre-loaded.
-- **"Shared" tab (Tab 2) = "Shared Recipes"** — shows recipes other users have directly sent to you (from `shared_to/{uid}/recipes/`) as full recipe cards (title, times, tags, original author + sender). Same feed as the My Recipes "Shared" chip. Does NOT show all public recipes or a community browse feed.
-- **"Discover" tab (Tab 3) = Recommendations placeholder** — renders a simple "Coming soon" screen. Implementation deferred.
-- **Public recipes are NOT auto-listed anywhere.** `visibility = "public"` only means the recipe is mirrored to `shared_recipes` in Firestore so it can be accessed via a shareable link or a future profile view. It does not appear in any in-app browse tab.
-- **Tab 4 is "Account"** (route `"account_tab"`, composable `AccountScreen`) — contains both account management and social/follow features.
+- **"Shared" tab (Tab 2) = "Shared Recipes"** — recipes other users shared with you, **saved as references** to the author's canonical instance (see Recipe Ownership Model below). Same card/detail/cooking-mode UI as Tab 1, but **read-only**: no edit/delete/share, only "Remove from my recipes". No Add Recipe FAB. Pending un-saved shares appear at the top as "In review".
+- **"Discover" tab (Tab 3) = Recommendations placeholder** — renders a simple "Coming soon" screen. Implementation deferred. (Future: public/discoverable recipes + time-of-day recommendations; will eventually become the default tab.)
+- **Tab 4 is "Account"** (route `"account_tab"`, composable `AccountScreen`) — contains both account management and social/co-chef features.
+- **No "official" recipes.** The seeded `recipes` collection concept is retired — every recipe has a real author. (The original 4 seeded recipes are re-imported under the owner's account as normal personal recipes.)
+
+---
+
+## Recipe Ownership Model (v2 — authoritative)
+
+This is the source-of-truth model for how recipes are owned, shared, and displayed. It supersedes any older "official/seeded" or "copy-on-save" language elsewhere in this doc.
+
+### Three origins, one canonical instance
+
+Every recipe has exactly **one canonical instance**, owned and editable only by its author, living at `personal_recipes/{authorUid}/recipes/{recipeId}`.
+
+| Origin | Where it shows | Editable? | `isReceived` |
+|---|---|---|---|
+| **Mine** (typed or imported by me) | Tab 1 | ✅ edit / delete / share | `false` |
+| **Received** (saved from another user's share) | Tab 2 | ❌ read-only; "Remove" only | `true` |
+| ~~Official / seeded~~ | — removed — | — | — |
+
+A **received** recipe is NOT a copy. It is a **reference** to the author's canonical instance, cached locally in Room for offline use. The author is the only one who can edit it; the receiver only views/cooks it.
+
+### Visibility is the share gate
+
+- A recipe is shareable only when its `visibility = "public"`. Going public publishes/refreshes the canonical mirror at `shared_recipes/{recipeId}`; going private **deletes** that mirror.
+- Tab 2 references read from `shared_recipes/{recipeId}`.
+- If the author flips a recipe **Public → Private** (or deletes it), the mirror disappears → every receiver's next sync removes it from their Tab 2 automatically.
+
+### Sharing & saving flow
+
+1. User A shares a recipe to User B. The recipe must be Public (the share action publishes it if needed). A **pointer** is delivered to B's inbox.
+2. B sees the pointer at the top of Tab 2 as **"In review"**.
+3. B taps → review screen → **Save Recipe** → the pending pointer is **consumed**, a reference `received_recipes/{B}/items/{recipeId}` = `{authorUid, authorName, recipeId, savedAt}` is written, and the recipe is cached into Room with `isReceived = true` and the **original author preserved**.
+4. B opens the saved recipe → the normal `RecipeDetailScreen` (read-only) → cooking mode etc.
+5. **Propagation:** on sync, each reference re-reads `shared_recipes/{recipeId}`. Author edits refresh B's cache; author unpublish/delete removes it from B's Tab 2.
+6. **Remove** (B): deletes B's reference + local cache only. A's instance is untouched and can be re-shared.
+
+Received recipes are **never** pushed to B's `personal_recipes` (they aren't B's), and are excluded from B's push sync.
+
+### Author label rule
+
+Author name + `isImported` flag are **always** persisted (we never overwrite the name with the literal "Imported"). The label is computed at display time:
+
+```
+name  = if (authorId == currentUid) "me" else authorDisplayName
+label = if (isImported) "Imported by $name" else name
+```
+
+| Recipe | `isImported` | Label |
+|---|---|---|
+| Tab 1, authored by me | false | **me** |
+| Tab 1, imported by me | true | **Imported by me** |
+| Tab 2, authored by B | false | **B** |
+| Tab 2, imported by B | true | **Imported by B** |
+
+### Cloud collections (recipe ownership)
+
+| Path | Contents |
+|---|---|
+| `personal_recipes/{authorUid}/recipes/{recipeId}` | Canonical recipe, author-editable. Tab 1 source. |
+| `shared_recipes/{recipeId}` | Public mirror; exists only while `visibility = "public"`; re-published on every edit. What receivers read. |
+| `received_recipes/{uid}/items/{recipeId}` | A user's saved references `{authorUid, authorName, recipeId, savedAt}`. Drives Tab 2. |
+| Direct-share pointer (inbox) | Notifies B of a new share; resolves to `shared_recipes/{recipeId}`; shown as "In review" until saved. |
+
+### Implementation status
+
+🚧 **In progress** — being built in 5 steps: (1) schema + migration + remove official concept; (2) sync rework; (3) share-requires-public path; (4) Tab 2 reference rebuild; (5) Tab 1 + detail read-only rules. Sections F2/F7/F8/F9 below describe the *previous* copy-based behaviour and are being migrated to this model.
 
 ---
 
@@ -135,17 +199,20 @@ data class RecipeEntity(
     val imageUrl: String?,
     val tags: String,                    // JSON List<String>
     val isCustomized: Boolean = false,
-    val isImported: Boolean = false,     // controls author display when shared (see Author Attribution)
+    val isImported: Boolean = false,     // URL/file import vs typed; drives "Imported by X" label
+    val isReceived: Boolean = false,     // PLANNED (v2): true = received from another user → Tab 2, read-only
     val needsReview: Boolean = false,    // true = imported but not yet confirmed by user
     val version: Int = 1,
     val changeLog: String = "[]",        // JSON List<RecipeChange>
     val createdAt: Long,
     val updatedAt: Long,
     val syncedAt: Long? = null,
-    val authorId: String? = null,        // Firebase UID of creator; null for pre-auth recipes
-    val authorDisplayName: String? = null, // real display name at creation time
+    val authorId: String? = null,        // Firebase UID of the ORIGINAL author (always preserved)
+    val authorDisplayName: String? = null, // ORIGINAL author display name (never overwritten with "Imported")
     val visibility: String = "private"   // "private" | "public" (public = mirrored to shared_recipes)
 )
+// v2 note: isReceived added via Room migration (DB version bump). Tab 1 = isReceived=false; Tab 2 = isReceived=true.
+// authorId == null special-case (old "official/seeded") is retired — see Recipe Ownership Model.
 ```
 
 ```kotlin
@@ -991,7 +1058,9 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 | # | Feature | Description |
 |---|---|---|
-| — | Discover / Recommendations tab | Personalised recipe suggestions (Gemini-powered); replaces placeholder |
+| **🚧 NOW** | Recipe Ownership Model v2 | See "Recipe Ownership Model (v2)" above. 5 steps: (1) schema `isReceived` + migration, kill official/seeded + fork dialog + `authorId==null` owner case; (2) sync: drop seeded `recipes` pull, exclude received from push, add received-reference refresh from `shared_recipes`; (3) share requires Public, deliver pointer not snapshot; (4) Tab 2 = Room-backed references + "In review" pending on top, Save consumes pointer, "Remove" action; (5) Tab 1 drop "Shared" chip, `RecipeDetailScreen` hides edit/delete/share + shows "Remove" when `isReceived`; author label rule "me / Imported by X". |
+| — | Discover / Recommendations tab | Public/discoverable recipes + time-of-day recommendations; replaces placeholder; eventually becomes default tab |
+| — | Public profile view | View another user's public recipes at `"profile/{uid}"` |
 | — | Public profile view | View another user's public recipes at `"profile/{uid}"` |
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil display |
 | — | Shopping List | Dedicated screen; add ingredients from recipe detail |
