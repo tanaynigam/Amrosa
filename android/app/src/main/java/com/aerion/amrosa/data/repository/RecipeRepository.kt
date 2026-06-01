@@ -91,6 +91,9 @@ class RecipeRepository(
             getRecipeWithDetails(entity.id)
         }
 
+    /** IDs of all locally-cached received recipes (Tab 2). Used by the received-reference refresh. */
+    suspend fun getReceivedRecipeIds(): List<String> = recipeDao.getReceivedRecipeIdsOnce()
+
     // ─── Domain mapping ───────────────────────────────────────────────────────
 
     private fun changeLogList(json: String): List<RecipeChange> =

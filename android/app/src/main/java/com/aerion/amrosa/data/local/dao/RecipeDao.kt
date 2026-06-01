@@ -86,9 +86,16 @@ abstract class RecipeDao {
     @Query("SELECT COUNT(*) FROM recipes")
     abstract suspend fun count(): Int
 
-    /** One-shot (non-Flow) read of all personal recipes — used for bulk cloud push. */
-    @Query("SELECT * FROM recipes WHERE isImported = 0 ORDER BY title ASC")
+    /**
+     * One-shot read of recipes eligible for cloud push to personal_recipes:
+     * personal (isImported=0) AND owned by me (isReceived=0). Received references are never pushed.
+     */
+    @Query("SELECT * FROM recipes WHERE isImported = 0 AND isReceived = 0 ORDER BY title ASC")
     abstract suspend fun getPersonalRecipesOnce(): List<RecipeEntity>
+
+    /** IDs of all locally-cached received recipes (Tab 2). Used by the received-reference refresh. */
+    @Query("SELECT id FROM recipes WHERE isReceived = 1")
+    abstract suspend fun getReceivedRecipeIdsOnce(): List<String>
 
     @Query("UPDATE recipes SET visibility = :visibility WHERE id = :id")
     abstract suspend fun updateVisibility(id: String, visibility: String)

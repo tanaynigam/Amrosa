@@ -30,6 +30,8 @@ class AmrosaApplication : Application() {
             container.authRepository.authStateFlow().collect { user ->
                 if (user != null && !user.isAnonymous) {
                     container.syncService.syncPersonalRecipes()
+                    // Refresh Tab 2 received recipes from their canonical public mirrors
+                    container.syncService.syncReceivedRecipes()
                     // Upsert public profile so other users can find / follow this user
                     container.socialRepository.upsertProfile()
                     // Register FCM token so we can receive push notifications
