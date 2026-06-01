@@ -35,7 +35,6 @@ fun HomeScreen(
     onFabFreeformClick: () -> Unit = {},
     onFabImportClick: () -> Unit = {},
     onNeedsReviewClick: (String) -> Unit = {},
-    onSharedRecipeClick: (shareId: String) -> Unit = {},
     filter: RecipeFilter = RecipeFilter.ALL
 ) {
     val app = LocalContext.current.applicationContext as AmrosaApplication
@@ -43,19 +42,16 @@ fun HomeScreen(
         key = "home-${filter.name}",
         factory = HomeViewModel.factory(
             repository = app.container.repository,
-            socialRepository = app.container.socialRepository,
             filter = filter
         )
     )
     val state by viewModel.uiState.collectAsState()
     var showAddSheet by remember { mutableStateOf(false) }
 
-    val isSharedMode = state.yourRecipesFilter == YourRecipesFilter.SHARED
-
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         floatingActionButton = {
-            if (!isSharedMode && (filter == RecipeFilter.YOURS || filter == RecipeFilter.PERSONAL)) {
+            if (filter == RecipeFilter.YOURS || filter == RecipeFilter.PERSONAL) {
                 ExtendedFloatingActionButton(
                     text = { Text("Add Recipe") },
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
@@ -85,7 +81,7 @@ fun HomeScreen(
             OutlinedTextField(
                 value = state.searchQuery,
                 onValueChange = viewModel::onSearchQueryChange,
-                placeholder = { Text(if (isSharedMode) "Search shared recipes…" else "Search recipes…") },
+                placeholder = { Text("Search recipes…") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
                 trailingIcon = {
                     if (state.searchQuery.isNotEmpty()) {
@@ -108,33 +104,22 @@ fun HomeScreen(
                     contentAlignment = Alignment.Center
                 ) { CircularProgressIndicator() }
 
-                isSharedMode && state.isSharedLoading -> Box(
-                    Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) { CircularProgressIndicator() }
-
                 else -> {
-                    val showEmpty = if (isSharedMode)
-                        state.filteredSharedRecipes.isEmpty()
-                    else
-                        state.filteredRecipes.isEmpty()
-
                     LazyColumn(
                         contentPadding = PaddingValues(
                             start = 16.dp, end = 16.dp,
                             top = 8.dp,
-                            bottom = if (!isSharedMode && (filter == RecipeFilter.YOURS || filter == RecipeFilter.PERSONAL)) 88.dp else 16.dp
+                            bottom = if (filter == RecipeFilter.YOURS || filter == RecipeFilter.PERSONAL) 88.dp else 16.dp
                         ),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // ── Combined filter chips (scroll with content) ─────────
+                        // ── Filter chips (scroll with content) ──────────────────
                         if (filter == RecipeFilter.YOURS) {
                             item(key = "chips") {
                                 LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    // Author / source filter chips
                                     item {
                                         FilterChip(
                                             selected = state.yourRecipesFilter == YourRecipesFilter.ALL,
@@ -156,16 +141,9 @@ fun HomeScreen(
                                             label = { Text("Imported") }
                                         )
                                     }
-                                    item {
-                                        FilterChip(
-                                            selected = state.yourRecipesFilter == YourRecipesFilter.SHARED,
-                                            onClick = { viewModel.onYourRecipesFilterChange(YourRecipesFilter.SHARED) },
-                                            label = { Text("Shared") }
-                                        )
-                                    }
 
-                                    // Thin divider + category chips (only in non-Shared mode)
-                                    if (!isSharedMode && state.categories.isNotEmpty()) {
+                                    // Thin divider + category chips
+                                    if (state.categories.isNotEmpty()) {
                                         item {
                                             Box(
                                                 modifier = Modifier
@@ -194,8 +172,7 @@ fun HomeScreen(
                             }
                         }
 
-                        // ── Empty state ─────────────────────────────────────────
-                        if (showEmpty) {
+                        if (state.filteredRecipes.isEmpty()) {
                             item(key = "empty") {
                                 Box(
                                     Modifier
@@ -204,23 +181,13 @@ fun HomeScreen(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        if (isSharedMode) "No shared recipes yet"
-                                        else "No recipes found",
+                                        "No recipes found",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
-                        } else if (isSharedMode) {
-                            // ── Shared recipe cards ─────────────────────────────
-                            items(state.filteredSharedRecipes, key = { it.shareId }) { summary ->
-                                SharedInboxCard(
-                                    summary = summary,
-                                    onClick = { onSharedRecipeClick(summary.shareId) }
-                                )
-                            }
                         } else {
-                            // ── My Recipes cards ────────────────────────────────
                             items(state.filteredRecipes, key = { it.id }) { recipe ->
                                 RecipeCard(
                                     recipe = recipe,
@@ -329,24 +296,22 @@ private fun RecipeCard(recipe: Recipe, onClick: () -> Unit) {
                 }
             }
 
-            val showAuthor = !recipe.authorDisplayName.isNullOrBlank()
+            // Tab 1 only shows my recipes → label is "me" / "Imported by me"
             val isShared = recipe.visibility == "public"
-            if (showAuthor || isShared) {
+            run {
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (showAuthor) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Person, contentDescription = null,
-                                modifier = Modifier.size(12.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(recipe.authorDisplayName!!,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Person, contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(if (recipe.isImported) "Imported by me" else "me",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (isShared) {
                         Surface(
@@ -394,74 +359,3 @@ private fun RecipeCard(recipe: Recipe, onClick: () -> Unit) {
     }
 }
 
-// ── Shared inbox card (same visual as SharedInboxScreen) ─────────────────────
-
-@Composable
-private fun SharedInboxCard(summary: ReceivedRecipeSummary, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(summary.title, style = MaterialTheme.typography.titleLarge,
-                maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Spacer(modifier = Modifier.height(6.dp))
-
-            val timeLabel = buildString {
-                summary.prepTimeMinutes?.let { append("Prep ${it}min") }
-                if (summary.prepTimeMinutes != null && summary.cookTimeMinutes != null) append("  ·  ")
-                summary.cookTimeMinutes?.let { append("Cook ${it}min") }
-            }
-            if (timeLabel.isNotBlank()) {
-                Text(timeLabel, style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-
-            if (summary.tags.isNotEmpty()) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(summary.tags) { tag ->
-                        SuggestionChip(onClick = {},
-                            label = { Text(tag, style = MaterialTheme.typography.labelSmall) })
-                    }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(Icons.Default.Person, contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(summary.authorDisplayName,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (summary.fromDisplayName != summary.authorDisplayName) {
-                    Text("· from ${summary.fromDisplayName}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
-                }
-                Spacer(Modifier.weight(1f))
-                Text(formatRelative(summary.sharedAt),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-            }
-        }
-    }
-}
-
-private fun formatRelative(millis: Long): String {
-    val diff = System.currentTimeMillis() - millis
-    return when {
-        diff < 60_000      -> "just now"
-        diff < 3_600_000   -> "${diff / 60_000}m ago"
-        diff < 86_400_000  -> "${diff / 3_600_000}h ago"
-        diff < 604_800_000 -> "${diff / 86_400_000}d ago"
-        else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(millis))
-    }
-}

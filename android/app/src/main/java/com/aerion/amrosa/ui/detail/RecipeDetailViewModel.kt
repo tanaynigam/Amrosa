@@ -33,8 +33,13 @@ data class RecipeDetailUiState(
     val isFollowingLoading: Boolean = false,
     /** Non-null for one compose frame after a successful direct share. */
     val shareSentToName: String? = null,
+    /** Set true after a received recipe is removed → screen navigates back. */
+    val removed: Boolean = false,
 ) {
     val isPublic: Boolean get() = recipe?.visibility == "public"
+
+    /** True when this is a received recipe (Tab 2) — read-only, "Remove" instead of edit/delete. */
+    val isReceived: Boolean get() = recipe?.isReceived == true
 
     val visibleIngredients: List<Ingredient> get() {
         val recipe = recipe ?: return emptyList()
@@ -190,6 +195,20 @@ class RecipeDetailViewModel(
                 sharedRecipeService.unpublish(recipeId)
                 stopObservingComments()
             }
+        }
+    }
+
+    // ── Received recipes (Tab 2) ────────────────────────────────────────────────
+
+    /**
+     * Remove a received recipe from my list: deletes the cloud reference and the
+     * local cached copy. The author's canonical instance is untouched.
+     */
+    fun removeReceivedRecipe() {
+        viewModelScope.launch {
+            socialRepository.removeReceivedReference(recipeId)
+            repository.removeReceivedRecipe(recipeId)
+            _uiState.update { it.copy(removed = true) }
         }
     }
 

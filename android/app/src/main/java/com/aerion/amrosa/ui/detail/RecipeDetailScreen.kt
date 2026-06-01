@@ -68,7 +68,14 @@ fun RecipeDetailScreen(
     var showFollowerPicker by remember { mutableStateOf(false) }
     // When sharing a PRIVATE recipe, remember who we're sharing to while the "make public" prompt shows
     var pendingShareRecipient by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // Confirm dialog for removing a received recipe from Tab 2
+    var showRemoveDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Navigate back once a received recipe has been removed
+    LaunchedEffect(state.removed) {
+        if (state.removed) onBack()
+    }
 
     // Show snackbar when a recipe is sent successfully
     LaunchedEffect(state.shareSentToName) {
@@ -115,23 +122,27 @@ fun RecipeDetailScreen(
                     }
                 },
                 actions = {
-                    // Single share button — owners only; opens ShareOptionsSheet
-                    if (state.isOwner) {
-                        IconButton(
-                            onClick = {
-                                viewModel.loadFollowing()
-                                showShareOptions = true
-                            },
-                            enabled = !state.isVisibilityUpdating
-                        ) {
-                            Icon(
-                                Icons.Default.Share,
-                                contentDescription = "Share recipe"
-                            )
+                    if (state.isReceived) {
+                        // Received recipe (Tab 2) — read-only: only Remove + Cooking Mode
+                        IconButton(onClick = { showRemoveDialog = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Remove from my recipes")
                         }
-                    }
-                    IconButton(onClick = onEditClick) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit Recipe")
+                    } else {
+                        // My recipe — share (owners) + edit
+                        if (state.isOwner) {
+                            IconButton(
+                                onClick = {
+                                    viewModel.loadFollowing()
+                                    showShareOptions = true
+                                },
+                                enabled = !state.isVisibilityUpdating
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = "Share recipe")
+                            }
+                        }
+                        IconButton(onClick = onEditClick) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit Recipe")
+                        }
                     }
                     IconButton(onClick = { showCookingMode = true }) {
                         Icon(Icons.Default.MenuBook, contentDescription = "Cooking Mode")
@@ -696,6 +707,33 @@ fun RecipeDetailScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingShareRecipient = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // ── Remove received recipe confirm ────────────────────────────────────────
+    if (showRemoveDialog) {
+        AlertDialog(
+            onDismissRequest = { showRemoveDialog = false },
+            icon = { Icon(Icons.Default.Delete, contentDescription = null) },
+            title = { Text("Remove from my recipes?") },
+            text = {
+                Text(
+                    "This removes the recipe from your Shared list. It stays available to its " +
+                    "author, and you can save it again if they share it with you."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.removeReceivedRecipe(); showRemoveDialog = false },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoveDialog = false }) { Text("Cancel") }
             }
         )
     }

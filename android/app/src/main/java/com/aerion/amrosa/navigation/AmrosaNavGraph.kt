@@ -114,8 +114,7 @@ private fun MainAppScaffold() {
                     onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
                     onNeedsReviewClick = { recipeId -> navController.navigate("import?reviewId=$recipeId") },
                     onFabFreeformClick = { navController.navigate("freeform") },
-                    onFabImportClick = { navController.navigate("import") },
-                    onSharedRecipeClick = { shareId -> navController.navigate("received/$shareId") }
+                    onFabImportClick = { navController.navigate("import") }
                 )
             }
 
