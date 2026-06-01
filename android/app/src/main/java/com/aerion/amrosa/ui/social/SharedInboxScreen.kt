@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
@@ -66,6 +67,11 @@ class SharedInboxViewModel(
                 _uiState.update { it.copy(saved = recipes, isLoading = false) }
             }
         }
+    }
+
+    /** Dismiss a pending share (delete the pointer) — clears stale/unwanted shares. */
+    fun dismissPending(shareId: String) {
+        viewModelScope.launch { socialRepository.deleteReceivedPointer(shareId) }
     }
 
     companion object {
@@ -146,7 +152,8 @@ fun SharedInboxScreen(
                         SharedRecipeCard(
                             item = item,
                             inReview = true,
-                            onClick = { onItemClick(item.shareId) }
+                            onClick = { onItemClick(item.shareId) },
+                            onDismiss = { viewModel.dismissPending(item.shareId) }
                         )
                     }
                     // Saved received recipes — open the normal (read-only) detail
@@ -220,7 +227,8 @@ private fun SavedReceivedCard(
 private fun SharedRecipeCard(
     item: ReceivedRecipeSummary,
     inReview: Boolean = false,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDismiss: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
@@ -233,16 +241,33 @@ private fun SharedRecipeCard(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             if (inReview) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.tertiaryContainer
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        "In review — tap to save",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer
+                    ) {
+                        Text(
+                            "In review — tap to save",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    if (onDismiss != null) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Dismiss",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(onClick = onDismiss)
+                        )
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
             }

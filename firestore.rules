@@ -111,7 +111,9 @@ service cloud.firestore {
         && request.auth.token.firebase.sign_in_provider != 'anonymous'
         && request.resource.data.fromUid == request.auth.uid;
 
-      allow update, delete: if false; // shared recipes are immutable
+      // Recipient may delete their own pending pointer (consume on save, or dismiss).
+      allow delete: if request.auth != null && request.auth.uid == recipientUid;
+      allow update: if false; // pointers are never edited in place
     }
 
     // ── Received-recipe references (Tab 2) ──────────────────────────────────

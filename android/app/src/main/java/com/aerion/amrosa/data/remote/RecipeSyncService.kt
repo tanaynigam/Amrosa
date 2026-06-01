@@ -103,6 +103,29 @@ class RecipeSyncService(
     }
 
     /**
+     * Delete a personal recipe from Firestore (personal_recipes/{uid}/recipes/{recipeId}).
+     * Must be called whenever an owned recipe is deleted locally, otherwise the next
+     * pull would resurrect it. No-ops for anonymous users.
+     */
+    suspend fun deletePersonalRecipe(recipeId: String): Boolean {
+        val uid = authRepository.uid
+        if (uid == null || authRepository.currentUser?.isAnonymous == true) return false
+        return try {
+            firestore.collection(COLLECTION_PERSONAL)
+                .document(uid)
+                .collection(SUBCOLLECTION_RECIPES)
+                .document(recipeId)
+                .delete()
+                .await()
+            Log.d(TAG, "Deleted personal recipe $recipeId from Firestore")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to delete personal recipe $recipeId", e)
+            false
+        }
+    }
+
+    /**
      * Pull all personal recipes for the current user from Firestore → Room.
      * Used after sign-in so cloud recipes appear on this device.
      */

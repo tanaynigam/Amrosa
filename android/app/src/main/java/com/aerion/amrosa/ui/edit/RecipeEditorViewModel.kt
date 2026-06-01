@@ -477,6 +477,12 @@ class RecipeEditorViewModel(
             _uiState.update { it.copy(isDeleting = true) }
             withContext(Dispatchers.IO) {
                 repository.deleteFullRecipe(recipeId)
+                // Remove the cloud copy too, otherwise the next pull resurrects it.
+                syncService.deletePersonalRecipe(recipeId)
+                // If it was public, take down the shared mirror so receivers lose access.
+                if (originalVisibility == "public") {
+                    sharedRecipeService.unpublish(recipeId)
+                }
             }
             _uiState.update { it.copy(isDeleting = false, deleteComplete = true) }
         }
