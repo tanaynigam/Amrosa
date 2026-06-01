@@ -225,10 +225,10 @@ class SharedRecipeService(
             "isCustomized" to recipe.isCustomized, "isImported" to recipe.isImported,
             "version" to recipe.version,
             "createdAt" to recipe.createdAt, "updatedAt" to recipe.updatedAt,
-            // Imported recipes always surface as "Imported" regardless of who published them.
-            // Personal recipes show the real author's display name.
+            // v2: always store the REAL author name + isImported flag. The "Imported by X"
+            // vs "X" label is computed at display time — never overwrite the name here.
             "authorId" to recipe.authorId,
-            "authorDisplayName" to if (recipe.isImported) "Imported" else (recipe.authorDisplayName ?: "User"),
+            "authorDisplayName" to (recipe.authorDisplayName ?: "User"),
             "visibility" to "public",
             "sharedAt" to System.currentTimeMillis(),
             "sections" to sections, "ingredients" to ingredients,

@@ -23,9 +23,13 @@ class RecipeRepository(
     fun getImportedRecipes(): Flow<List<Recipe>> =
         recipeDao.getImportedRecipes().map { list -> list.map { it.toBasicDomain() } }
 
-    /** All user recipes (personal + imported), pending review first. */
+    /** Tab 1 — my recipes only (personal + imported), pending review first. */
     fun getYoursRecipes(): Flow<List<Recipe>> =
         recipeDao.getYoursRecipes().map { list -> list.map { it.toBasicDomain() } }
+
+    /** Tab 2 — recipes received from other users (read-only references). */
+    fun getReceivedRecipes(): Flow<List<Recipe>> =
+        recipeDao.getReceivedRecipes().map { list -> list.map { it.toBasicDomain() } }
 
     suspend fun getRecipeWithDetails(id: String): Recipe? {
         val entity = recipeDao.getRecipeById(id) ?: return null
@@ -93,6 +97,71 @@ class RecipeRepository(
 
     /** IDs of all locally-cached received recipes (Tab 2). Used by the received-reference refresh. */
     suspend fun getReceivedRecipeIds(): List<String> = recipeDao.getReceivedRecipeIdsOnce()
+
+    /**
+     * Cache a received recipe (from a shared_recipes mirror) into Room with isReceived = true.
+     * Uses the canonical recipe id + child ids so later refreshes REPLACE the same rows.
+     * Preserves the original author; the local copy is private + read-only.
+     */
+    suspend fun cacheReceivedRecipe(recipe: Recipe) {
+        val now = System.currentTimeMillis()
+        val recipeEntity = RecipeEntity(
+            id = recipe.id,
+            title = recipe.title,
+            description = recipe.description,
+            sourceUrls = gson.toJson(recipe.sourceUrls),
+            baseServings = recipe.baseServings,
+            baseServingsMin = recipe.baseServingsMin,
+            baseServingsMax = recipe.baseServingsMax,
+            scaleIngredientId = recipe.scaleIngredientId,
+            scaleStep = recipe.scaleStep,
+            prepTimeMinutes = recipe.prepTimeMinutes,
+            cookTimeMinutes = recipe.cookTimeMinutes,
+            imageUrl = recipe.imageUrl,
+            tags = gson.toJson(recipe.tags),
+            isCustomized = recipe.isCustomized,
+            isImported = recipe.isImported,
+            isReceived = true,
+            needsReview = false,
+            version = recipe.version,
+            changeLog = "[]",
+            createdAt = recipe.createdAt.takeIf { it > 0 } ?: now,
+            updatedAt = now,
+            authorId = recipe.authorId,
+            authorDisplayName = recipe.authorDisplayName,
+            visibility = "private"
+        )
+        val sections = recipe.sections.map {
+            RecipeSectionEntity(id = it.id, recipeId = recipe.id, name = it.name, orderIndex = it.orderIndex)
+        }
+        val ingredients = recipe.ingredients.map {
+            IngredientEntity(
+                id = it.id, recipeId = recipe.id, sectionId = it.sectionId, name = it.name,
+                quantityValue = it.quantityValue, quantityUnit = it.quantityUnit, quantityDisplay = it.quantityDisplay,
+                groupLabel = it.groupLabel, isOptional = it.isOptional,
+                substituteGroupId = it.substituteGroupId, substituteRatio = it.substituteRatio,
+                orderIndex = it.orderIndex,
+                quantityValueMetric = it.quantityValueMetric, quantityUnitMetric = it.quantityUnitMetric,
+                quantityDisplayMetric = it.quantityDisplayMetric,
+                quantityValueImperial = it.quantityValueImperial, quantityUnitImperial = it.quantityUnitImperial,
+                quantityDisplayImperial = it.quantityDisplayImperial
+            )
+        }
+        val steps = recipe.steps.map {
+            StepEntity(id = it.id, recipeId = recipe.id, sectionId = it.sectionId,
+                instruction = it.instruction, orderIndex = it.orderIndex)
+        }
+        val refs = recipe.steps.flatMap { step ->
+            step.ingredientRefs.map { ref ->
+                StepIngredientRefEntity(stepId = step.id, ingredientId = ref.ingredientId,
+                    quantityDisplay = ref.quantityDisplay)
+            }
+        }
+        recipeDao.insertFullRecipe(recipeEntity, sections, ingredients, steps, refs)
+    }
+
+    /** Remove a received recipe's local cache (the cloud reference is removed separately). */
+    suspend fun removeReceivedRecipe(recipeId: String) = recipeDao.deleteFullRecipe(recipeId)
 
     // ─── Domain mapping ───────────────────────────────────────────────────────
 

@@ -38,12 +38,18 @@ import java.util.*
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 data class SharedInboxUiState(
-    val items: List<ReceivedRecipeSummary> = emptyList(),
+    /** Pending shares not yet saved — shown at the top as "In review". */
+    val pending: List<ReceivedRecipeSummary> = emptyList(),
+    /** Saved received recipes (cached references) — normal cards. */
+    val saved: List<com.aerion.amrosa.domain.model.Recipe> = emptyList(),
     val isLoading: Boolean = true
-)
+) {
+    val isEmpty: Boolean get() = pending.isEmpty() && saved.isEmpty()
+}
 
 class SharedInboxViewModel(
-    private val socialRepository: SocialRepository
+    private val socialRepository: SocialRepository,
+    private val repository: com.aerion.amrosa.data.repository.RecipeRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SharedInboxUiState())
@@ -52,17 +58,25 @@ class SharedInboxViewModel(
     init {
         viewModelScope.launch {
             socialRepository.getReceivedRecipesSummaryFlow().collect { items ->
-                _uiState.update { it.copy(items = items, isLoading = false) }
+                _uiState.update { it.copy(pending = items, isLoading = false) }
+            }
+        }
+        viewModelScope.launch {
+            repository.getReceivedRecipes().collect { recipes ->
+                _uiState.update { it.copy(saved = recipes, isLoading = false) }
             }
         }
     }
 
     companion object {
-        fun factory(socialRepository: SocialRepository): ViewModelProvider.Factory =
+        fun factory(
+            socialRepository: SocialRepository,
+            repository: com.aerion.amrosa.data.repository.RecipeRepository
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    SharedInboxViewModel(socialRepository) as T
+                    SharedInboxViewModel(socialRepository, repository) as T
             }
     }
 }
@@ -72,12 +86,13 @@ class SharedInboxViewModel(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SharedInboxScreen(
-    onItemClick: (shareId: String) -> Unit
+    onItemClick: (shareId: String) -> Unit,
+    onSavedClick: (recipeId: String) -> Unit
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
     val viewModel: SharedInboxViewModel = viewModel(
-        factory = SharedInboxViewModel.factory(app.container.socialRepository)
+        factory = SharedInboxViewModel.factory(app.container.socialRepository, app.container.repository)
     )
     val state by viewModel.uiState.collectAsState()
 
@@ -92,7 +107,7 @@ fun SharedInboxScreen(
                     CircularProgressIndicator()
                 }
 
-                state.items.isEmpty() -> Box(
+                state.isEmpty -> Box(
                     Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
@@ -126,13 +141,74 @@ fun SharedInboxScreen(
                     contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp, start = 16.dp, end = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(state.items, key = { it.shareId }) { item ->
+                    // Pending shares — "In review", tap to review & save
+                    items(state.pending, key = { "pending-${it.shareId}" }) { item ->
                         SharedRecipeCard(
                             item = item,
+                            inReview = true,
                             onClick = { onItemClick(item.shareId) }
                         )
                     }
+                    // Saved received recipes — open the normal (read-only) detail
+                    items(state.saved, key = { "saved-${it.id}" }) { recipe ->
+                        SavedReceivedCard(
+                            recipe = recipe,
+                            onClick = { onSavedClick(recipe.id) }
+                        )
+                    }
                 }
+            }
+        }
+    }
+}
+
+// ─── Saved received recipe card (read-only) ──────────────────────────────────
+
+@Composable
+private fun SavedReceivedCard(
+    recipe: com.aerion.amrosa.domain.model.Recipe,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(recipe.title, style = MaterialTheme.typography.titleLarge,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(6.dp))
+            val timeLabel = buildString {
+                recipe.prepTimeMinutes?.let { append("Prep ${it}min") }
+                if (recipe.prepTimeMinutes != null && recipe.cookTimeMinutes != null) append("  ·  ")
+                recipe.cookTimeMinutes?.let { append("Cook ${it}min") }
+            }
+            if (timeLabel.isNotBlank()) {
+                Text(timeLabel, style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+            }
+            if (recipe.tags.isNotEmpty()) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(recipe.tags) { tag ->
+                        SuggestionChip(onClick = {},
+                            label = { Text(tag, style = MaterialTheme.typography.labelSmall) })
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+            // Original author (v2 label rule: "Imported by X" handled by isImported)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Icon(Icons.Default.Person, contentDescription = null,
+                    modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (recipe.isImported) "Imported by ${recipe.authorDisplayName ?: "Unknown"}"
+                    else (recipe.authorDisplayName ?: "Unknown"),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -143,6 +219,7 @@ fun SharedInboxScreen(
 @Composable
 private fun SharedRecipeCard(
     item: ReceivedRecipeSummary,
+    inReview: Boolean = false,
     onClick: () -> Unit
 ) {
     Card(
@@ -155,6 +232,20 @@ private fun SharedRecipeCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
+            if (inReview) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer
+                ) {
+                    Text(
+                        "In review — tap to save",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
             Text(
                 item.title,
                 style = MaterialTheme.typography.titleLarge,

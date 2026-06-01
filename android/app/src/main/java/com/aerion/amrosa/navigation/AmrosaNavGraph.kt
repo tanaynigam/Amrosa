@@ -122,7 +122,8 @@ private fun MainAppScaffold() {
             // ── Tab: Shared with me ───────────────────────────────────────────
             composable(BottomTab.Shared.route) {
                 SharedInboxScreen(
-                    onItemClick = { shareId -> navController.navigate("received/$shareId") }
+                    onItemClick = { shareId -> navController.navigate("received/$shareId") },
+                    onSavedClick = { recipeId -> navController.navigate("recipe/$recipeId") }
                 )
             }
 

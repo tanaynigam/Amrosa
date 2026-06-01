@@ -23,6 +23,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.entity.*
+import com.aerion.amrosa.data.remote.SharedRecipeService
 import com.aerion.amrosa.data.remote.SocialRepository
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.domain.model.*
@@ -54,6 +55,7 @@ data class ReceivedRecipeUiState(
 class ReceivedRecipeViewModel(
     private val shareId: String,
     private val socialRepository: SocialRepository,
+    private val sharedRecipeService: SharedRecipeService,
     private val repository: RecipeRepository,
     private val authRepository: AuthRepository,
     private val gson: Gson
@@ -62,16 +64,27 @@ class ReceivedRecipeViewModel(
     private val _uiState = MutableStateFlow(ReceivedRecipeUiState())
     val uiState: StateFlow<ReceivedRecipeUiState> = _uiState.asStateFlow()
 
+    // Pointer details — kept for the save step
+    private var pointer: com.aerion.amrosa.domain.model.ReceivedPointer? = null
+
     init {
         viewModelScope.launch {
-            val data = socialRepository.getReceivedRecipe(shareId)
+            // 1. Read the pending pointer to find the canonical recipe id + author
+            val p = socialRepository.getReceivedPointer(shareId)
+            pointer = p
+            // 2. Read the live recipe from the public mirror (shared_recipes/{recipeId})
+            val recipe = p?.let { sharedRecipeService.getSharedRecipeDetail(it.recipeId) }
             _uiState.update {
                 it.copy(
-                    recipe = data?.recipe,
-                    fromDisplayName = data?.fromDisplayName,
-                    selectedServings = data?.recipe?.baseServings ?: 1,
+                    recipe = recipe,
+                    fromDisplayName = p?.fromDisplayName,
+                    selectedServings = recipe?.baseServings ?: 1,
                     isLoading = false,
-                    error = if (data == null) "Recipe not found" else null
+                    error = when {
+                        p == null -> "This share is no longer available."
+                        recipe == null -> "This recipe is no longer shared by its author."
+                        else -> null
+                    }
                 )
             }
         }
@@ -82,116 +95,26 @@ class ReceivedRecipeViewModel(
     }
 
     /**
-     * Save a copy of this received recipe to Room as the current user's personal recipe.
-     * Returns the new recipeId via [savedRecipeId] in state.
+     * Save this received recipe to Tab 2 (Recipe Ownership Model v2):
+     *   1. write a reference at received_recipes/{uid}/items/{recipeId}
+     *   2. cache the recipe locally with isReceived = true (original author preserved)
+     *   3. consume the pending share pointer
+     * The local copy keeps the canonical recipeId so future refreshes overwrite it in place.
      */
     fun saveToMyRecipes() {
         val recipe = _uiState.value.recipe ?: return
-        val uid = authRepository.uid ?: return
+        val p = pointer ?: return
         _uiState.update { it.copy(isSaving = true) }
         viewModelScope.launch {
-            val newRecipeId = UUID.randomUUID().toString()
-            val now = System.currentTimeMillis()
-
-            // Build Room entities
-            val recipeEntity = RecipeEntity(
-                id = newRecipeId,
-                title = recipe.title,
-                description = recipe.description,
-                sourceUrls = gson.toJson(recipe.sourceUrls),
-                baseServings = recipe.baseServings,
-                baseServingsMin = recipe.baseServingsMin,
-                baseServingsMax = recipe.baseServingsMax,
-                scaleIngredientId = recipe.scaleIngredientId,
-                scaleStep = recipe.scaleStep,
-                prepTimeMinutes = recipe.prepTimeMinutes,
-                cookTimeMinutes = recipe.cookTimeMinutes,
-                imageUrl = recipe.imageUrl,
-                tags = gson.toJson(recipe.tags),
-                isCustomized = false,
-                isImported = false,
-                needsReview = false,
-                version = 1,
-                changeLog = "[]",
-                createdAt = now,
-                updatedAt = now,
-                authorId = uid,
-                authorDisplayName = authRepository.displayName ?: authRepository.email,
-                visibility = "private"
-            )
-
-            val sectionEntities = recipe.sections.map { s ->
-                RecipeSectionEntity(
-                    id = UUID.randomUUID().toString(),
-                    recipeId = newRecipeId,
-                    name = s.name,
-                    orderIndex = s.orderIndex
-                )
-            }
-            val sectionIdMap = recipe.sections.zip(sectionEntities)
-                .associate { (old, new) -> old.id to new.id }
-
-            val ingredientEntities = recipe.ingredients.map { ing ->
-                IngredientEntity(
-                    id = UUID.randomUUID().toString(),
-                    recipeId = newRecipeId,
-                    sectionId = ing.sectionId?.let { sectionIdMap[it] },
-                    name = ing.name,
-                    quantityValue = ing.quantityValue,
-                    quantityUnit = ing.quantityUnit,
-                    quantityDisplay = ing.quantityDisplay,
-                    groupLabel = ing.groupLabel,
-                    isOptional = ing.isOptional,
-                    substituteGroupId = ing.substituteGroupId,
-                    substituteRatio = ing.substituteRatio,
-                    orderIndex = ing.orderIndex,
-                    quantityValueMetric = ing.quantityValueMetric,
-                    quantityUnitMetric = ing.quantityUnitMetric,
-                    quantityDisplayMetric = ing.quantityDisplayMetric,
-                    quantityValueImperial = ing.quantityValueImperial,
-                    quantityUnitImperial = ing.quantityUnitImperial,
-                    quantityDisplayImperial = ing.quantityDisplayImperial
-                )
-            }
-
-            val stepEntities = recipe.steps.map { step ->
-                StepEntity(
-                    id = UUID.randomUUID().toString(),
-                    recipeId = newRecipeId,
-                    sectionId = step.sectionId?.let { sectionIdMap[it] },
-                    instruction = step.instruction,
-                    orderIndex = step.orderIndex
-                )
-            }
-            val stepIdMap = recipe.steps.zip(stepEntities)
-                .associate { (old, new) -> old.id to new.id }
-
-            val refEntities = recipe.steps.flatMap { step ->
-                val newStepId = stepIdMap[step.id] ?: return@flatMap emptyList()
-                step.ingredientRefs.mapNotNull { ref ->
-                    // Find the new ingredient id from the original ingredient id
-                    val oldIng = recipe.ingredients.find { it.id == ref.ingredientId }
-                        ?: return@mapNotNull null
-                    val newIngId = ingredientEntities.getOrNull(
-                        recipe.ingredients.indexOf(oldIng)
-                    )?.id ?: return@mapNotNull null
-                    StepIngredientRefEntity(
-                        stepId = newStepId,
-                        ingredientId = newIngId,
-                        quantityDisplay = ref.quantityDisplay
-                    )
-                }
-            }
-
             try {
-                repository.insertFullRecipe(
-                    recipe = recipeEntity,
-                    sections = sectionEntities,
-                    ingredients = ingredientEntities,
-                    steps = stepEntities,
-                    refs = refEntities
+                socialRepository.saveReceivedReference(
+                    recipeId = recipe.id,
+                    authorUid = p.authorUid,
+                    authorName = recipe.authorDisplayName ?: p.authorName
                 )
-                _uiState.update { it.copy(isSaving = false, savedRecipeId = newRecipeId) }
+                repository.cacheReceivedRecipe(recipe)
+                socialRepository.deleteReceivedPointer(shareId)
+                _uiState.update { it.copy(isSaving = false, savedRecipeId = recipe.id) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isSaving = false, error = "Couldn't save recipe: ${e.message}") }
             }
@@ -202,6 +125,7 @@ class ReceivedRecipeViewModel(
         fun factory(
             shareId: String,
             socialRepository: SocialRepository,
+            sharedRecipeService: SharedRecipeService,
             repository: RecipeRepository,
             authRepository: AuthRepository,
             gson: Gson
@@ -209,7 +133,7 @@ class ReceivedRecipeViewModel(
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    ReceivedRecipeViewModel(shareId, socialRepository, repository, authRepository, gson) as T
+                    ReceivedRecipeViewModel(shareId, socialRepository, sharedRecipeService, repository, authRepository, gson) as T
             }
     }
 }
@@ -237,6 +161,7 @@ fun ReceivedRecipeScreen(
         factory = ReceivedRecipeViewModel.factory(
             shareId = shareId,
             socialRepository = app.container.socialRepository,
+            sharedRecipeService = app.container.sharedRecipeService,
             repository = app.container.repository,
             authRepository = app.container.authRepository,
             gson = app.container.gson

@@ -36,6 +36,8 @@ class SocialRepository(
         private const val COL_FOLLOWS = "follows"
         private const val COL_NOTIFICATIONS = "notifications"
         private const val COL_SHARED_TO = "shared_to"
+        private const val COL_RECEIVED = "received_recipes"
+        private const val SUB_ITEMS = "items"
     }
 
     // ── User profile ───────────────────────────────────────────────────────────
@@ -392,25 +394,69 @@ class SocialRepository(
     }
 
     /**
-     * Load a recipe that was shared directly to the current user.
-     * Returns the full recipe + the sender's display name.
-     * Fetches from shared_to/{currentUid}/recipes/{shareId}.
+     * Read a pending share pointer from shared_to/{uid}/recipes/{shareId}.
+     * Returns the canonical recipeId + original author + sender — the actual recipe
+     * is read from shared_recipes/{recipeId} (the public mirror).
      */
-    suspend fun getReceivedRecipe(shareId: String): ReceivedRecipeData? {
+    suspend fun getReceivedPointer(shareId: String): ReceivedPointer? {
         val uid = authRepository.uid ?: return null
         return try {
             val doc = firestore.collection(COL_SHARED_TO)
-                .document(uid)
-                .collection("recipes")
-                .document(shareId)
+                .document(uid).collection("recipes").document(shareId)
                 .get().await()
             val data = doc.data ?: return null
-            val recipe = parseSharedRecipe(doc.id, data)
-            val fromDisplayName = data["fromDisplayName"] as? String ?: "Someone"
-            ReceivedRecipeData(recipe = recipe, fromDisplayName = fromDisplayName)
+            ReceivedPointer(
+                shareId = shareId,
+                // recipeId is the canonical id; fall back to shareId for legacy snapshot docs
+                recipeId = data["recipeId"] as? String ?: shareId,
+                authorUid = data["authorUid"] as? String ?: data["fromUid"] as? String ?: "",
+                authorName = data["authorDisplayName"] as? String ?: "Someone",
+                fromDisplayName = data["fromDisplayName"] as? String ?: "Someone"
+            )
         } catch (e: Exception) {
-            Log.e(TAG, "getReceivedRecipe $shareId failed", e)
+            Log.e(TAG, "getReceivedPointer $shareId failed", e)
             null
+        }
+    }
+
+    /** Write a saved-received reference: received_recipes/{uid}/items/{recipeId}. */
+    suspend fun saveReceivedReference(recipeId: String, authorUid: String, authorName: String) {
+        val uid = authRepository.uid ?: return
+        try {
+            firestore.collection(COL_RECEIVED).document(uid).collection(SUB_ITEMS)
+                .document(recipeId)
+                .set(
+                    mapOf(
+                        "recipeId" to recipeId,
+                        "authorUid" to authorUid,
+                        "authorName" to authorName,
+                        "savedAt" to System.currentTimeMillis()
+                    )
+                ).await()
+        } catch (e: Exception) {
+            Log.e(TAG, "saveReceivedReference $recipeId failed", e)
+        }
+    }
+
+    /** Consume (delete) a pending share pointer once it has been saved. */
+    suspend fun deleteReceivedPointer(shareId: String) {
+        val uid = authRepository.uid ?: return
+        try {
+            firestore.collection(COL_SHARED_TO).document(uid).collection("recipes")
+                .document(shareId).delete().await()
+        } catch (e: Exception) {
+            Log.e(TAG, "deleteReceivedPointer $shareId failed", e)
+        }
+    }
+
+    /** Remove a saved-received reference (the "Remove from my recipes" action). */
+    suspend fun removeReceivedReference(recipeId: String) {
+        val uid = authRepository.uid ?: return
+        try {
+            firestore.collection(COL_RECEIVED).document(uid).collection(SUB_ITEMS)
+                .document(recipeId).delete().await()
+        } catch (e: Exception) {
+            Log.e(TAG, "removeReceivedReference $recipeId failed", e)
         }
     }
 
