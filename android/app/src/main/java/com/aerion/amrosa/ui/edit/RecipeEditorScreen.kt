@@ -34,6 +34,7 @@ fun RecipeEditorScreen(
         factory = RecipeEditorViewModel.factory(
             app.container.repository,
             app.container.syncService,
+            app.container.sharedRecipeService,
             app.container.authRepository,
             recipeId,
             app.container.gson

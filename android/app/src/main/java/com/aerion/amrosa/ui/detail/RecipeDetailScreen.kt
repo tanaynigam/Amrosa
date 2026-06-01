@@ -66,6 +66,8 @@ fun RecipeDetailScreen(
     var showShareOptions by remember { mutableStateOf(false) }
     // Follower picker sheet (opened after selecting "Send to follower")
     var showFollowerPicker by remember { mutableStateOf(false) }
+    // When sharing a PRIVATE recipe, remember who we're sharing to while the "make public" prompt shows
+    var pendingShareRecipient by remember { mutableStateOf<Pair<String, String>?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Show snackbar when a recipe is sent successfully
@@ -662,8 +664,38 @@ fun RecipeDetailScreen(
             isLoading = state.isFollowingLoading,
             onDismiss = { showFollowerPicker = false },
             onSend = { uid, name ->
-                viewModel.shareToFollower(uid, name)
                 showFollowerPicker = false
+                if (state.isPublic) {
+                    // Already public — share immediately
+                    viewModel.shareToFollower(uid, name)
+                } else {
+                    // Private — confirm making it public before sharing
+                    pendingShareRecipient = uid to name
+                }
+            }
+        )
+    }
+
+    // ── "Make public to share" confirm prompt ─────────────────────────────────
+    pendingShareRecipient?.let { (uid, name) ->
+        AlertDialog(
+            onDismissRequest = { pendingShareRecipient = null },
+            icon = { Icon(Icons.Default.Public, contentDescription = null) },
+            title = { Text("Share with $name?") },
+            text = {
+                Text(
+                    "Sharing makes this recipe public so $name can view it. " +
+                    "You can make it private again anytime — that removes it from everyone you shared with."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.makePublicAndShareToFollower(uid, name)
+                    pendingShareRecipient = null
+                }) { Text("Share") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingShareRecipient = null }) { Text("Cancel") }
             }
         )
     }

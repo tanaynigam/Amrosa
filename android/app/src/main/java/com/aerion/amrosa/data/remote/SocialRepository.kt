@@ -584,7 +584,10 @@ class SocialRepository(
         return mapOf(
             "fromUid" to fromUid,
             "fromDisplayName" to fromName,
-            // Original recipe author — preserved so recipients see the right author name
+            // Canonical recipe id + original author — used by Tab 2 to resolve the
+            // live recipe from shared_recipes/{recipeId} (Recipe Ownership Model v2)
+            "recipeId" to recipe.id,
+            "authorUid" to (recipe.authorId ?: fromUid),
             "authorDisplayName" to recipe.authorDisplayName,
             "sharedAt" to System.currentTimeMillis(),
             "title" to recipe.title,

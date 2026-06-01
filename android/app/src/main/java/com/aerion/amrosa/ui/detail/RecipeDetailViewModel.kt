@@ -284,16 +284,37 @@ class RecipeDetailViewModel(
         }
     }
 
-    /** Share this recipe directly to a follower. */
+    /** Share this (already-public) recipe directly to a co-chef. */
     fun shareToFollower(recipientUid: String, recipientName: String) {
-        val recipe = _uiState.value.recipe ?: return
+        viewModelScope.launch { shareToFollowerInternal(recipientUid, recipientName) }
+    }
+
+    /**
+     * Make the recipe Public (publishes the canonical mirror) and then share it.
+     * Used when the user confirms the "make public to share" prompt for a private recipe.
+     */
+    fun makePublicAndShareToFollower(recipientUid: String, recipientName: String) {
         viewModelScope.launch {
-            socialRepository.shareRecipeTo(recipientUid, recipe)
-            _uiState.update { it.copy(shareSentToName = recipientName) }
-            // Clear the toast after one frame
-            kotlinx.coroutines.delay(3000)
-            _uiState.update { it.copy(shareSentToName = null) }
+            publishCurrentRecipe()
+            shareToFollowerInternal(recipientUid, recipientName)
         }
+    }
+
+    /** Persist + publish the current recipe as Public so co-chefs can read its mirror. */
+    private suspend fun publishCurrentRecipe() {
+        repository.setVisibility(recipeId, "public")
+        val updated = _uiState.value.recipe?.copy(visibility = "public") ?: return
+        _uiState.update { it.copy(recipe = updated) }
+        sharedRecipeService.publish(updated)
+        startObservingComments()
+    }
+
+    private suspend fun shareToFollowerInternal(recipientUid: String, recipientName: String) {
+        val recipe = _uiState.value.recipe ?: return
+        socialRepository.shareRecipeTo(recipientUid, recipe)
+        _uiState.update { it.copy(shareSentToName = recipientName) }
+        kotlinx.coroutines.delay(3000)
+        _uiState.update { it.copy(shareSentToName = null) }
     }
 
     companion object {
