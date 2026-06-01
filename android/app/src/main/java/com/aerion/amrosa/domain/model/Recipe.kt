@@ -19,6 +19,7 @@ data class Recipe(
     val steps: List<Step>,
     val isCustomized: Boolean,
     val isImported: Boolean = false,
+    val isReceived: Boolean = false,        // true = received from another user → Tab 2, read-only
     val needsReview: Boolean = false,
     val version: Int = 1,
     val changeLog: List<RecipeChange> = emptyList(),

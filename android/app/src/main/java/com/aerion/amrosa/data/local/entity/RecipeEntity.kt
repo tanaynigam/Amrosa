@@ -19,14 +19,15 @@ data class RecipeEntity(
     val imageUrl: String?,
     val tags: String,               // JSON List<String>
     val isCustomized: Boolean = false,
-    val isImported: Boolean = false,    // true = URL/file-imported; false = seeded/personal/edited
+    val isImported: Boolean = false,    // true = URL/file-imported; drives "Imported by X" label
+    val isReceived: Boolean = false,    // true = saved from another user's share → Tab 2, read-only reference
     val needsReview: Boolean = false,   // true = imported but not yet confirmed by user
     val version: Int = 1,               // increments on each user save
     val changeLog: String = "[]",       // JSON array of RecipeChange entries
     val createdAt: Long,
     val updatedAt: Long,
     val syncedAt: Long? = null,
-    val authorId: String? = null,           // Firebase UID of creator; null for seeded
-    val authorDisplayName: String? = null,  // e.g. "Tanay", "Imported", "Amrosa"
-    val visibility: String = "private",     // "private" or "public"
+    val authorId: String? = null,           // Firebase UID of the ORIGINAL author (always preserved)
+    val authorDisplayName: String? = null,  // ORIGINAL author display name (never overwritten with "Imported")
+    val visibility: String = "private",     // "private" or "public" (public = mirrored to shared_recipes)
 )

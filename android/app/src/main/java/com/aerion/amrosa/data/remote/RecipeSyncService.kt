@@ -49,56 +49,16 @@ class RecipeSyncService(
     // ─── Shared recipes (pull-only) ───────────────────────────────────────────
 
     /**
-     * Pull shared/seeded recipes updated since last sync. Upserts into Room.
-     * Returns number of recipes synced.
+     * No-op since Recipe Ownership Model v2: the seeded/"official" `recipes` collection
+     * is retired. Every recipe is owned by a real author and synced via
+     * [syncPersonalRecipes] (mine) or the received-reference refresh (Tab 2).
      */
-    suspend fun sync(): Int {
-        val lastSync = prefs.getLong(KEY_LAST_SYNC, 0L)
-        Log.d(TAG, "Syncing shared recipes updated after $lastSync")
+    @Deprecated("Official/seeded recipes removed in v2", ReplaceWith("syncPersonalRecipes()"))
+    suspend fun sync(): Int = 0
 
-        return try {
-            val snapshot = firestore.collection(COLLECTION_RECIPES)
-                .whereGreaterThan("updatedAt", lastSync)
-                .get()
-                .await()
-
-            if (snapshot.isEmpty) {
-                Log.d(TAG, "No new shared recipes to sync")
-                return 0
-            }
-
-            var count = 0
-            val total = snapshot.documents.size
-            for (doc in snapshot.documents) {
-                try {
-                    val recipe = parseRecipe(doc.id, doc.data ?: continue)
-                    repository.insertFullRecipe(
-                        recipe.first, recipe.second, recipe.third, recipe.fourth, recipe.fifth
-                    )
-                    count++
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to parse recipe ${doc.id}", e)
-                }
-            }
-
-            if (count == total) {
-                val now = System.currentTimeMillis()
-                prefs.edit().putLong(KEY_LAST_SYNC, now).apply()
-                Log.d(TAG, "Synced $count/$total shared recipes — timestamp advanced")
-            } else {
-                Log.w(TAG, "Synced $count/$total shared recipes — ${total - count} failed, timestamp NOT advanced")
-            }
-            count
-        } catch (e: Exception) {
-            Log.e(TAG, "Shared sync failed", e)
-            0
-        }
-    }
-
-    /** Force a full re-sync of shared recipes (clears timestamp). */
+    /** Force a full re-pull of the signed-in user's personal recipes. */
     suspend fun forceFullSync(): Int {
-        prefs.edit().putLong(KEY_LAST_SYNC, 0L).apply()
-        return sync()
+        return syncPersonalRecipes().first
     }
 
     // ─── Personal recipes (per-user, push + pull) ─────────────────────────────

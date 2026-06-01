@@ -183,15 +183,18 @@ class ReceivedRecipeViewModel(
                 }
             }
 
-            repository.insertFullRecipe(
-                recipe = recipeEntity,
-                sections = sectionEntities,
-                ingredients = ingredientEntities,
-                steps = stepEntities,
-                refs = refEntities
-            )
-
-            _uiState.update { it.copy(isSaving = false, savedRecipeId = newRecipeId) }
+            try {
+                repository.insertFullRecipe(
+                    recipe = recipeEntity,
+                    sections = sectionEntities,
+                    ingredients = ingredientEntities,
+                    steps = stepEntities,
+                    refs = refEntities
+                )
+                _uiState.update { it.copy(isSaving = false, savedRecipeId = newRecipeId) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isSaving = false, error = "Couldn't save recipe: ${e.message}") }
+            }
         }
     }
 
@@ -218,14 +221,14 @@ class ReceivedRecipeViewModel(
  * Provides a "Save to My Recipes" button.
  *
  * @param onBack back nav
- * @param onSaved called once the recipe has been saved to My Recipes
+ * @param onSaved called with the new local recipeId once the copy is saved to My Recipes
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReceivedRecipeScreen(
     shareId: String,
     onBack: () -> Unit,
-    onSaved: () -> Unit
+    onSaved: (newRecipeId: String) -> Unit
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
@@ -242,9 +245,9 @@ fun ReceivedRecipeScreen(
     val state by viewModel.uiState.collectAsState()
     var selectedUnit by remember { mutableStateOf(UnitMode.ORIGINAL) }
 
-    // Navigate back (to Shared tab) once save completes
+    // Open the saved recipe's detail once the copy is written to Room
     LaunchedEffect(state.savedRecipeId) {
-        if (state.savedRecipeId != null) onSaved()
+        state.savedRecipeId?.let { onSaved(it) }
     }
 
     Scaffold(

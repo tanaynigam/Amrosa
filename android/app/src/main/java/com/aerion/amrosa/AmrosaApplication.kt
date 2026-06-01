@@ -26,11 +26,9 @@ class AmrosaApplication : Application() {
         createNotificationChannel()
         appScope.launch {
             // Whenever the user is signed in with a real account (on app start or after sign-in),
-            // seed local data and pull from Firestore.
+            // pull their recipes from Firestore. (No seeded/"official" recipes in v2.)
             container.authRepository.authStateFlow().collect { user ->
                 if (user != null && !user.isAnonymous) {
-                    container.seeder.seedIfNeeded()
-                    container.syncService.sync()
                     container.syncService.syncPersonalRecipes()
                     // Upsert public profile so other users can find / follow this user
                     container.socialRepository.upsertProfile()

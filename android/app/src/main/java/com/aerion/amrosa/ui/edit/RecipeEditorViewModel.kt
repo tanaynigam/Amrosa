@@ -47,7 +47,6 @@ data class EditorSection(
 
 data class EditorUiState(
     val isLoading: Boolean = true,
-    val showForkDialog: Boolean = false,
     val isSaving: Boolean = false,
     val saveComplete: Boolean = false,
     val isDeleting: Boolean = false,
@@ -166,7 +165,6 @@ class RecipeEditorViewModel(
             _uiState.update {
                 it.copy(
                     isLoading = false,
-                    showForkDialog = !recipe.isCustomized,
                     title = recipe.title,
                     description = recipe.description ?: "",
                     isPersonalAuthor = !recipe.isImported,
@@ -183,14 +181,6 @@ class RecipeEditorViewModel(
             }
         }
     }
-
-    // ─── Fork dialog ──────────────────────────────────────────────────────────
-
-    /** User confirmed they want to fork the official recipe and edit it. */
-    fun onForkConfirmed() = _uiState.update { it.copy(showForkDialog = false) }
-
-    /** User declined to edit — signal the screen to navigate back. */
-    fun onForkDismissed() = _uiState.update { it.copy(showForkDialog = false, saveComplete = true) }
 
     // ─── Metadata updaters ────────────────────────────────────────────────────
 
