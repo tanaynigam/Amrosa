@@ -7,6 +7,7 @@ import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.entity.*
 import com.aerion.amrosa.data.remote.RecipeSyncService
 import com.aerion.amrosa.data.remote.SharedRecipeService
+import com.google.firebase.functions.FirebaseFunctions
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.domain.model.Ingredient
 import com.aerion.amrosa.domain.model.RecipeChange
@@ -16,6 +17,7 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -31,7 +33,14 @@ data class EditorIngredient(
     // Preserved from original — not shown in v1 UI but kept on save
     val quantityValue: Double? = null,
     val substituteGroupId: String? = null,
-    val substituteRatio: Float = 1.0f
+    val substituteRatio: Float = 1.0f,
+    // Unit conversions — preserved across edits; (re)populated by "Update conversions"
+    val quantityValueMetric: Double? = null,
+    val quantityUnitMetric: String? = null,
+    val quantityDisplayMetric: String? = null,
+    val quantityValueImperial: Double? = null,
+    val quantityUnitImperial: String? = null,
+    val quantityDisplayImperial: String? = null
 )
 
 data class EditorStep(
@@ -52,6 +61,9 @@ data class EditorUiState(
     val saveComplete: Boolean = false,
     val isDeleting: Boolean = false,
     val deleteComplete: Boolean = false,
+    val isConverting: Boolean = false,
+    /** Non-null for one snackbar after an "Update conversions" run. */
+    val conversionMessage: String? = null,
     val error: String? = null,
     // Recipe metadata
     val title: String = "",
@@ -358,7 +370,14 @@ class RecipeEditorViewModel(
                             isOptional = ing.isOptional,
                             substituteGroupId = ing.substituteGroupId,
                             substituteRatio = ing.substituteRatio,
-                            orderIndex = idx
+                            orderIndex = idx,
+                            // Preserve / update unit conversions across edits
+                            quantityValueMetric = ing.quantityValueMetric,
+                            quantityUnitMetric = ing.quantityUnitMetric,
+                            quantityDisplayMetric = ing.quantityDisplayMetric,
+                            quantityValueImperial = ing.quantityValueImperial,
+                            quantityUnitImperial = ing.quantityUnitImperial,
+                            quantityDisplayImperial = ing.quantityDisplayImperial
                         )
                     }
                 }
@@ -465,10 +484,79 @@ class RecipeEditorViewModel(
         isOptional = isOptional,
         quantityValue = quantityValue,
         substituteGroupId = substituteGroupId,
-        substituteRatio = substituteRatio
+        substituteRatio = substituteRatio,
+        quantityValueMetric = quantityValueMetric,
+        quantityUnitMetric = quantityUnitMetric,
+        quantityDisplayMetric = quantityDisplayMetric,
+        quantityValueImperial = quantityValueImperial,
+        quantityUnitImperial = quantityUnitImperial,
+        quantityDisplayImperial = quantityDisplayImperial
     )
 
     private fun Step.toEditor() = EditorStep(id = id, instruction = instruction)
+
+    // ─── Update conversions (Gemini) ────────────────────────────────────────────
+
+    private val functions = FirebaseFunctions.getInstance("us-central1")
+
+    /**
+     * Recompute metric + imperial conversions for every ingredient via the
+     * convertIngredients Cloud Function, then merge the results into editor state.
+     * The user still has to Save to persist.
+     */
+    fun updateConversions() {
+        val ingredients = _uiState.value.sections.flatMap { it.ingredients }
+        if (ingredients.isEmpty()) return
+        _uiState.update { it.copy(isConverting = true) }
+        viewModelScope.launch {
+            try {
+                val payload = ingredients.map { ing ->
+                    hashMapOf(
+                        "id" to ing.id,
+                        "name" to ing.name,
+                        "quantityDisplay" to ing.quantityDisplay
+                    )
+                }
+                @Suppress("UNCHECKED_CAST")
+                val data = withContext(Dispatchers.IO) {
+                    functions.getHttpsCallable("convertIngredients")
+                        .call(hashMapOf("ingredients" to payload))
+                        .await()
+                        .getData()
+                } as? Map<String, Any?>
+                val results = (data?.get("ingredients") as? List<*>)
+                    ?.filterIsInstance<Map<String, Any?>>()
+                    ?: emptyList()
+                val byId = results.associateBy { it["id"] as? String }
+
+                var updatedCount = 0
+                _uiState.update { state ->
+                    state.copy(
+                        isConverting = false,
+                        conversionMessage = "Conversions updated",
+                        sections = state.sections.map { section ->
+                            section.copy(ingredients = section.ingredients.map { ing ->
+                                val r = byId[ing.id] ?: return@map ing
+                                updatedCount++
+                                ing.copy(
+                                    quantityValueMetric = (r["quantityValueMetric"] as? Number)?.toDouble(),
+                                    quantityUnitMetric = r["quantityUnitMetric"] as? String,
+                                    quantityDisplayMetric = r["quantityDisplayMetric"] as? String,
+                                    quantityValueImperial = (r["quantityValueImperial"] as? Number)?.toDouble(),
+                                    quantityUnitImperial = r["quantityUnitImperial"] as? String,
+                                    quantityDisplayImperial = r["quantityDisplayImperial"] as? String
+                                )
+                            })
+                        }
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isConverting = false, conversionMessage = "Conversion failed: ${e.message}") }
+            }
+        }
+    }
+
+    fun clearConversionMessage() = _uiState.update { it.copy(conversionMessage = null) }
 
     // ─── Delete ───────────────────────────────────────────────────────────────
 

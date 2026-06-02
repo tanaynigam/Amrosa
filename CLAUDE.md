@@ -463,6 +463,13 @@ Unit toggle (`SingleChoiceSegmentedButtonRow`: Original | Metric | Imperial) sho
 
 Gemini's imperial fields are **zeroed in `validateRecipe()`** before `computeImperialFromMetric()` runs, so Gemini output is completely ignored for imperial.
 
+#### "Update unit conversions" button (existing recipes) ✅
+
+For recipes that predate conversions or have stale ones, the **Recipe Editor** has an **"Update unit conversions"** button:
+- `convertIngredients` Cloud Function: input `{ ingredients: [{id, name, quantityDisplay}] }`. Gemini produces **metric** per ingredient — **weight (g/kg) for dry/solid items using density** (so imperial becomes oz/lb), **volume (ml/L) for liquids** (imperial becomes fl oz). `computeImperialFromMetric` then fills imperial. Output `{ ingredients: [{id + 6 conversion fields}] }`.
+- `RecipeEditorViewModel.updateConversions()` calls it and merges results into editor state; the user then **Saves** to persist (push to cloud + re-publish if public).
+- **`EditorIngredient` carries the 6 conversion fields** and the save mapping writes them — fixing a prior bug where editing a recipe wiped its conversions.
+
 ---
 
 ### F7 — Authentication ✅

@@ -446,6 +446,78 @@ function computeImperialFromMetric(recipe) {
   }
 }
 
+// ─── Standalone ingredient conversion (Update conversions button) ──────────────
+
+const CONVERT_SYSTEM_INSTRUCTION =
+  "You are a unit-conversion assistant for the Amrosa recipe app. " +
+  "Given a list of recipe ingredients with their original quantities, produce METRIC conversions. " +
+  "For DRY or SOLID ingredients (flour, sugar, rice, butter, paneer, spices measured by volume, etc.), " +
+  "output WEIGHT in g or kg using typical density (e.g. 1 cup all-purpose flour ≈ 120 g, " +
+  "1 cup granulated sugar ≈ 200 g, 1 cup butter ≈ 227 g, 1 tbsp ≈ the weight of that ingredient). " +
+  "For LIQUID ingredients (water, milk, oil, stock, cream, etc.), output VOLUME in ml or L " +
+  "(1 cup = 240 ml, 1 tbsp = 15 ml, 1 tsp = 5 ml). " +
+  "If a quantity is already metric, keep it. " +
+  "Non-convertible quantities (whole counts like '2 eggs' / '3 cloves', 'to taste', 'a pinch', 'for garnish') → all null. " +
+  "Return ONLY a JSON array (no markdown), one object per input id: " +
+  '[{"id":"...","quantityValueMetric":number|null,"quantityUnitMetric":"g"|"kg"|"ml"|"L"|null,"quantityDisplayMetric":"120 g"|null}]';
+
+/**
+ * Convert a list of ingredients to metric (via Gemini, using density for dry items),
+ * then compute imperial deterministically. Returns one object per ingredient id with
+ * all six conversion fields. Used by the editor's "Update conversions" button.
+ */
+async function convertIngredientsFromList(ingredients, apiKey) {
+  if (!Array.isArray(ingredients) || ingredients.length === 0) {
+    throw new Error("Please provide ingredients to convert.");
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.5-flash",
+    systemInstruction: CONVERT_SYSTEM_INSTRUCTION,
+    generationConfig: {
+      responseMimeType: "application/json",
+      maxOutputTokens: 8192,
+      thinkingConfig: { thinkingBudget: 0 },
+    },
+  });
+
+  const compact = ingredients.map((i) => ({
+    id: i.id,
+    name: i.name,
+    quantity: i.quantityDisplay || i.quantity || "",
+  }));
+  const prompt = `Convert these ingredients to metric:\n${JSON.stringify(compact, null, 2)}`;
+
+  const result = await model.generateContent(prompt);
+  let jsonText = result.response.text().trim();
+  if (jsonText.startsWith("```")) {
+    jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (err) {
+    throw new Error(`Gemini returned invalid JSON: ${err.message}`);
+  }
+  if (!Array.isArray(parsed)) parsed = parsed.ingredients || [];
+
+  const out = parsed.map((p) => ({
+    id: p.id,
+    quantityValueMetric: p.quantityValueMetric ?? null,
+    quantityUnitMetric: p.quantityUnitMetric ?? null,
+    quantityDisplayMetric: p.quantityDisplayMetric ?? null,
+    quantityValueImperial: null,
+    quantityUnitImperial: null,
+    quantityDisplayImperial: null,
+  }));
+
+  // Imperial is always derived from metric with exact math.
+  computeImperialFromMetric({ ingredients: out });
+  return out;
+}
+
 // ─── Validation ───────────────────────────────────────────────────────────────
 
 function validateRecipe(recipe) {
@@ -495,4 +567,4 @@ function validateRecipe(recipe) {
   computeImperialFromMetric(recipe);
 }
 
-module.exports = { parseRecipeFromUrl, parseRecipeFromContent, formatRecipeFromText };
+module.exports = { parseRecipeFromUrl, parseRecipeFromContent, formatRecipeFromText, convertIngredientsFromList };

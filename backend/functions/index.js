@@ -7,6 +7,7 @@ const {
   parseRecipeFromUrl,
   parseRecipeFromContent,
   formatRecipeFromText,
+  convertIngredientsFromList,
 } = require("./parseRecipe");
 
 admin.initializeApp();
@@ -185,6 +186,42 @@ exports.formatRecipeText = onCall(
       recipe.createdAt = now;
       recipe.updatedAt = now;
       return { recipe };
+    } catch (err) {
+      throw toHttpsError(err);
+    }
+  }
+);
+
+// ─── convertIngredients ─────────────────────────────────────────────────────
+/**
+ * Compute metric + imperial conversions for a list of ingredients.
+ * Used by the recipe editor's "Update conversions" button on existing recipes.
+ *
+ * Input:  { ingredients: [{ id, name, quantityDisplay }] }
+ * Output: { ingredients: [{ id, quantityValueMetric, quantityUnitMetric, quantityDisplayMetric,
+ *                           quantityValueImperial, quantityUnitImperial, quantityDisplayImperial }] }
+ */
+exports.convertIngredients = onCall(
+  {
+    secrets: [geminiKey],
+    timeoutSeconds: 120,
+    memory: "512MiB",
+    region: "us-central1",
+  },
+  async (request) => {
+    const ingredients = request.data?.ingredients;
+    if (!Array.isArray(ingredients) || ingredients.length === 0) {
+      throw new HttpsError("invalid-argument", "Ingredients are required.");
+    }
+
+    const apiKey = geminiKey.value();
+    if (!apiKey) {
+      throw new HttpsError("internal", "Gemini API key is not configured.");
+    }
+
+    try {
+      const converted = await convertIngredientsFromList(ingredients, apiKey);
+      return { ingredients: converted };
     } catch (err) {
       throw toHttpsError(err);
     }
