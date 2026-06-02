@@ -456,8 +456,9 @@ Unit toggle (`SingleChoiceSegmentedButtonRow`: Original | Metric | Imperial) sho
 - Non-convertible (whole eggs, cloves, "to taste", counts) → all conversion fields null
 
 **`computeImperialFromMetric(recipe)` logic (runs after Gemini):**
-- `g` or `kg` → grams first; if `< 453.6g` → oz (`grams / 28.35`, 1dp); if `≥ 453.6g` → lb (`grams / 453.6`, 2dp)
-- `ml` or `L` → ml first; → fl oz (`ml / 29.574`, 1dp)
+- `g` or `kg` → grams first; if `< 453.6g` → oz (`grams / 28.35`); if `≥ 453.6g` → lb (`grams / 453.6`)
+- `ml` or `L` → ml first; → fl oz (`ml / 29.574`)
+- **Adaptive rounding via `impRound()`** so small amounts don't collapse to `0`: `≥1` → 1 decimal, `≥0.1` → 2 decimals, `<0.1` → 3 decimals (e.g. 1 g → `0.035 oz`)
 - Unknown or null metric unit → imperial = null
 - This guarantees imperial is never in cups/tbsp/tsp — only oz, lb, or fl oz
 
@@ -468,7 +469,9 @@ Gemini's imperial fields are **zeroed in `validateRecipe()`** before `computeImp
 For recipes that predate conversions or have stale ones, the **Recipe Editor** has an **"Update unit conversions"** button:
 - `convertIngredients` Cloud Function: input `{ ingredients: [{id, name, quantityDisplay}] }`. Gemini produces **metric** per ingredient — **weight (g/kg) for dry/solid items using density** (so imperial becomes oz/lb), **volume (ml/L) for liquids** (imperial becomes fl oz). `computeImperialFromMetric` then fills imperial. Output `{ ingredients: [{id + 6 conversion fields}] }`.
 - `RecipeEditorViewModel.updateConversions()` calls it and merges results into editor state; the user then **Saves** to persist (push to cloud + re-publish if public).
+- Button is placed **directly above the ingredients/sections** in the editor (after the metadata card).
 - **`EditorIngredient` carries the 6 conversion fields** and the save mapping writes them — fixing a prior bug where editing a recipe wiped its conversions.
+- **Note:** after conversion, a dry ingredient's *Metric* column is weight-based (e.g. flour `120 g`, not `480 ml`) since imperial-as-weight (oz/lb) requires metric-as-weight. Original column is unchanged.
 
 ---
 
@@ -1073,13 +1076,13 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **Imperial unit fix** | Gemini only populates metric fields; `computeImperialFromMetric()` in Cloud Function computes imperial from metric with exact math: g/kg → oz (< 453.6g) or lb; ml/L → fl oz (1 fl oz = 29.574 ml) |
 | **Recipe Ownership Model v2** | ✅ End-to-end (iOS↔Android). No official recipes; Tab 1 = mine (editable), Tab 2 = received references (read-only, "Remove"); reference-based shares via `shared_recipes` mirror gated by Public; auto-removal on unpublish/delete; author labels "me / Imported by X". See "Recipe Ownership Model (v2)". |
 | **Notification deep links** | Tapping a push routes to the target screen: `recipe_shared` → `received/{shareId}`; follow notifications → Account tab. `MainActivity` reads FCM extras → `AmrosaApplication.pendingDeepLink` → nav graph navigates. |
+| **Update unit conversions (existing recipes)** | `convertIngredients` Cloud Function (Gemini metric w/ density for dry → weight, liquids → volume) + deterministic imperial; editor "Update unit conversions" button above ingredients; `EditorIngredient` now preserves the 6 conversion fields on save (fixes edit wiping conversions); adaptive `impRound()` so tiny amounts don't show `0 oz`. |
 
 ### Planned — In Priority Order
 
 | # | Feature | Description |
 |---|---|---|
 | — | Discover / Recommendations tab | Public/discoverable recipes + time-of-day recommendations; replaces placeholder; eventually becomes default tab |
-| — | Public profile view | View another user's public recipes at `"profile/{uid}"` |
 | — | Public profile view | View another user's public recipes at `"profile/{uid}"` |
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil display |
 | — | Shopping List | Dedicated screen; add ingredients from recipe detail |
