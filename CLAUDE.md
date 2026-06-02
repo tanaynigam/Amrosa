@@ -1101,6 +1101,8 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 - `RecipeDetailView`: when `isReceived`, top bar shows only **Remove** + Cooking Mode; owner recipes keep Share + Edit. Share gates on Public — sharing a private recipe prompts "make public to share". `isOwner = authorId == uid && !isReceived`.
 - `RecipeEditorView`: delete also removes the cloud copy + unpublishes the mirror if public; save re-publishes the mirror if public. Fork dialog removed.
 - Author label rule: "me" / "Imported by me" (Tab 1) · "B" / "Imported by B" (Tab 2). `SharedRecipeService.buildDocument` no longer overwrites the author name with "Imported".
+- **Author-name resolution ("Imported by Imported" fix):** at save, when the mirror name is blank/"Imported" the sender IS the author → use `fromDisplayName`. On refresh, `resolveAuthorName()` reads `users/{authorUid}.displayName` (authoritative) so legacy/iOS recipes stored as literal "Imported" display the real name.
+- **Notification deep links:** `recipe_shared` tap → Shared tab → `SharedInboxView` consumes the shareId and opens the `ReceivedRecipeView` review screen; `follow_*` → Account tab.
 
 ### iOS ✅ Implemented & Matching Android
 

@@ -56,10 +56,17 @@ final class SharedInboxViewModel {
 // MARK: - View
 
 struct SharedInboxView: View {
+    /// Set by a recipe_shared push tap / deep link → opens the review screen.
+    @Binding var openShareId: String?
+
     @Environment(AppContainer.self) private var container
     @State private var viewModel: SharedInboxViewModel?
     @State private var selectedShareId: String? = nil
     @State private var selectedRecipe: RecipeModel? = nil
+
+    init(openShareId: Binding<String?> = .constant(nil)) {
+        self._openShareId = openShareId
+    }
 
     var body: some View {
         Group {
@@ -80,6 +87,12 @@ struct SharedInboxView: View {
         .navigationDestination(item: $selectedRecipe) { recipe in
             RecipeDetailView(recipe: recipe)
         }
+        .onChange(of: openShareId) { _, id in
+            if let id = id {
+                selectedShareId = id      // open the review screen for the shared recipe
+                openShareId = nil
+            }
+        }
         .onAppear {
             if viewModel == nil {
                 viewModel = SharedInboxViewModel(
@@ -89,6 +102,8 @@ struct SharedInboxView: View {
             }
             viewModel?.start()
             viewModel?.loadSaved()   // refresh saved list when returning to the tab
+            // Handle a deep link that arrived before this view was on screen
+            if let id = openShareId { selectedShareId = id; openShareId = nil }
         }
         .onDisappear {
             viewModel?.stop()

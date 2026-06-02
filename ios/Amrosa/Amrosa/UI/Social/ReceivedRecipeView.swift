@@ -64,11 +64,20 @@ final class ReceivedRecipeViewModel {
         guard let r = recipe, let p = pointer, !isSaved, !isSaving else { return }
         isSaving = true
         Task {
+            // Real author name: the mirror's name unless it's blank/"Imported" (legacy/iOS),
+            // in which case the sender IS the author → use fromDisplayName.
+            let mirrorName = r.authorDisplayName
+            let realAuthorName: String
+            if let m = mirrorName, !m.trimmingCharacters(in: .whitespaces).isEmpty, m.lowercased() != "imported" {
+                realAuthorName = m
+            } else {
+                realAuthorName = p.fromDisplayName
+            }
             await socialRepository.saveReceivedReference(
-                recipeId: r.id, authorUid: p.authorUid, authorName: r.authorDisplayName ?? p.authorName
+                recipeId: r.id, authorUid: p.authorUid, authorName: realAuthorName
             )
             do {
-                try repository.cacheReceivedRecipe(r, isImported: r.isImported, authorDisplayName: r.authorDisplayName)
+                try repository.cacheReceivedRecipe(r, isImported: r.isImported, authorDisplayName: realAuthorName)
                 await socialRepository.deleteReceivedPointer(shareId: shareId)
                 isSaved = true
                 isSaving = false
