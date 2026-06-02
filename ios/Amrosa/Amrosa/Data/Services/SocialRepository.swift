@@ -265,19 +265,48 @@ final class SocialRepository {
         }
     }
 
-    /// Load a directly-shared recipe from `shared_to/{currentUid}/recipes/{shareId}`.
-    /// Returns the full recipe + the sender's display name.
-    func getReceivedRecipe(shareId: String) async -> ReceivedRecipeData? {
+    /// Read a pending share pointer from `shared_to/{uid}/recipes/{shareId}`.
+    /// Returns the canonical recipeId + original author + sender — the actual recipe
+    /// is read from `shared_recipes/{recipeId}` (the public mirror) via SharedRecipeService.
+    func getReceivedPointer(shareId: String) async -> ReceivedPointer? {
         guard let myUid = authRepository.uid else { return nil }
         guard let doc = try? await db.collection("shared_to")
-            .document(myUid)
-            .collection("recipes")
-            .document(shareId)
-            .getDocument(),
-              let data = doc.data(),
-              let recipe = parseReceivedRecipe(id: shareId, data: data) else { return nil }
-        let fromDisplayName = data["fromDisplayName"] as? String ?? "Someone"
-        return ReceivedRecipeData(recipe: recipe, fromDisplayName: fromDisplayName)
+            .document(myUid).collection("recipes").document(shareId).getDocument(),
+              let data = doc.data() else { return nil }
+        return ReceivedPointer(
+            shareId: shareId,
+            recipeId: data["recipeId"] as? String ?? shareId,
+            authorUid: data["authorUid"] as? String ?? data["fromUid"] as? String ?? "",
+            authorName: data["authorDisplayName"] as? String ?? "Someone",
+            fromDisplayName: data["fromDisplayName"] as? String ?? "Someone"
+        )
+    }
+
+    /// Write a saved-received reference: `received_recipes/{uid}/items/{recipeId}`.
+    func saveReceivedReference(recipeId: String, authorUid: String, authorName: String) async {
+        guard let myUid = authRepository.uid else { return }
+        try? await db.collection("received_recipes").document(myUid).collection("items")
+            .document(recipeId)
+            .setData([
+                "recipeId": recipeId,
+                "authorUid": authorUid,
+                "authorName": authorName,
+                "savedAt": Int64(Date().timeIntervalSince1970 * 1000)
+            ])
+    }
+
+    /// Consume (delete) a pending share pointer once it has been saved or dismissed.
+    func deleteReceivedPointer(shareId: String) async {
+        guard let myUid = authRepository.uid else { return }
+        try? await db.collection("shared_to").document(myUid).collection("recipes")
+            .document(shareId).delete()
+    }
+
+    /// Remove a saved-received reference (the "Remove from my recipes" action).
+    func removeReceivedReference(recipeId: String) async {
+        guard let myUid = authRepository.uid else { return }
+        try? await db.collection("received_recipes").document(myUid).collection("items")
+            .document(recipeId).delete()
     }
 
     // MARK: - Private helpers
@@ -378,6 +407,10 @@ final class SocialRepository {
             "createdAt": Int64(recipe.createdAt.timeIntervalSince1970 * 1000),
             "fromUid": fromUid,
             "fromDisplayName": fromDisplayName,
+            // Canonical recipe id + original author — used by Tab 2 to resolve the
+            // live recipe from shared_recipes/{recipeId} (Recipe Ownership Model v2)
+            "recipeId": recipe.id,
+            "authorUid": recipe.authorId ?? fromUid,
             // Original recipe author — preserved so recipients see the right author name
             "authorDisplayName": recipe.authorDisplayName ?? fromDisplayName,
             "tags": recipe.tags,
@@ -516,6 +549,7 @@ final class SocialRepository {
             authorId: data["fromUid"] as? String,
             // Original recipe author; fall back to sender for old docs that don't store it
             authorDisplayName: (data["authorDisplayName"] as? String) ?? (data["fromDisplayName"] as? String),
+            isImported: data["isImported"] as? Bool ?? false,
             visibility: "private",
             sections: sections,
             ingredients: ingredients,

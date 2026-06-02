@@ -10,26 +10,39 @@ final class ReceivedRecipeViewModel {
     var isLoading: Bool = true
     var isSaved: Bool = false
     var isSaving: Bool = false
+    var errorMessage: String? = nil
     var selectedServings: Int = 1
     var scaleFactor: Double = 1.0
 
     private let shareId: String
     private let socialRepository: SocialRepository
     private let sharedRecipeService: SharedRecipeService
+    private let repository: RecipeRepository
+    private var pointer: ReceivedPointer? = nil
 
-    init(shareId: String, socialRepository: SocialRepository, sharedRecipeService: SharedRecipeService) {
+    init(shareId: String, socialRepository: SocialRepository, sharedRecipeService: SharedRecipeService, repository: RecipeRepository) {
         self.shareId = shareId
         self.socialRepository = socialRepository
         self.sharedRecipeService = sharedRecipeService
+        self.repository = repository
     }
 
     func load() async {
         isLoading = true
-        if let data = await socialRepository.getReceivedRecipe(shareId: shareId) {
-            recipe = data.recipe
-            fromDisplayName = data.fromDisplayName
-            selectedServings = data.recipe.baseServings
+        // 1. Read the pending pointer → canonical recipeId + author
+        let p = await socialRepository.getReceivedPointer(shareId: shareId)
+        pointer = p
+        // 2. Read the live recipe from the public mirror (shared_recipes/{recipeId})
+        if let p = p {
+            fromDisplayName = p.fromDisplayName
+            recipe = await sharedRecipeService.getSharedRecipeDetail(recipeId: p.recipeId)
+            if let r = recipe { selectedServings = r.baseServings }
         }
+        errorMessage = {
+            if p == nil { return "This share is no longer available." }
+            if recipe == nil { return "This recipe is no longer shared by its author." }
+            return nil
+        }()
         isLoading = false
     }
 
@@ -42,16 +55,28 @@ final class ReceivedRecipeViewModel {
         }
     }
 
-    /// Saves a copy to local recipes. `onSaved` fires after a successful save so the
-    /// caller can pop back to the Shared tab (mirrors the import-review flow).
+    /// Save this received recipe as a reference (Recipe Ownership Model v2):
+    ///   1. write received_recipes/{uid}/items/{recipeId}
+    ///   2. cache locally with isReceived = true (original author preserved)
+    ///   3. consume the pending share pointer
+    /// `onSaved` fires after success so the caller can pop back to the Shared tab.
     func saveRecipe(onSaved: @escaping () -> Void) {
-        guard let r = recipe, !isSaved, !isSaving else { return }
+        guard let r = recipe, let p = pointer, !isSaved, !isSaving else { return }
         isSaving = true
         Task {
-            let success = await sharedRecipeService.copyToMyRecipes(r)
-            isSaved = success
-            isSaving = false
-            if success { onSaved() }
+            await socialRepository.saveReceivedReference(
+                recipeId: r.id, authorUid: p.authorUid, authorName: r.authorDisplayName ?? p.authorName
+            )
+            do {
+                try repository.cacheReceivedRecipe(r, isImported: r.isImported, authorDisplayName: r.authorDisplayName)
+                await socialRepository.deleteReceivedPointer(shareId: shareId)
+                isSaved = true
+                isSaving = false
+                onSaved()
+            } catch {
+                errorMessage = "Couldn't save recipe: \(error.localizedDescription)"
+                isSaving = false
+            }
         }
     }
 
@@ -102,7 +127,8 @@ struct ReceivedRecipeView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 40)).foregroundStyle(.secondary)
-                        Text("Recipe not found").foregroundStyle(.secondary)
+                        Text(vm.errorMessage ?? "Recipe not found").foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center).padding(.horizontal)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -117,7 +143,8 @@ struct ReceivedRecipeView: View {
                 viewModel = ReceivedRecipeViewModel(
                     shareId: shareId,
                     socialRepository: container.socialRepository,
-                    sharedRecipeService: container.sharedRecipeService
+                    sharedRecipeService: container.sharedRecipeService,
+                    repository: container.recipeRepository
                 )
                 Task { await viewModel?.load() }
             }

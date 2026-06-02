@@ -117,6 +117,7 @@ final class RecipeEditorViewModel {
     private let repository: RecipeRepository
     private let authRepository: AuthRepository
     private let syncService: RecipeSyncService?
+    private let sharedRecipeService: SharedRecipeService?
 
     /// Display name shown in the "Personal" dropdown option
     var personalAuthorName: String {
@@ -125,10 +126,11 @@ final class RecipeEditorViewModel {
 
     // MARK: - Init for new recipe
 
-    init(repository: RecipeRepository, authRepository: AuthRepository, syncService: RecipeSyncService? = nil) {
+    init(repository: RecipeRepository, authRepository: AuthRepository, syncService: RecipeSyncService? = nil, sharedRecipeService: SharedRecipeService? = nil) {
         self.repository = repository
         self.authRepository = authRepository
         self.syncService = syncService
+        self.sharedRecipeService = sharedRecipeService
         self.title = ""
         self.description = ""
         self.prepTimeMinutes = ""
@@ -149,10 +151,12 @@ final class RecipeEditorViewModel {
          repository: RecipeRepository,
          authRepository: AuthRepository,
          syncService: RecipeSyncService? = nil,
+         sharedRecipeService: SharedRecipeService? = nil,
          forking: Bool = false) {
         self.repository = repository
         self.authRepository = authRepository
         self.syncService = syncService
+        self.sharedRecipeService = sharedRecipeService
         self.existingRecipe = forking ? nil : recipe
         self.title = forking ? "\(recipe.title) (copy)" : recipe.title
         self.description = recipe.recipeDescription ?? ""
@@ -293,6 +297,10 @@ final class RecipeEditorViewModel {
                 // Push to Firestore
                 if let updated = try repository.fetchRecipe(id: existing.id) {
                     await syncService?.pushPersonalRecipe(updated)
+                    // If public, re-publish the canonical mirror so receivers pick up edits.
+                    if updated.visibility == "public" {
+                        _ = await sharedRecipeService?.publish(updated)
+                    }
                 }
             } else {
                 // New recipe — build a ParsedRecipeData and insert
@@ -320,9 +328,15 @@ final class RecipeEditorViewModel {
 
     func deleteRecipe() {
         guard let existing = existingRecipe else { return }
+        let wasPublic = existing.visibility == "public"
+        let id = existing.id
         isDeleting = true
         Task {
-            try? repository.deleteRecipe(id: existing.id)
+            try? repository.deleteRecipe(id: id)
+            // Remove the cloud copy too, otherwise the next pull resurrects it.
+            await syncService?.deletePersonalRecipe(id)
+            // If it was public, take down the shared mirror so receivers lose access.
+            if wasPublic { _ = await sharedRecipeService?.unpublish(id) }
             isDeleting = false
             deleteComplete = true
         }

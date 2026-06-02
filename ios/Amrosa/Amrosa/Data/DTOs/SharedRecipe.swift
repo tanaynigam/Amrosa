@@ -18,6 +18,8 @@ struct SharedRecipe: Identifiable {
     let tags: [String]
     let authorId: String?
     let authorDisplayName: String?
+    /// URL/file-imported vs typed — drives the "Imported by X" label (v2).
+    let isImported: Bool
     let visibility: String
     let sections: [SharedSection]
     let ingredients: [SharedIngredient]

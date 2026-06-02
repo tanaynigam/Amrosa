@@ -1072,6 +1072,17 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. Swift, SwiftUI, SwiftData. All core features including auth gate, shared recipes, comments, and visibility/share are implemented. Notifications are push-only (no in-app notification screen).
 
+**Recipe Ownership Model v2 — ported (matches the authoritative model above):**
+- `RecipeModel.isReceived` added (SwiftData auto-migrates the additive field). Tab 1 = `isReceived=false`; Tab 2 = `isReceived=true`.
+- `RecipeSyncService`: seeded `recipes` pull removed; `sync()` = pull personal + `syncReceivedRecipes()`. Received refresh re-reads each `shared_recipes/{recipeId}` mirror via `SharedRecipeService.getSharedRecipeDetail` → present: re-cache (`cacheReceivedRecipe`, original author preserved); absent: drop reference + local copy. `pushPersonalRecipe` skips received. `deletePersonalRecipe(id)` removes the cloud doc on delete.
+- `SocialRepository`: `getReceivedPointer` / `saveReceivedReference` / `deleteReceivedPointer` / `removeReceivedReference`; `buildSharedToDocument` stores `recipeId` + `authorUid`. `received_recipes/{uid}/items` references drive Tab 2.
+- `RecipeRepository`: `fetchMyRecipes` (Tab 1, excludes received), `fetchReceivedRecipes` / `fetchReceivedRecipeIds` (Tab 2), `cacheReceivedRecipe` (canonical ids preserved, `isReceived=true`), `removeReceivedRecipe`.
+- `ReceivedRecipeView`: reads pointer → loads live mirror; **Save Recipe** writes a reference + caches locally + consumes the pointer (no copy).
+- `SharedInboxView` (Tab 2): pending pointers ("In review — tap to save", dismiss ✕) on top + saved received cards below; saved → read-only `RecipeDetailView`.
+- `RecipeDetailView`: when `isReceived`, top bar shows only **Remove** + Cooking Mode; owner recipes keep Share + Edit. Share gates on Public — sharing a private recipe prompts "make public to share". `isOwner = authorId == uid && !isReceived`.
+- `RecipeEditorView`: delete also removes the cloud copy + unpublishes the mirror if public; save re-publishes the mirror if public. Fork dialog removed.
+- Author label rule: "me" / "Imported by me" (Tab 1) · "B" / "Imported by B" (Tab 2). `SharedRecipeService.buildDocument` no longer overwrites the author name with "Imported".
+
 ### iOS ✅ Implemented & Matching Android
 
 | Feature | Notes |

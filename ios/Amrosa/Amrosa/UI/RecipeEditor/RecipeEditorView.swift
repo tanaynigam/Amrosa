@@ -40,13 +40,15 @@ struct RecipeEditorView: View {
                         repository: container.recipeRepository,
                         authRepository: container.authRepository,
                         syncService: container.syncService,
+                        sharedRecipeService: container.sharedRecipeService,
                         forking: forking
                     )
                 } else {
                     viewModel = RecipeEditorViewModel(
                         repository: container.recipeRepository,
                         authRepository: container.authRepository,
-                        syncService: container.syncService
+                        syncService: container.syncService,
+                        sharedRecipeService: container.sharedRecipeService
                     )
                 }
             }

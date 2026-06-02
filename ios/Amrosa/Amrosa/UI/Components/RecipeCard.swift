@@ -58,12 +58,11 @@ struct RecipeCard: View {
                         .padding(.top, 4)
                     }
 
-                    if let authorName = recipe.authorDisplayName {
-                        Text("by \(authorName)")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .padding(.top, 2)
-                    }
+                    // v2 author label — Tab 1 is always my recipes: "me" / "Imported by me"
+                    Text(recipe.isImported ? "Imported by me" : "me")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
                 }
                 Spacer(minLength: 0)
 

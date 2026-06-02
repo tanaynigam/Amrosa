@@ -32,8 +32,8 @@ final class AppContainer {
         let repo = RecipeRepository(context: context)
         let auth = AuthRepository()
         let functions = CloudFunctionsService()
-        let sync = RecipeSyncService(repository: repo, authRepository: auth)
         let shared = SharedRecipeService(authRepository: auth, repository: repo)
+        let sync = RecipeSyncService(repository: repo, authRepository: auth, sharedRecipeService: shared)
         let social = SocialRepository(authRepository: auth)
 
         self.recipeRepository = repo

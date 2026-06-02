@@ -16,8 +16,18 @@ struct ReceivedRecipeSummary: Identifiable {
     var id: String { shareId }
 }
 
-/// Full recipe + sender name, returned by getReceivedRecipe().
+/// Full recipe + sender name, used by the received-recipe review screen.
 struct ReceivedRecipeData {
     let recipe: SharedRecipe
+    let fromDisplayName: String
+}
+
+/// A pending share pointer (`shared_to/{uid}/recipes/{shareId}`).
+/// The actual recipe is resolved from `shared_recipes/{recipeId}`.
+struct ReceivedPointer {
+    let shareId: String
+    let recipeId: String
+    let authorUid: String
+    let authorName: String
     let fromDisplayName: String
 }

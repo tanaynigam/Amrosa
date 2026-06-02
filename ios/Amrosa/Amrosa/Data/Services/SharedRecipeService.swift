@@ -268,7 +268,9 @@ final class SharedRecipeService {
             "updatedAt": recipe.updatedAt.timeIntervalSince1970 * 1000,
             "createdAt": recipe.createdAt.timeIntervalSince1970 * 1000,
             "authorId": recipe.authorId ?? "",
-            "authorDisplayName": recipe.isImported ? "Imported" : (recipe.authorDisplayName ?? "User"),
+            // v2: always store the real author name + isImported flag. The "Imported by X"
+            // vs "X" label is computed at display time — never overwrite the name here.
+            "authorDisplayName": recipe.authorDisplayName ?? "User",
             "tags": recipe.tags,
             "sourceUrls": recipe.sourceUrls,
             "sections": sections,
@@ -359,6 +361,7 @@ final class SharedRecipeService {
             tags: tags,
             authorId: data["authorId"] as? String,
             authorDisplayName: data["authorDisplayName"] as? String,
+            isImported: data["isImported"] as? Bool ?? false,
             visibility: data["visibility"] as? String ?? "public",
             sections: sections,
             ingredients: ingredients,

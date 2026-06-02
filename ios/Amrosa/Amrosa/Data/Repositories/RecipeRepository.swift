@@ -29,12 +29,36 @@ final class RecipeRepository {
             }
     }
 
+    /// Push-eligible recipes: personal (not imported) AND owned by me (not received). Never pushes references.
     func fetchPersonalRecipes() throws -> [RecipeModel] {
         let descriptor = FetchDescriptor<RecipeModel>(
-            predicate: #Predicate { !$0.isImported },
+            predicate: #Predicate { !$0.isImported && !$0.isReceived },
             sortBy: [SortDescriptor(\.title)]
         )
         return try context.fetch(descriptor)
+    }
+
+    /// Tab 1 — my recipes only (excludes received references).
+    func fetchMyRecipes() throws -> [RecipeModel] {
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { !$0.isReceived },
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+        return try context.fetch(descriptor)
+    }
+
+    /// Tab 2 — recipes received from other users (read-only references).
+    func fetchReceivedRecipes() throws -> [RecipeModel] {
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { $0.isReceived },
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+        return try context.fetch(descriptor)
+    }
+
+    /// IDs of all locally-cached received recipes (Tab 2). Used by the received-reference refresh.
+    func fetchReceivedRecipeIds() throws -> [String] {
+        try fetchReceivedRecipes().map { $0.id }
     }
 
     func fetchRecipe(id: String) throws -> RecipeModel? {
@@ -176,6 +200,88 @@ final class RecipeRepository {
 
         try context.save()
         return recipe
+    }
+
+    // MARK: - Received recipes (Tab 2, Recipe Ownership Model v2)
+
+    /// Cache a received recipe (from a shared_recipes mirror) into Room with isReceived = true.
+    /// Preserves the canonical recipe id + child ids so refreshes REPLACE the same rows.
+    /// Keeps the original author; the local copy is private + read-only.
+    func cacheReceivedRecipe(_ shared: SharedRecipe, isImported: Bool, authorDisplayName: String?) throws {
+        // Delete any existing local copy first so we overwrite in place
+        if let existing = try fetchRecipe(id: shared.id) {
+            context.delete(existing)
+        }
+        let now = Date()
+        let recipe = RecipeModel(
+            id: shared.id,
+            title: shared.title,
+            recipeDescription: shared.description,
+            sourceUrls: shared.sourceUrls,
+            baseServings: shared.baseServings,
+            baseServingsMin: shared.baseServingsMin,
+            baseServingsMax: shared.baseServingsMax,
+            scaleIngredientId: shared.scaleIngredientId,
+            scaleStep: shared.scaleStep,
+            prepTimeMinutes: shared.prepTimeMinutes,
+            cookTimeMinutes: shared.cookTimeMinutes,
+            imageUrl: shared.imageUrl,
+            tags: shared.tags,
+            isCustomized: false,
+            isImported: isImported,
+            isReceived: true,
+            needsReview: false,
+            createdAt: now,
+            updatedAt: now,
+            authorId: shared.authorId,
+            authorDisplayName: authorDisplayName,
+            visibility: "private"
+        )
+        context.insert(recipe)
+
+        let sections = shared.sections.sorted { $0.orderIndex < $1.orderIndex }.map { s -> RecipeSectionModel in
+            let m = RecipeSectionModel(id: s.id, name: s.name, orderIndex: s.orderIndex)
+            context.insert(m); m.recipe = recipe; return m
+        }
+        let sectionMap = Dictionary(uniqueKeysWithValues: sections.map { ($0.id, $0) })
+
+        let ingredients = shared.ingredients.sorted { $0.orderIndex < $1.orderIndex }.map { i -> IngredientModel in
+            let m = IngredientModel(
+                id: i.id, name: i.name,
+                quantityValue: i.quantityValue, quantityUnit: i.quantityUnit, quantityDisplay: i.quantityDisplay,
+                groupLabel: i.groupLabel, isOptional: i.isOptional, orderIndex: i.orderIndex,
+                quantityValueMetric: i.quantityValueMetric, quantityUnitMetric: i.quantityUnitMetric,
+                quantityDisplayMetric: i.quantityDisplayMetric,
+                quantityValueImperial: i.quantityValueImperial, quantityUnitImperial: i.quantityUnitImperial,
+                quantityDisplayImperial: i.quantityDisplayImperial
+            )
+            context.insert(m); m.recipe = recipe
+            if let sid = i.sectionId { m.section = sectionMap[sid] }
+            return m
+        }
+        let ingMap = Dictionary(uniqueKeysWithValues: ingredients.map { ($0.id, $0) })
+
+        let steps = shared.steps.sorted { $0.orderIndex < $1.orderIndex }.map { s -> StepModel in
+            let m = StepModel(id: s.id, instruction: s.instruction, orderIndex: s.orderIndex)
+            context.insert(m); m.recipe = recipe
+            if let sid = s.sectionId { m.section = sectionMap[sid] }
+            return m
+        }
+        let stepMap = Dictionary(uniqueKeysWithValues: steps.map { ($0.id, $0) })
+
+        for step in shared.steps {
+            for ref in step.ingredientRefs {
+                guard let s = stepMap[step.id], let ing = ingMap[ref.ingredientId] else { continue }
+                let refModel = StepIngredientRefModel(quantityDisplay: ref.quantityDisplay)
+                context.insert(refModel); refModel.step = s; refModel.ingredient = ing
+            }
+        }
+        try context.save()
+    }
+
+    /// Remove a received recipe's local cache (the cloud reference is removed separately).
+    func removeReceivedRecipe(id: String) throws {
+        try deleteRecipe(id: id)
     }
 
     // MARK: - Update

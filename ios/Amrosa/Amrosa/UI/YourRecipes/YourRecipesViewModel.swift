@@ -6,31 +6,23 @@ import Foundation
 @MainActor
 final class YourRecipesViewModel {
     var recipes: [RecipeModel] = []
-    var sharedRecipes: [ReceivedRecipeSummary] = []
     var searchText: String = ""
     var filterMode: RecipeFilter = .all
     var errorMessage: String? = nil
 
     private let repository: RecipeRepository
-    private let socialRepository: SocialRepository
-    private var sharedTask: Task<Void, Never>? = nil
 
-    init(repository: RecipeRepository, socialRepository: SocialRepository) {
+    init(repository: RecipeRepository) {
         self.repository = repository
-        self.socialRepository = socialRepository
     }
 
     enum RecipeFilter: String, CaseIterable {
         case all = "All"
         case personal = "Personal"
         case imported = "Imported"
-        case shared = "Shared"
     }
 
-    var isSharedMode: Bool { filterMode == .shared }
-
     var filteredRecipes: [RecipeModel] {
-        if filterMode == .shared { return [] }
         var result = recipes
 
         switch filterMode {
@@ -54,41 +46,16 @@ final class YourRecipesViewModel {
         }
     }
 
-    var filteredSharedRecipes: [ReceivedRecipeSummary] {
-        guard filterMode == .shared else { return [] }
-        if searchText.isEmpty { return sharedRecipes }
-        let q = searchText.lowercased()
-        return sharedRecipes.filter { r in
-            r.title.lowercased().contains(q) ||
-            r.tags.contains { $0.lowercased().contains(q) }
-        }
-    }
-
     var pendingReviewCount: Int {
         recipes.filter { $0.needsReview }.count
     }
 
     func load() {
         do {
-            recipes = try repository.fetchAllRecipes()
+            // Tab 1 — my recipes only (excludes received references, which live in Tab 2)
+            recipes = try repository.fetchMyRecipes()
         } catch {
             errorMessage = error.localizedDescription
         }
-        startSharedStream()
-    }
-
-    private func startSharedStream() {
-        guard sharedTask == nil else { return }
-        sharedTask = Task {
-            for await batch in socialRepository.receivedRecipesSummaryStream() {
-                guard !Task.isCancelled else { break }
-                sharedRecipes = batch
-            }
-        }
-    }
-
-    func stop() {
-        sharedTask?.cancel()
-        sharedTask = nil
     }
 }

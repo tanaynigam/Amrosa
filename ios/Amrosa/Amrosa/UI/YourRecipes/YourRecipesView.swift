@@ -4,7 +4,6 @@ struct YourRecipesView: View {
     @Environment(AppContainer.self) private var container
     @State private var viewModel: YourRecipesViewModel?
     @State private var selectedRecipe: RecipeModel? = nil
-    @State private var selectedShareId: String? = nil
     @State private var showAddMenu = false
     @State private var navigateToImport = false
     @State private var navigateToFreeform = false
@@ -16,7 +15,6 @@ struct YourRecipesView: View {
                 YourRecipesContent(
                     viewModel: vm,
                     selectedRecipe: $selectedRecipe,
-                    selectedShareId: $selectedShareId,
                     onTapNeedsReview: { recipe in
                         navigateToImportForReview = recipe
                     }
@@ -27,14 +25,11 @@ struct YourRecipesView: View {
         }
         .navigationTitle("My Recipes")
         .toolbar {
-            // FAB hidden in Shared mode (matches Android)
-            if viewModel?.isSharedMode != true {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showAddMenu = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showAddMenu = true
+                } label: {
+                    Image(systemName: "plus")
                 }
             }
         }
@@ -48,9 +43,6 @@ struct YourRecipesView: View {
         .navigationDestination(item: $selectedRecipe) { recipe in
             RecipeDetailView(recipe: recipe)
         }
-        .navigationDestination(item: $selectedShareId) { shareId in
-            ReceivedRecipeView(shareId: shareId)
-        }
         .navigationDestination(isPresented: $navigateToImport) {
             ImportView()
         }
@@ -62,14 +54,10 @@ struct YourRecipesView: View {
         }
         .onAppear {
             if viewModel == nil {
-                viewModel = YourRecipesViewModel(
-                    repository: container.recipeRepository,
-                    socialRepository: container.socialRepository
-                )
+                viewModel = YourRecipesViewModel(repository: container.recipeRepository)
             }
             viewModel?.load()
         }
-        .onDisappear { viewModel?.stop() }
     }
 }
 
@@ -142,7 +130,6 @@ private struct AddRecipeSheet: View {
 private struct YourRecipesContent: View {
     @Bindable var viewModel: YourRecipesViewModel
     @Binding var selectedRecipe: RecipeModel?
-    @Binding var selectedShareId: String?
     var onTapNeedsReview: (RecipeModel) -> Void
 
     var body: some View {
@@ -152,10 +139,7 @@ private struct YourRecipesContent: View {
                 Image(systemName: "magnifyingglass")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                TextField(
-                    viewModel.isSharedMode ? "Search shared recipes…" : "Search recipes…",
-                    text: $viewModel.searchText
-                )
+                TextField("Search recipes…", text: $viewModel.searchText)
                 if !viewModel.searchText.isEmpty {
                     Button { viewModel.searchText = "" } label: {
                         Image(systemName: "xmark.circle.fill")
@@ -188,58 +172,27 @@ private struct YourRecipesContent: View {
                     }
                     .padding(.top, 8)
 
-                    if viewModel.isSharedMode {
-                        sharedContent
+                    if viewModel.filteredRecipes.isEmpty {
+                        ContentUnavailableView(
+                            "No Recipes Yet",
+                            systemImage: "bookmark",
+                            description: Text("Tap + to add your first recipe.")
+                        )
+                        .padding(.top, 40)
                     } else {
-                        localContent
+                        ForEach(viewModel.filteredRecipes) { recipe in
+                            Button {
+                                if recipe.needsReview { onTapNeedsReview(recipe) }
+                                else { selectedRecipe = recipe }
+                            } label: {
+                                RecipeCard(recipe: recipe, showNeedsReviewBanner: true)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 16)
+                        }
                     }
                 }
                 .padding(.bottom, 24)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var localContent: some View {
-        if viewModel.filteredRecipes.isEmpty {
-            ContentUnavailableView(
-                "No Recipes Yet",
-                systemImage: "bookmark",
-                description: Text("Tap + to add your first recipe.")
-            )
-            .padding(.top, 40)
-        } else {
-            ForEach(viewModel.filteredRecipes) { recipe in
-                Button {
-                    if recipe.needsReview { onTapNeedsReview(recipe) }
-                    else { selectedRecipe = recipe }
-                } label: {
-                    RecipeCard(recipe: recipe, showNeedsReviewBanner: true)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 16)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var sharedContent: some View {
-        if viewModel.filteredSharedRecipes.isEmpty {
-            ContentUnavailableView(
-                "No Shared Recipes",
-                systemImage: "tray",
-                description: Text("Recipes co-chefs send you appear here.")
-            )
-            .padding(.top, 40)
-        } else {
-            ForEach(viewModel.filteredSharedRecipes) { item in
-                Button {
-                    selectedShareId = item.shareId
-                } label: {
-                    SharedRecipeCard(item: item)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 16)
             }
         }
     }

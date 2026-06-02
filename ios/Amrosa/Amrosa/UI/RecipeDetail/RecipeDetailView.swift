@@ -5,14 +5,17 @@ import SwiftUI
 struct RecipeDetailView: View {
     let recipe: RecipeModel
     @Environment(AppContainer.self) private var container
+    @Environment(\.dismiss) private var dismiss
     @State private var viewModel: RecipeDetailViewModel?
     @State private var showCookingMode = false
     @State private var navigateToEditor = false
-    @State private var showForkAlert = false
     @State private var isForkMode = false
     @State private var showShareOptions = false
     @State private var showFollowerPicker = false
     @State private var showSentConfirmation = false
+    @State private var showRemoveConfirm = false
+    // "Make public to share" prompt for a private recipe
+    @State private var pendingShareRecipient: (uid: String, name: String)? = nil
 
     var body: some View {
         Group {
@@ -26,19 +29,27 @@ struct RecipeDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                if viewModel?.isOwner == true {
-                    Button { viewModel?.loadFollowing(); showShareOptions = true } label: {
-                        Image(systemName: "square.and.arrow.up")
+                if viewModel?.isReceived == true {
+                    // Received (Tab 2) — read-only: Remove + Cooking Mode only
+                    Button(role: .destructive) { showRemoveConfirm = true } label: {
+                        Image(systemName: "trash")
                     }
-                }
-                Button {
-                    if recipe.authorId == nil && !recipe.isCustomized { showForkAlert = true }
-                    else { navigateToEditor = true }
-                } label: {
-                    Image(systemName: "pencil")
-                }
-                Button { showCookingMode = true } label: {
-                    Image(systemName: "book.closed")
+                    Button { showCookingMode = true } label: {
+                        Image(systemName: "book.closed")
+                    }
+                } else {
+                    // Owned recipe — Share + Edit + Cooking Mode
+                    if viewModel?.isOwner == true {
+                        Button { viewModel?.loadFollowing(); showShareOptions = true } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    Button { navigateToEditor = true } label: {
+                        Image(systemName: "pencil")
+                    }
+                    Button { showCookingMode = true } label: {
+                        Image(systemName: "book.closed")
+                    }
                 }
             }
         }
@@ -69,7 +80,16 @@ struct RecipeDetailView: View {
             Text("This recipe will be visible to anyone with the link. You can make it private again at any time.")
         }
         .sheet(isPresented: $showFollowerPicker) {
-            if let vm = viewModel { FollowerPickerSheet(viewModel: vm, isPresented: $showFollowerPicker) }
+            if let vm = viewModel {
+                FollowerPickerSheet(viewModel: vm, isPresented: $showFollowerPicker) { uid, name in
+                    // Gate on Public — sharing a private recipe prompts to make it public first
+                    if vm.isPublic {
+                        vm.shareToFollower(uid: uid, name: name)
+                    } else {
+                        pendingShareRecipient = (uid, name)
+                    }
+                }
+            }
         }
         .alert("Sent!", isPresented: $showSentConfirmation) {
             Button("OK", role: .cancel) { viewModel?.shareSentToName = nil }
@@ -77,12 +97,26 @@ struct RecipeDetailView: View {
             if let name = viewModel?.shareSentToName { Text("Recipe sent to \(name).") }
         }
         .onChange(of: viewModel?.shareSentToName) { _, newVal in if newVal != nil { showSentConfirmation = true } }
-        .alert("Fork Recipe?", isPresented: $showForkAlert) {
-            Button("Fork") { isForkMode = true; navigateToEditor = true }
+        .alert(
+            "Share with \(pendingShareRecipient?.name ?? "")?",
+            isPresented: Binding(get: { pendingShareRecipient != nil },
+                                 set: { if !$0 { pendingShareRecipient = nil } })
+        ) {
+            Button("Share") {
+                if let r = pendingShareRecipient { viewModel?.makePublicAndShareToFollower(uid: r.uid, name: r.name) }
+                pendingShareRecipient = nil
+            }
+            Button("Cancel", role: .cancel) { pendingShareRecipient = nil }
+        } message: {
+            Text("Sharing makes this recipe public so they can view it. You can make it private again later.")
+        }
+        .confirmationDialog("Remove this recipe?", isPresented: $showRemoveConfirm, titleVisibility: .visible) {
+            Button("Remove", role: .destructive) { viewModel?.removeReceivedRecipe() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will create a personal copy of the recipe that you can edit.")
+            Text("It will be removed from your recipes. The original author keeps their copy.")
         }
+        .onChange(of: viewModel?.removed) { _, isRemoved in if isRemoved == true { dismiss() } }
         .onAppear {
             if viewModel == nil {
                 viewModel = RecipeDetailViewModel(
@@ -734,6 +768,7 @@ private struct ShareOptionsSheet: View {
 private struct FollowerPickerSheet: View {
     @Bindable var viewModel: RecipeDetailViewModel
     @Binding var isPresented: Bool
+    let onSend: (_ uid: String, _ name: String) -> Void
 
     var body: some View {
         NavigationStack {
@@ -758,7 +793,7 @@ private struct FollowerPickerSheet: View {
                             Text(person.displayName).font(.body)
                             Spacer()
                             Button("Send") {
-                                viewModel.shareToFollower(uid: person.uid, name: person.displayName)
+                                onSend(person.uid, person.displayName)
                                 isPresented = false
                             }
                             .font(.subheadline).buttonStyle(.borderedProminent)

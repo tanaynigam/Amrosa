@@ -6,6 +6,7 @@ final class RecipeSyncService {
     private let db = Firestore.firestore()
     private let repository: RecipeRepository
     private let authRepository: AuthRepository
+    private let sharedRecipeService: SharedRecipeService
 
     private let lastSyncKey = "amrosa_last_sync"
     var lastSyncDate: Date? {
@@ -18,34 +19,22 @@ final class RecipeSyncService {
         }
     }
 
-    init(repository: RecipeRepository, authRepository: AuthRepository) {
+    init(repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService) {
         self.repository = repository
         self.authRepository = authRepository
+        self.sharedRecipeService = sharedRecipeService
     }
 
-    // MARK: - Sync (pull both seeded + personal)
+    // MARK: - Sync (Recipe Ownership Model v2)
 
+    /// v2: the seeded/"official" `recipes` collection is retired. Sync pulls the user's
+    /// own personal recipes (Tab 1) and refreshes received references (Tab 2).
     func sync() async {
-        await pullSeededRecipes()
         if let uid = authRepository.uid {
             await pullPersonalRecipes(uid: uid)
         }
+        await syncReceivedRecipes()
         lastSyncDate = Date()
-    }
-
-    // MARK: - Pull seeded/shared recipes (Firestore → local)
-
-    func pullSeededRecipes() async {
-        var query = db.collection("recipes").limit(to: 100)
-        if let last = lastSyncDate {
-            query = query.whereField("updatedAt", isGreaterThan: Timestamp(date: last))
-        }
-        guard let snapshot = try? await query.getDocuments() else { return }
-        for doc in snapshot.documents {
-            var data = doc.data()
-            data["id"] = doc.documentID
-            try? repository.upsertFromFirestore(data: data)
-        }
     }
 
     // MARK: - Pull personal recipes (Firestore → local)
@@ -60,10 +49,57 @@ final class RecipeSyncService {
         }
     }
 
+    // MARK: - Delete personal recipe (local delete must also remove the cloud copy)
+
+    /// Delete a personal recipe from `personal_recipes/{uid}/recipes/{recipeId}`.
+    /// Must be called whenever an owned recipe is deleted locally, otherwise the next
+    /// pull would resurrect it.
+    func deletePersonalRecipe(_ recipeId: String) async {
+        guard let uid = authRepository.uid else { return }
+        try? await db.collection("personal_recipes").document(uid)
+            .collection("recipes").document(recipeId).delete()
+    }
+
+    // MARK: - Received recipes (Tab 2 — references to other users' recipes)
+
+    /// Refresh the Tab 2 received-recipe cache from the canonical public mirrors.
+    /// For each reference in `received_recipes/{uid}/items`:
+    ///   - read `shared_recipes/{recipeId}` → present: re-cache (propagate edits);
+    ///     absent: author went Private/deleted → drop reference + local copy.
+    /// Also prunes locally-cached received recipes that no longer have a reference.
+    func syncReceivedRecipes() async {
+        guard let uid = authRepository.uid else { return }
+        guard let refs = try? await db.collection("received_recipes").document(uid)
+            .collection("items").getDocuments() else { return }
+
+        var liveIds = Set<String>()
+        for refDoc in refs.documents {
+            let recipeId = refDoc.data()["recipeId"] as? String ?? refDoc.documentID
+            if let mirror = await sharedRecipeService.getSharedRecipeDetail(recipeId: recipeId) {
+                let label = mirror.authorDisplayName
+                try? repository.cacheReceivedRecipe(mirror, isImported: mirror.isImported, authorDisplayName: label)
+                liveIds.insert(recipeId)
+            } else {
+                // Author unpublished (went Private) or deleted → remove ref + local copy
+                try? await refDoc.reference.delete()
+                try? repository.removeReceivedRecipe(id: recipeId)
+            }
+        }
+
+        // Prune locally-cached received recipes that no longer have a reference
+        if let localIds = try? repository.fetchReceivedRecipeIds() {
+            for localId in localIds where !liveIds.contains(localId) {
+                try? repository.removeReceivedRecipe(id: localId)
+            }
+        }
+    }
+
     // MARK: - Push one personal recipe (local → Firestore)
 
     func pushPersonalRecipe(_ recipe: RecipeModel) async {
         guard let uid = authRepository.uid else { return }
+        // Received recipes (Tab 2) are references to another user's recipe — never push them as ours.
+        if recipe.isReceived { return }
 
         // Use Int64 milliseconds — not Firestore Timestamp — so Android can read as Long
         var data: [String: Any] = [

@@ -139,11 +139,30 @@ final class RecipeDetailViewModel {
 
     // MARK: - Ownership
 
+    /// True when this is a received recipe (Tab 2) — read-only, "Remove" instead of edit/delete/share.
+    var isReceived: Bool { recipe.isReceived }
+
+    /// Owner = authored by me AND not a received reference (Recipe Ownership Model v2).
     var isOwner: Bool {
         guard let uid = authRepository.uid else { return false }
-        // Pre-auth / seeded recipes have no authorId — treat as owned by the signed-in user
+        if recipe.isReceived { return false }
+        // Pre-auth recipes have no authorId — treat as owned by the signed-in user
         guard let authorId = recipe.authorId else { return true }
         return authorId == uid
+    }
+
+    /// Set true after a received recipe is removed → view navigates back.
+    var removed: Bool = false
+
+    /// Author label per v2 rule: "me" / "Imported by me" / "B" / "Imported by B".
+    var authorLabel: String {
+        let name: String
+        if recipe.authorId == authRepository.uid {
+            name = "me"
+        } else {
+            name = recipe.authorDisplayName ?? "Unknown"
+        }
+        return recipe.isImported ? "Imported by \(name)" : name
     }
 
     // MARK: - Sections / ingredients
@@ -269,13 +288,37 @@ final class RecipeDetailViewModel {
         }
     }
 
-    /// Share this recipe directly to a follower.
+    /// Share this (already-public) recipe directly to a co-chef.
     func shareToFollower(uid: String, name: String) {
+        Task { await shareToFollowerInternal(uid: uid, name: name) }
+    }
+
+    /// Make the recipe Public (publishes the canonical mirror), then share it.
+    /// Used when the user confirms the "make public to share" prompt for a private recipe.
+    func makePublicAndShareToFollower(uid: String, name: String) {
         Task {
-            let success = await socialRepository.shareRecipeTo(recipientUid: uid, recipientName: name, recipe: recipe)
-            if success {
-                shareSentToName = name
-            }
+            _ = await sharedRecipeService.publish(recipe)
+            try? repository.updateVisibility(recipeId: recipe.id, visibility: "public")
+            recipe.visibility = "public"
+            startCommentListener()
+            await shareToFollowerInternal(uid: uid, name: name)
+        }
+    }
+
+    private func shareToFollowerInternal(uid: String, name: String) async {
+        let success = await socialRepository.shareRecipeTo(recipientUid: uid, recipientName: name, recipe: recipe)
+        if success { shareSentToName = name }
+    }
+
+    // MARK: - Received recipes (Tab 2)
+
+    /// Remove a received recipe: deletes the cloud reference + local cache.
+    /// The author's canonical instance is untouched.
+    func removeReceivedRecipe() {
+        Task {
+            await socialRepository.removeReceivedReference(recipeId: recipe.id)
+            try? repository.removeReceivedRecipe(id: recipe.id)
+            removed = true
         }
     }
 

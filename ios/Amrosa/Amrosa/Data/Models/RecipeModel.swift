@@ -18,6 +18,8 @@ final class RecipeModel {
     var tagsJson: String
     var isCustomized: Bool
     var isImported: Bool
+    /// true = saved from another user's share → Tab 2, read-only reference (Recipe Ownership Model v2)
+    var isReceived: Bool = false
     var needsReview: Bool
     var version: Int
     var changeLogJson: String
@@ -57,6 +59,7 @@ final class RecipeModel {
         tags: [String] = [],
         isCustomized: Bool = false,
         isImported: Bool = false,
+        isReceived: Bool = false,
         needsReview: Bool = false,
         version: Int = 1,
         changeLog: [RecipeChange] = [],
@@ -82,6 +85,7 @@ final class RecipeModel {
         self.tagsJson = Self.encode(tags)
         self.isCustomized = isCustomized
         self.isImported = isImported
+        self.isReceived = isReceived
         self.needsReview = needsReview
         self.version = version
         self.changeLogJson = Self.encode(changeLog)
