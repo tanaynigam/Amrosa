@@ -82,7 +82,7 @@ private struct MainAppView: View {
             .tag(0)
 
             NavigationStack {
-                SharedInboxView()
+                SharedInboxView(openShareId: $pushShareId)
             }
             .tabItem { Label("Shared", systemImage: "tray") }
             .tag(1)
@@ -99,16 +99,10 @@ private struct MainAppView: View {
             .tabItem { Label("Account", systemImage: "person") }
             .tag(3)
         }
-        // Deep link → Shared tab
+        // Deep link (HTTPS / custom scheme) → Shared tab
         .onChange(of: deepLinkRecipeId) { _, id in if id != nil { selectedTab = 1 } }
-        // Push: recipe shared → Shared tab (SharedInboxView handles the shareId)
-        .onChange(of: pushShareId) { _, id in
-            if id != nil {
-                deepLinkRecipeId = id
-                pushShareId = nil
-                selectedTab = 1
-            }
-        }
+        // Push: recipe shared → Shared tab; SharedInboxView consumes pushShareId → opens review
+        .onChange(of: pushShareId) { _, id in if id != nil { selectedTab = 1 } }
         // Push: follow request/accepted → Account tab
         .onChange(of: pushGoToAccount) { _, go in
             if go { selectedTab = 3; pushGoToAccount = false }

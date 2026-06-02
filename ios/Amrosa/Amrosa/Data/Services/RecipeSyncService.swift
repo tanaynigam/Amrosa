@@ -75,9 +75,15 @@ final class RecipeSyncService {
         var liveIds = Set<String>()
         for refDoc in refs.documents {
             let recipeId = refDoc.data()["recipeId"] as? String ?? refDoc.documentID
+            let authorUid = refDoc.data()["authorUid"] as? String
+            let referenceName = refDoc.data()["authorName"] as? String
             if let mirror = await sharedRecipeService.getSharedRecipeDetail(recipeId: recipeId) {
-                let label = mirror.authorDisplayName
-                try? repository.cacheReceivedRecipe(mirror, isImported: mirror.isImported, authorDisplayName: label)
+                // Prefer the author's live profile name so legacy/iOS recipes that stored
+                // the literal "Imported" resolve to the real name ("Imported by Imported" fix).
+                let realName = await resolveAuthorName(
+                    authorUid: authorUid, referenceName: referenceName, mirrorName: mirror.authorDisplayName
+                )
+                try? repository.cacheReceivedRecipe(mirror, isImported: mirror.isImported, authorDisplayName: realName)
                 liveIds.insert(recipeId)
             } else {
                 // Author unpublished (went Private) or deleted → remove ref + local copy
@@ -92,6 +98,23 @@ final class RecipeSyncService {
                 try? repository.removeReceivedRecipe(id: localId)
             }
         }
+    }
+
+    /// Best real author name for a received recipe. The canonical mirror may store the
+    /// literal "Imported" (legacy/iOS) — in that case look up the author's live profile.
+    /// Falls back to the saved reference name, then the mirror name.
+    private func resolveAuthorName(authorUid: String?, referenceName: String?, mirrorName: String?) async -> String? {
+        func ok(_ s: String?) -> Bool {
+            guard let s = s, !s.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+            return s.lowercased() != "imported"
+        }
+        if ok(referenceName) { return referenceName }
+        if let authorUid = authorUid,
+           let profile = try? await db.collection("users").document(authorUid).getDocument(),
+           let name = profile.data()?["displayName"] as? String, ok(name) {
+            return name
+        }
+        return ok(mirrorName) ? mirrorName : (referenceName ?? mirrorName)
     }
 
     // MARK: - Push one personal recipe (local → Firestore)
