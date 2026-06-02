@@ -172,7 +172,18 @@ label = if (isImported) "Imported by $name" else name
 
 ### Implementation status
 
-🚧 **In progress** — being built in 5 steps: (1) schema + migration + remove official concept; (2) sync rework; (3) share-requires-public path; (4) Tab 2 reference rebuild; (5) Tab 1 + detail read-only rules. Sections F2/F7/F8/F9 below describe the *previous* copy-based behaviour and are being migrated to this model.
+✅ **Implemented & verified end-to-end (iOS ↔ Android)** across 5 steps:
+1. Schema `isReceived` + Room migration (9→10); removed official/seeded concept, fork dialog, `authorId==null` owner case.
+2. Sync rework: dropped seeded `recipes` pull; received refs excluded from push; `syncReceivedRecipes()` refreshes Tab 2 from `shared_recipes` mirrors (prunes when the author unpublishes/deletes). Delete also removes the cloud copy + unpublishes if public.
+3. Share requires Public (confirm prompt); share doc carries `recipeId` + `authorUid`; re-publish on edit.
+4. Tab 2 = Room-backed references; pending "In review" pointers on top (dismissible ✕); Save consumes the pointer, caches `isReceived=true` with original author.
+5. Tab 1 drops the "Shared" chip; `RecipeDetailScreen` is read-only for received recipes (no edit/delete/share — "Remove from my recipes" instead); author labels "me / Imported by me / B / Imported by B".
+
+**Author name resolution:** the real author name is resolved from `users/{authorUid}.displayName` during the received refresh (and the sender's name at save), so legacy/iOS recipes that stored the literal "Imported" still display "Imported by {real name}".
+
+**Firestore rule:** `shared_to/{uid}/recipes` allows the recipient to delete their own pointers (consume-on-save + dismiss).
+
+**Notification deep links:** tapping a push routes to the relevant screen — `recipe_shared` → `received/{shareId}` review; `follow_request`/`follow_accepted` → Account tab. `MainActivity` reads the FCM `type`/`shareId` extras (foreground via PendingIntent, background via launch intent) and hands a route to the nav graph through `AmrosaApplication.pendingDeepLink`.
 
 ---
 
@@ -1053,12 +1064,13 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **Delete recipe** | Red "Delete Recipe" button at bottom of editor; confirmation dialog; calls `repository.deleteFullRecipe(recipeId)` then navigates back |
 | **URL import reliability** | `extractJsonLdRecipe()` extracts `schema.org/Recipe` JSON-LD from raw HTML (before cleanHtml strips scripts) — major recipe sites include this for SEO; realistic browser headers; 402/403 → actionable error message suggesting freeform entry |
 | **Imperial unit fix** | Gemini only populates metric fields; `computeImperialFromMetric()` in Cloud Function computes imperial from metric with exact math: g/kg → oz (< 453.6g) or lb; ml/L → fl oz (1 fl oz = 29.574 ml) |
+| **Recipe Ownership Model v2** | ✅ End-to-end (iOS↔Android). No official recipes; Tab 1 = mine (editable), Tab 2 = received references (read-only, "Remove"); reference-based shares via `shared_recipes` mirror gated by Public; auto-removal on unpublish/delete; author labels "me / Imported by X". See "Recipe Ownership Model (v2)". |
+| **Notification deep links** | Tapping a push routes to the target screen: `recipe_shared` → `received/{shareId}`; follow notifications → Account tab. `MainActivity` reads FCM extras → `AmrosaApplication.pendingDeepLink` → nav graph navigates. |
 
 ### Planned — In Priority Order
 
 | # | Feature | Description |
 |---|---|---|
-| **🚧 NOW** | Recipe Ownership Model v2 | See "Recipe Ownership Model (v2)" above. 5 steps: (1) schema `isReceived` + migration, kill official/seeded + fork dialog + `authorId==null` owner case; (2) sync: drop seeded `recipes` pull, exclude received from push, add received-reference refresh from `shared_recipes`; (3) share requires Public, deliver pointer not snapshot; (4) Tab 2 = Room-backed references + "In review" pending on top, Save consumes pointer, "Remove" action; (5) Tab 1 drop "Shared" chip, `RecipeDetailScreen` hides edit/delete/share + shows "Remove" when `isReceived`; author label rule "me / Imported by X". |
 | — | Discover / Recommendations tab | Public/discoverable recipes + time-of-day recommendations; replaces placeholder; eventually becomes default tab |
 | — | Public profile view | View another user's public recipes at `"profile/{uid}"` |
 | — | Public profile view | View another user's public recipes at `"profile/{uid}"` |

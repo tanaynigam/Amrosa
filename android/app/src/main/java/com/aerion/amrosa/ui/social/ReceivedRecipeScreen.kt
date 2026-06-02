@@ -107,12 +107,17 @@ class ReceivedRecipeViewModel(
         _uiState.update { it.copy(isSaving = true) }
         viewModelScope.launch {
             try {
+                // Real author name: the mirror's name unless it's blank/"Imported"
+                // (legacy/iOS), in which case the sender IS the author → use fromDisplayName.
+                val mirrorName = recipe.authorDisplayName
+                val realAuthorName = if (mirrorName.isNullOrBlank() || mirrorName.equals("Imported", true))
+                    p.fromDisplayName else mirrorName
                 socialRepository.saveReceivedReference(
                     recipeId = recipe.id,
                     authorUid = p.authorUid,
-                    authorName = recipe.authorDisplayName ?: p.authorName
+                    authorName = realAuthorName
                 )
-                repository.cacheReceivedRecipe(recipe)
+                repository.cacheReceivedRecipe(recipe.copy(authorDisplayName = realAuthorName))
                 socialRepository.deleteReceivedPointer(shareId)
                 _uiState.update { it.copy(isSaving = false, savedRecipeId = recipe.id) }
             } catch (e: Exception) {

@@ -237,6 +237,7 @@ class RecipeSyncService(
 
             for (refDoc in refsSnapshot.documents) {
                 val recipeId = refDoc.getString("recipeId") ?: refDoc.id
+                val authorUid = refDoc.getString("authorUid")
                 try {
                     val mirror = firestore.collection(COLLECTION_SHARED)
                         .document(recipeId)
@@ -245,8 +246,12 @@ class RecipeSyncService(
                     val data = mirror.data
                     if (mirror.exists() && data != null) {
                         val parsed = parseRecipe(recipeId, data, markReceived = true)
+                        // Author display name: prefer the author's live profile name, so
+                        // "Imported by Imported" (legacy/iOS) resolves to the real name.
+                        val realName = resolveAuthorName(authorUid, refDoc.getString("authorName"), parsed.first.authorDisplayName)
+                        val fixed = parsed.first.copy(authorDisplayName = realName)
                         repository.insertFullRecipe(
-                            parsed.first, parsed.second, parsed.third, parsed.fourth, parsed.fifth
+                            fixed, parsed.second, parsed.third, parsed.fourth, parsed.fifth
                         )
                         liveIds.add(recipeId)
                     } else {
@@ -270,6 +275,30 @@ class RecipeSyncService(
             Log.e(TAG, "syncReceivedRecipes failed", e)
             0
         }
+    }
+
+    /**
+     * Best real author name for a received recipe. The canonical mirror may store the
+     * literal "Imported" (legacy/iOS) — in that case look up the author's live profile.
+     * Falls back to the saved reference name, then the mirror name.
+     */
+    private suspend fun resolveAuthorName(
+        authorUid: String?,
+        referenceName: String?,
+        mirrorName: String?
+    ): String? {
+        fun ok(s: String?) = !s.isNullOrBlank() && !s.equals("Imported", ignoreCase = true)
+        if (ok(referenceName)) return referenceName
+        if (authorUid != null) {
+            try {
+                val profile = firestore.collection("users").document(authorUid).get().await()
+                val name = profile.getString("displayName")
+                if (ok(name)) return name
+            } catch (e: Exception) {
+                Log.w(TAG, "resolveAuthorName: profile lookup failed for $authorUid", e)
+            }
+        }
+        return if (ok(mirrorName)) mirrorName else referenceName ?: mirrorName
     }
 
     // ─── Firestore serialisation ──────────────────────────────────────────────

@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -77,6 +78,16 @@ private fun MainAppScaffold() {
 
     val tabRoutes = remember { bottomTabs.map { it.route }.toSet() }
     val showBottomBar = currentDestination?.route in tabRoutes
+
+    // Notification deep link: navigate to the requested route when one arrives.
+    val app = LocalContext.current.applicationContext as AmrosaApplication
+    val pendingDeepLink by app.pendingDeepLink.collectAsState()
+    LaunchedEffect(pendingDeepLink) {
+        pendingDeepLink?.let { route ->
+            navController.navigate(route)
+            app.pendingDeepLink.value = null
+        }
+    }
 
     Scaffold(
         bottomBar = {

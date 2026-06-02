@@ -52,17 +52,19 @@ class AmrosaMessagingService : FirebaseMessagingService() {
         super.onMessageReceived(message)
         val title = message.notification?.title ?: message.data["title"] ?: return
         val body  = message.notification?.body  ?: message.data["body"]  ?: ""
-        showNotification(title, body)
+        showNotification(title, body, message.data["type"], message.data["shareId"])
     }
 
-    private fun showNotification(title: String, body: String) {
-        // Tapping the notification opens the app
+    private fun showNotification(title: String, body: String, type: String?, shareId: String?) {
+        // Tapping the notification opens the app and routes to the relevant screen
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            type?.let { putExtra("type", it) }
+            shareId?.let { putExtra("shareId", it) }
         }
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)

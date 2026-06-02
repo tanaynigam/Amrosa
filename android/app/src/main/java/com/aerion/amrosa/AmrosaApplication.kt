@@ -11,6 +11,7 @@ import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -19,6 +20,21 @@ class AmrosaApplication : Application() {
     lateinit var container: AppContainer
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Navigation target requested by tapping a push notification.
+     * Set by MainActivity from the launch/new intent; consumed by the nav graph.
+     */
+    val pendingDeepLink = MutableStateFlow<String?>(null)
+
+    companion object {
+        /** Maps a notification's (type, shareId) to an in-app route, or null if none. */
+        fun routeFor(type: String?, shareId: String?): String? = when (type) {
+            "recipe_shared" -> shareId?.let { "received/$it" }
+            "follow_request", "follow_accepted" -> "account_tab"
+            else -> null
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
