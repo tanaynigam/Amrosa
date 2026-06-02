@@ -159,31 +159,13 @@ private struct RecipeEditorContent: View {
                 }
             }
 
-            // ── Error / Save ────────────────────────────────────────────
+            // ── Error ────────────────────────────────────────────────────
             if let error = viewModel.errorMessage {
                 Section {
                     Text(error)
                         .foregroundStyle(.red)
                         .font(.caption)
                 }
-            }
-
-            Section {
-                Button {
-                    Task {
-                        await viewModel.save()
-                        if viewModel.savedRecipeId != nil { dismiss() }
-                    }
-                } label: {
-                    if viewModel.isSaving {
-                        ProgressView()
-                    } else {
-                        Text("Save Recipe")
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .disabled(viewModel.isSaving || viewModel.title.trimmed.isEmpty)
             }
 
             // Delete — only shown when editing an existing recipe
@@ -208,7 +190,18 @@ private struct RecipeEditorContent: View {
                 Button("Cancel") { dismiss() }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                EditButton()
+                if viewModel.isSaving {
+                    ProgressView()
+                } else {
+                    Button("Save") {
+                        Task {
+                            await viewModel.save()
+                            if viewModel.savedRecipeId != nil { dismiss() }
+                        }
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(viewModel.title.trimmed.isEmpty)
+                }
             }
         }
     }
