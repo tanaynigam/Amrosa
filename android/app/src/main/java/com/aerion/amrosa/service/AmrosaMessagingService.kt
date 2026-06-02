@@ -32,10 +32,11 @@ class AmrosaMessagingService : FirebaseMessagingService() {
         if (user == null || user.isAnonymous) return
         serviceScope.launch {
             try {
+                // Private subdoc — owner-only readable; CF reads via Admin SDK.
                 FirebaseFirestore.getInstance()
-                    .collection("users")
-                    .document(user.uid)
-                    .update("fcmToken", token)
+                    .collection("users").document(user.uid)
+                    .collection("private").document("push")
+                    .set(mapOf("fcmToken" to token, "updatedAt" to System.currentTimeMillis()))
                     .await()
                 Log.d(TAG, "FCM token updated for uid=${user.uid}")
             } catch (e: Exception) {

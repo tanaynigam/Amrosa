@@ -237,8 +237,15 @@ exports.sendPushNotification = onDocumentCreated(
     const data = event.data?.data();
     if (!data) return;
 
-    const userSnap = await admin.firestore().collection('users').doc(uid).get();
-    const fcmToken = userSnap.data()?.fcmToken;
+    // FCM token lives in a private subdoc (owner-only readable); Admin SDK bypasses rules.
+    // Fall back to the legacy users/{uid}.fcmToken field for tokens stored before the move.
+    const pushSnap = await admin.firestore()
+      .collection('users').doc(uid).collection('private').doc('push').get();
+    let fcmToken = pushSnap.data()?.fcmToken;
+    if (!fcmToken) {
+      const userSnap = await admin.firestore().collection('users').doc(uid).get();
+      fcmToken = userSnap.data()?.fcmToken;
+    }
     if (!fcmToken) { console.log('No FCM token for uid=' + uid); return; }
 
     const { type, fromDisplayName, recipeName } = data;

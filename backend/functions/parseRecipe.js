@@ -458,23 +458,71 @@ function computeImperialFromMetric(recipe) {
 
 // ─── Standalone ingredient conversion (Update conversions button) ──────────────
 
+// Plausible food density range (g per ml). Outside this, a volume→weight value is
+// physically impossible → we reject it and fall back to a volume (fl oz) conversion.
+const MIN_DENSITY = 0.1;
+const MAX_DENSITY = 2.5;
+
+// Deterministic density table for common ingredients (g/ml). Substring-matched on name.
+// Used to override Gemini's weight for the common case so it's not AI-dependent.
+const DENSITY_TABLE = [
+  { keys: ["all-purpose flour", "plain flour", "maida", "flour", "atta", "besan"], d: 0.55 },
+  { keys: ["brown sugar"], d: 0.72 },
+  { keys: ["powdered sugar", "icing sugar", "confectioner"], d: 0.56 },
+  { keys: ["sugar", "caster"], d: 0.85 },
+  { keys: ["butter", "ghee", "margarine"], d: 0.96 },
+  { keys: ["cocoa", "cacao"], d: 0.41 },
+  { keys: ["rolled oats", "oats"], d: 0.41 },
+  { keys: ["rice", "basmati"], d: 0.85 },
+  { keys: ["salt"], d: 1.2 },
+  { keys: ["honey"], d: 1.42 },
+  { keys: ["cornstarch", "corn starch", "cornflour"], d: 0.54 },
+  { keys: ["breadcrumbs", "bread crumbs"], d: 0.36 },
+];
+
+function densityFor(name) {
+  const n = (name || "").toLowerCase();
+  for (const row of DENSITY_TABLE) {
+    if (row.keys.some((k) => n.includes(k))) return row.d;
+  }
+  return null;
+}
+
+/** Round + format a metric amount (g or ml), choosing kg/L for large values. */
+function metricFields(value, baseUnit) {
+  // baseUnit: "g" or "ml"
+  if (value == null) return { v: null, u: null, d: null };
+  if (baseUnit === "g" && value >= 1000) {
+    const kg = impRound(value / 1000);
+    return { v: kg, u: "kg", d: `${kg} kg` };
+  }
+  if (baseUnit === "ml" && value >= 1000) {
+    const l = impRound(value / 1000);
+    return { v: l, u: "L", d: `${l} L` };
+  }
+  const r = value >= 10 ? Math.round(value) : impRound(value);
+  return { v: r, u: baseUnit, d: `${r} ${baseUnit}` };
+}
+
 const CONVERT_SYSTEM_INSTRUCTION =
   "You are a unit-conversion assistant for the Amrosa recipe app. " +
-  "Given a list of recipe ingredients with their original quantities, produce METRIC conversions. " +
-  "For DRY or SOLID ingredients (flour, sugar, rice, butter, paneer, spices measured by volume, etc.), " +
-  "output WEIGHT in g or kg using typical density (e.g. 1 cup all-purpose flour ≈ 120 g, " +
-  "1 cup granulated sugar ≈ 200 g, 1 cup butter ≈ 227 g, 1 tbsp ≈ the weight of that ingredient). " +
-  "For LIQUID ingredients (water, milk, oil, stock, cream, etc.), output VOLUME in ml or L " +
-  "(1 cup = 240 ml, 1 tbsp = 15 ml, 1 tsp = 5 ml). " +
-  "If a quantity is already metric, keep it. " +
-  "Non-convertible quantities (whole counts like '2 eggs' / '3 cloves', 'to taste', 'a pinch', 'for garnish') → all null. " +
-  "Return ONLY a JSON array (no markdown), one object per input id: " +
-  '[{"id":"...","quantityValueMetric":number|null,"quantityUnitMetric":"g"|"kg"|"ml"|"L"|null,"quantityDisplayMetric":"120 g"|null}]';
+  "For each ingredient, return its metric VOLUME in ml (`ml`) when it was measured by volume " +
+  "(cups, tbsp, tsp, fl oz, ml, L) — otherwise null — AND its metric WEIGHT in grams (`grams`) when " +
+  "it is a dry/solid ingredient OR was measured by weight (oz, lb, g, kg) — otherwise null. " +
+  "For LIQUID ingredients (water, milk, oil, stock, broth, juice, cream, vinegar), give `ml` and leave `grams` null. " +
+  "For dry ingredients measured by volume, give BOTH `ml` (the volume) and `grams` (weight via realistic density). " +
+  "Conversions: 1 cup = 240 ml, 1 tbsp = 15 ml, 1 tsp = 5 ml, 1 fl oz = 30 ml; 1 oz = 28.35 g, 1 lb = 453.6 g. " +
+  "Non-convertible (whole counts like '2 eggs'/'3 cloves', 'to taste', 'a pinch', 'for garnish') → both null. " +
+  'Return ONLY a JSON array (no markdown), one object per input id: [{"id":"...","ml":number|null,"grams":number|null}]';
 
 /**
- * Convert a list of ingredients to metric (via Gemini, using density for dry items),
- * then compute imperial deterministically. Returns one object per ingredient id with
- * all six conversion fields. Used by the editor's "Update conversions" button.
+ * Convert ingredients to metric + imperial with validation.
+ * Gemini supplies ml and/or grams; the server then:
+ *   - overrides grams with a curated density when the ingredient is known (deterministic)
+ *   - validates the implied density (grams / ml) is physically plausible; if not, drops
+ *     the weight and falls back to the volume (ml → fl oz)
+ *   - prefers weight (g → oz/lb) when valid, else volume (ml → fl oz)
+ * Imperial is always computed deterministically from the chosen metric.
  */
 async function convertIngredientsFromList(ingredients, apiKey) {
   if (!Array.isArray(ingredients) || ingredients.length === 0) {
@@ -497,7 +545,7 @@ async function convertIngredientsFromList(ingredients, apiKey) {
     name: i.name,
     quantity: i.quantityDisplay || i.quantity || "",
   }));
-  const prompt = `Convert these ingredients to metric:\n${JSON.stringify(compact, null, 2)}`;
+  const prompt = `Convert these ingredients:\n${JSON.stringify(compact, null, 2)}`;
 
   const result = await model.generateContent(prompt);
   let jsonText = result.response.text().trim();
@@ -513,17 +561,44 @@ async function convertIngredientsFromList(ingredients, apiKey) {
   }
   if (!Array.isArray(parsed)) parsed = parsed.ingredients || [];
 
-  const out = parsed.map((p) => ({
-    id: p.id,
-    quantityValueMetric: p.quantityValueMetric ?? null,
-    quantityUnitMetric: p.quantityUnitMetric ?? null,
-    quantityDisplayMetric: p.quantityDisplayMetric ?? null,
-    quantityValueImperial: null,
-    quantityUnitImperial: null,
-    quantityDisplayImperial: null,
-  }));
+  // Map results by id so we can match back to the requested ingredients.
+  const byId = new Map(parsed.map((p) => [p.id, p]));
 
-  // Imperial is always derived from metric with exact math.
+  const out = ingredients.map((ing) => {
+    const p = byId.get(ing.id) || {};
+    let ml = typeof p.ml === "number" && p.ml > 0 ? p.ml : null;
+    let grams = typeof p.grams === "number" && p.grams > 0 ? p.grams : null;
+
+    // Deterministic density override for known dry ingredients (needs the volume).
+    if (ml != null) {
+      const tableD = densityFor(ing.name);
+      if (tableD != null) grams = ml * tableD;
+    }
+
+    // Validate volume→weight density; reject implausible weights.
+    if (grams != null && ml != null) {
+      const density = grams / ml;
+      if (density < MIN_DENSITY || density > MAX_DENSITY) grams = null; // fall back to volume
+    }
+
+    // Choose metric: prefer weight when we have a trustworthy one, else volume.
+    let metric;
+    if (grams != null) metric = metricFields(grams, "g");
+    else if (ml != null) metric = metricFields(ml, "ml");
+    else metric = { v: null, u: null, d: null };
+
+    return {
+      id: ing.id,
+      quantityValueMetric: metric.v,
+      quantityUnitMetric: metric.u,
+      quantityDisplayMetric: metric.d,
+      quantityValueImperial: null,
+      quantityUnitImperial: null,
+      quantityDisplayImperial: null,
+    };
+  });
+
+  // Imperial is always derived from the chosen metric with exact math.
   computeImperialFromMetric({ ingredients: out });
   return out;
 }

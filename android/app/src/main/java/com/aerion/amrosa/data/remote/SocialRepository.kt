@@ -308,12 +308,14 @@ class SocialRepository(
     suspend fun updateFcmToken(token: String) {
         val uid = authRepository.uid ?: return
         try {
+            // Stored in a private subdoc so it isn't world-readable. The Cloud Function
+            // reads it via the Admin SDK (bypasses rules).
             firestore.collection(COL_USERS).document(uid)
-                .update("fcmToken", token)
+                .collection("private").document("push")
+                .set(mapOf("fcmToken" to token, "updatedAt" to System.currentTimeMillis()))
                 .await()
         } catch (e: Exception) {
-            // Firestore update fails if doc doesn't exist yet; upsertProfile will create it
-            Log.w(TAG, "updateFcmToken failed (profile may not exist yet): ${e.message}")
+            Log.w(TAG, "updateFcmToken failed: ${e.message}")
         }
     }
 
