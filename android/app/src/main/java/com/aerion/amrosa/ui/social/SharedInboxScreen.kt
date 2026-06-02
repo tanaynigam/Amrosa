@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
@@ -26,6 +27,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.data.remote.SocialRepository
 import com.aerion.amrosa.domain.model.ReceivedRecipeSummary
+import com.aerion.amrosa.ui.components.AmrosaTopBar
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,12 +39,18 @@ import java.util.*
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 data class SharedInboxUiState(
-    val items: List<ReceivedRecipeSummary> = emptyList(),
+    /** Pending shares not yet saved — shown at the top as "In review". */
+    val pending: List<ReceivedRecipeSummary> = emptyList(),
+    /** Saved received recipes (cached references) — normal cards. */
+    val saved: List<com.aerion.amrosa.domain.model.Recipe> = emptyList(),
     val isLoading: Boolean = true
-)
+) {
+    val isEmpty: Boolean get() = pending.isEmpty() && saved.isEmpty()
+}
 
 class SharedInboxViewModel(
-    private val socialRepository: SocialRepository
+    private val socialRepository: SocialRepository,
+    private val repository: com.aerion.amrosa.data.repository.RecipeRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SharedInboxUiState())
@@ -51,17 +59,30 @@ class SharedInboxViewModel(
     init {
         viewModelScope.launch {
             socialRepository.getReceivedRecipesSummaryFlow().collect { items ->
-                _uiState.update { it.copy(items = items, isLoading = false) }
+                _uiState.update { it.copy(pending = items, isLoading = false) }
+            }
+        }
+        viewModelScope.launch {
+            repository.getReceivedRecipes().collect { recipes ->
+                _uiState.update { it.copy(saved = recipes, isLoading = false) }
             }
         }
     }
 
+    /** Dismiss a pending share (delete the pointer) — clears stale/unwanted shares. */
+    fun dismissPending(shareId: String) {
+        viewModelScope.launch { socialRepository.deleteReceivedPointer(shareId) }
+    }
+
     companion object {
-        fun factory(socialRepository: SocialRepository): ViewModelProvider.Factory =
+        fun factory(
+            socialRepository: SocialRepository,
+            repository: com.aerion.amrosa.data.repository.RecipeRepository
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    SharedInboxViewModel(socialRepository) as T
+                    SharedInboxViewModel(socialRepository, repository) as T
             }
     }
 }
@@ -71,77 +92,129 @@ class SharedInboxViewModel(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SharedInboxScreen(
-    onItemClick: (shareId: String) -> Unit
+    onItemClick: (shareId: String) -> Unit,
+    onSavedClick: (recipeId: String) -> Unit
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
     val viewModel: SharedInboxViewModel = viewModel(
-        factory = SharedInboxViewModel.factory(app.container.socialRepository)
+        factory = SharedInboxViewModel.factory(app.container.socialRepository, app.container.repository)
     )
     val state by viewModel.uiState.collectAsState()
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Shared Recipes") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
-            )
-        }
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        if (state.isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-            return@Scaffold
-        }
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            AmrosaTopBar(title = "Shared Recipes")
 
-        if (state.items.isEmpty()) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(32.dp)
+            when {
+                state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+
+                state.isEmpty -> Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Default.Inbox,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "No recipes shared with you yet",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "When a co-chef sends you a recipe, it will appear here.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.padding(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Inbox,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "No recipes shared with you yet",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "When a co-chef sends you a recipe, it will appear here.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp, start = 16.dp, end = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Pending shares — "In review", tap to review & save
+                    items(state.pending, key = { "pending-${it.shareId}" }) { item ->
+                        SharedRecipeCard(
+                            item = item,
+                            inReview = true,
+                            onClick = { onItemClick(item.shareId) },
+                            onDismiss = { viewModel.dismissPending(item.shareId) }
+                        )
+                    }
+                    // Saved received recipes — open the normal (read-only) detail
+                    items(state.saved, key = { "saved-${it.id}" }) { recipe ->
+                        SavedReceivedCard(
+                            recipe = recipe,
+                            onClick = { onSavedClick(recipe.id) }
+                        )
+                    }
                 }
             }
-            return@Scaffold
         }
+    }
+}
 
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(vertical = 8.dp, horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(state.items, key = { it.shareId }) { item ->
-                SharedRecipeCard(
-                    item = item,
-                    onClick = { onItemClick(item.shareId) }
+// ─── Saved received recipe card (read-only) ──────────────────────────────────
+
+@Composable
+private fun SavedReceivedCard(
+    recipe: com.aerion.amrosa.domain.model.Recipe,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(recipe.title, style = MaterialTheme.typography.titleLarge,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(6.dp))
+            val timeLabel = buildString {
+                recipe.prepTimeMinutes?.let { append("Prep ${it}min") }
+                if (recipe.prepTimeMinutes != null && recipe.cookTimeMinutes != null) append("  ·  ")
+                recipe.cookTimeMinutes?.let { append("Cook ${it}min") }
+            }
+            if (timeLabel.isNotBlank()) {
+                Text(timeLabel, style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+            }
+            if (recipe.tags.isNotEmpty()) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(recipe.tags) { tag ->
+                        SuggestionChip(onClick = {},
+                            label = { Text(tag, style = MaterialTheme.typography.labelSmall) })
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+            // Original author (v2 label rule: "Imported by X" handled by isImported)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Icon(Icons.Default.Person, contentDescription = null,
+                    modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (recipe.isImported) "Imported by ${recipe.authorDisplayName ?: "Unknown"}"
+                    else (recipe.authorDisplayName ?: "Unknown"),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -153,7 +226,9 @@ fun SharedInboxScreen(
 @Composable
 private fun SharedRecipeCard(
     item: ReceivedRecipeSummary,
-    onClick: () -> Unit
+    inReview: Boolean = false,
+    onClick: () -> Unit,
+    onDismiss: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
@@ -165,6 +240,37 @@ private fun SharedRecipeCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
+            if (inReview) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer
+                    ) {
+                        Text(
+                            "In review — tap to save",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    if (onDismiss != null) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Dismiss",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(onClick = onDismiss)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
             Text(
                 item.title,
                 style = MaterialTheme.typography.titleLarge,

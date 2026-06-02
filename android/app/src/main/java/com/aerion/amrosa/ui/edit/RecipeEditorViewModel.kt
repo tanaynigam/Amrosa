@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.entity.*
 import com.aerion.amrosa.data.remote.RecipeSyncService
+import com.aerion.amrosa.data.remote.SharedRecipeService
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.domain.model.Ingredient
 import com.aerion.amrosa.domain.model.RecipeChange
@@ -47,7 +48,6 @@ data class EditorSection(
 
 data class EditorUiState(
     val isLoading: Boolean = true,
-    val showForkDialog: Boolean = false,
     val isSaving: Boolean = false,
     val saveComplete: Boolean = false,
     val isDeleting: Boolean = false,
@@ -79,6 +79,7 @@ data class EditorUiState(
 class RecipeEditorViewModel(
     private val repository: RecipeRepository,
     private val syncService: RecipeSyncService,
+    private val sharedRecipeService: SharedRecipeService,
     private val authRepository: AuthRepository,
     private val recipeId: String,
     private val gson: Gson
@@ -166,7 +167,6 @@ class RecipeEditorViewModel(
             _uiState.update {
                 it.copy(
                     isLoading = false,
-                    showForkDialog = !recipe.isCustomized,
                     title = recipe.title,
                     description = recipe.description ?: "",
                     isPersonalAuthor = !recipe.isImported,
@@ -183,14 +183,6 @@ class RecipeEditorViewModel(
             }
         }
     }
-
-    // ─── Fork dialog ──────────────────────────────────────────────────────────
-
-    /** User confirmed they want to fork the official recipe and edit it. */
-    fun onForkConfirmed() = _uiState.update { it.copy(showForkDialog = false) }
-
-    /** User declined to edit — signal the screen to navigate back. */
-    fun onForkDismissed() = _uiState.update { it.copy(showForkDialog = false, saveComplete = true) }
 
     // ─── Metadata updaters ────────────────────────────────────────────────────
 
@@ -403,6 +395,16 @@ class RecipeEditorViewModel(
                     }
                 }
 
+                // If the recipe is public, re-publish the canonical mirror so receivers
+                // (Tab 2) pick up the edit on their next sync. Fire-and-forget.
+                if (originalVisibility == "public") {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        repository.getRecipeWithDetails(recipeId)?.let { updated ->
+                            sharedRecipeService.publish(updated)
+                        }
+                    }
+                }
+
                 _uiState.update { it.copy(isSaving = false, saveComplete = true) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isSaving = false, error = "Save failed: ${e.message}") }
@@ -475,6 +477,12 @@ class RecipeEditorViewModel(
             _uiState.update { it.copy(isDeleting = true) }
             withContext(Dispatchers.IO) {
                 repository.deleteFullRecipe(recipeId)
+                // Remove the cloud copy too, otherwise the next pull resurrects it.
+                syncService.deletePersonalRecipe(recipeId)
+                // If it was public, take down the shared mirror so receivers lose access.
+                if (originalVisibility == "public") {
+                    sharedRecipeService.unpublish(recipeId)
+                }
             }
             _uiState.update { it.copy(isDeleting = false, deleteComplete = true) }
         }
@@ -484,13 +492,14 @@ class RecipeEditorViewModel(
         fun factory(
             repository: RecipeRepository,
             syncService: RecipeSyncService,
+            sharedRecipeService: SharedRecipeService,
             authRepository: AuthRepository,
             recipeId: String,
             gson: Gson
         ) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                RecipeEditorViewModel(repository, syncService, authRepository, recipeId, gson) as T
+                RecipeEditorViewModel(repository, syncService, sharedRecipeService, authRepository, recipeId, gson) as T
         }
     }
 }

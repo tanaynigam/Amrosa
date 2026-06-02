@@ -114,15 +114,15 @@ private fun MainAppScaffold() {
                     onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
                     onNeedsReviewClick = { recipeId -> navController.navigate("import?reviewId=$recipeId") },
                     onFabFreeformClick = { navController.navigate("freeform") },
-                    onFabImportClick = { navController.navigate("import") },
-                    onSharedRecipeClick = { shareId -> navController.navigate("received/$shareId") }
+                    onFabImportClick = { navController.navigate("import") }
                 )
             }
 
             // ── Tab: Shared with me ───────────────────────────────────────────
             composable(BottomTab.Shared.route) {
                 SharedInboxScreen(
-                    onItemClick = { shareId -> navController.navigate("received/$shareId") }
+                    onItemClick = { shareId -> navController.navigate("received/$shareId") },
+                    onSavedClick = { recipeId -> navController.navigate("recipe/$recipeId") }
                 )
             }
 
@@ -158,9 +158,12 @@ private fun MainAppScaffold() {
                 ReceivedRecipeScreen(
                     shareId = shareId,
                     onBack = { navController.popBackStack() },
-                    // After saving, go back to the Shared tab — the card stays there,
-                    // and the saved copy is now also in My Recipes
-                    onSaved = { navController.popBackStack() }
+                    // After saving, drop the review screen and open the saved copy's
+                    // normal recipe detail. The shared card remains in the Shared feed.
+                    onSaved = { newRecipeId ->
+                        navController.popBackStack()
+                        navController.navigate("recipe/$newRecipeId")
+                    }
                 )
             }
 

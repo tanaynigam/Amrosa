@@ -34,6 +34,7 @@ fun RecipeEditorScreen(
         factory = RecipeEditorViewModel.factory(
             app.container.repository,
             app.container.syncService,
+            app.container.sharedRecipeService,
             app.container.authRepository,
             recipeId,
             app.container.gson
@@ -83,13 +84,6 @@ fun RecipeEditorScreen(
         )
     }
 
-    // Fork confirmation dialog
-    if (state.showForkDialog) {
-        ForkConfirmationDialog(
-            onConfirm = vm::onForkConfirmed,
-            onDismiss = vm::onForkDismissed   // triggers saveComplete → navigates back
-        )
-    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -666,28 +660,3 @@ private fun StepRow(
     }
 }
 
-// ─── Fork Confirmation Dialog ─────────────────────────────────────────────────
-
-@Composable
-private fun ForkConfirmationDialog(
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.Edit, contentDescription = null) },
-        title = { Text("Edit Official Recipe?") },
-        text = {
-            Text(
-                "This recipe is synced from the cloud. Editing it creates a personal copy — " +
-                "your version won't be overwritten by future syncs. This can't be undone."
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text("Edit Anyway") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}

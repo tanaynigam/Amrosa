@@ -44,61 +44,24 @@ class RecipeSyncService(
         private const val COLLECTION_RECIPES = "recipes"
         private const val COLLECTION_PERSONAL = "personal_recipes"
         private const val SUBCOLLECTION_RECIPES = "recipes"
+        private const val COLLECTION_SHARED = "shared_recipes"
+        private const val COLLECTION_RECEIVED = "received_recipes"
+        private const val SUBCOLLECTION_ITEMS = "items"
     }
 
     // ─── Shared recipes (pull-only) ───────────────────────────────────────────
 
     /**
-     * Pull shared/seeded recipes updated since last sync. Upserts into Room.
-     * Returns number of recipes synced.
+     * No-op since Recipe Ownership Model v2: the seeded/"official" `recipes` collection
+     * is retired. Every recipe is owned by a real author and synced via
+     * [syncPersonalRecipes] (mine) or the received-reference refresh (Tab 2).
      */
-    suspend fun sync(): Int {
-        val lastSync = prefs.getLong(KEY_LAST_SYNC, 0L)
-        Log.d(TAG, "Syncing shared recipes updated after $lastSync")
+    @Deprecated("Official/seeded recipes removed in v2", ReplaceWith("syncPersonalRecipes()"))
+    suspend fun sync(): Int = 0
 
-        return try {
-            val snapshot = firestore.collection(COLLECTION_RECIPES)
-                .whereGreaterThan("updatedAt", lastSync)
-                .get()
-                .await()
-
-            if (snapshot.isEmpty) {
-                Log.d(TAG, "No new shared recipes to sync")
-                return 0
-            }
-
-            var count = 0
-            val total = snapshot.documents.size
-            for (doc in snapshot.documents) {
-                try {
-                    val recipe = parseRecipe(doc.id, doc.data ?: continue)
-                    repository.insertFullRecipe(
-                        recipe.first, recipe.second, recipe.third, recipe.fourth, recipe.fifth
-                    )
-                    count++
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to parse recipe ${doc.id}", e)
-                }
-            }
-
-            if (count == total) {
-                val now = System.currentTimeMillis()
-                prefs.edit().putLong(KEY_LAST_SYNC, now).apply()
-                Log.d(TAG, "Synced $count/$total shared recipes — timestamp advanced")
-            } else {
-                Log.w(TAG, "Synced $count/$total shared recipes — ${total - count} failed, timestamp NOT advanced")
-            }
-            count
-        } catch (e: Exception) {
-            Log.e(TAG, "Shared sync failed", e)
-            0
-        }
-    }
-
-    /** Force a full re-sync of shared recipes (clears timestamp). */
+    /** Force a full re-pull of the signed-in user's personal recipes. */
     suspend fun forceFullSync(): Int {
-        prefs.edit().putLong(KEY_LAST_SYNC, 0L).apply()
-        return sync()
+        return syncPersonalRecipes().first
     }
 
     // ─── Personal recipes (per-user, push + pull) ─────────────────────────────
@@ -119,6 +82,11 @@ class RecipeSyncService(
                 Log.w(TAG, "pushPersonalRecipe: recipe $recipeId not found in Room")
                 return false
             }
+            // Received recipes (Tab 2) are references to another user's recipe — never push them as ours.
+            if (recipe.isReceived) {
+                Log.d(TAG, "pushPersonalRecipe: skipped — $recipeId is a received recipe")
+                return false
+            }
             val doc = buildFirestoreDocument(recipe, authorIdOverride = uid)
             firestore.collection(COLLECTION_PERSONAL)
                 .document(uid)
@@ -130,6 +98,29 @@ class RecipeSyncService(
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to push personal recipe $recipeId", e)
+            false
+        }
+    }
+
+    /**
+     * Delete a personal recipe from Firestore (personal_recipes/{uid}/recipes/{recipeId}).
+     * Must be called whenever an owned recipe is deleted locally, otherwise the next
+     * pull would resurrect it. No-ops for anonymous users.
+     */
+    suspend fun deletePersonalRecipe(recipeId: String): Boolean {
+        val uid = authRepository.uid
+        if (uid == null || authRepository.currentUser?.isAnonymous == true) return false
+        return try {
+            firestore.collection(COLLECTION_PERSONAL)
+                .document(uid)
+                .collection(SUBCOLLECTION_RECIPES)
+                .document(recipeId)
+                .delete()
+                .await()
+            Log.d(TAG, "Deleted personal recipe $recipeId from Firestore")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to delete personal recipe $recipeId", e)
             false
         }
     }
@@ -216,6 +207,69 @@ class RecipeSyncService(
         val pulled = pullPersonalRecipes()
         val pushed = pushAllPersonalRecipes()
         return Pair(pulled, pushed)
+    }
+
+    // ─── Received recipes (Tab 2 — references to other users' recipes) ────────
+
+    /**
+     * Refresh the Tab 2 received-recipe cache from the canonical public mirrors.
+     *
+     * For each reference in `received_recipes/{uid}/items`:
+     *   - read `shared_recipes/{recipeId}` (the author's public mirror)
+     *   - if present → re-cache into Room with isReceived = true (propagates author edits)
+     *   - if absent  → the author set it Private or deleted it → drop the reference + local copy
+     *
+     * Also prunes any locally-cached received recipe that no longer has a reference.
+     * Returns the number of received recipes available after refresh.
+     */
+    suspend fun syncReceivedRecipes(): Int {
+        val uid = authRepository.uid
+        if (uid == null || authRepository.currentUser?.isAnonymous == true) return 0
+
+        return try {
+            val refsSnapshot = firestore.collection(COLLECTION_RECEIVED)
+                .document(uid)
+                .collection(SUBCOLLECTION_ITEMS)
+                .get()
+                .await()
+
+            val liveIds = mutableSetOf<String>()
+
+            for (refDoc in refsSnapshot.documents) {
+                val recipeId = refDoc.getString("recipeId") ?: refDoc.id
+                try {
+                    val mirror = firestore.collection(COLLECTION_SHARED)
+                        .document(recipeId)
+                        .get()
+                        .await()
+                    val data = mirror.data
+                    if (mirror.exists() && data != null) {
+                        val parsed = parseRecipe(recipeId, data, markReceived = true)
+                        repository.insertFullRecipe(
+                            parsed.first, parsed.second, parsed.third, parsed.fourth, parsed.fifth
+                        )
+                        liveIds.add(recipeId)
+                    } else {
+                        // Author unpublished (went Private) or deleted → remove ref + local copy
+                        refDoc.reference.delete().await()
+                        repository.deleteFullRecipe(recipeId)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to refresh received recipe $recipeId", e)
+                }
+            }
+
+            // Prune locally-cached received recipes that no longer have a reference
+            for (localId in repository.getReceivedRecipeIds()) {
+                if (localId !in liveIds) repository.deleteFullRecipe(localId)
+            }
+
+            Log.d(TAG, "Received refresh: ${liveIds.size} available")
+            liveIds.size
+        } catch (e: Exception) {
+            Log.e(TAG, "syncReceivedRecipes failed", e)
+            0
+        }
     }
 
     // ─── Firestore serialisation ──────────────────────────────────────────────
@@ -309,7 +363,8 @@ class RecipeSyncService(
     @Suppress("UNCHECKED_CAST")
     private fun parseRecipe(
         docId: String,
-        data: Map<String, Any>
+        data: Map<String, Any>,
+        markReceived: Boolean = false
     ): RecipeData {
         val now = System.currentTimeMillis()
 
@@ -329,11 +384,14 @@ class RecipeSyncService(
             tags = gson.toJson(data["tags"] as? List<*> ?: emptyList<String>()),
             isCustomized = data["isCustomized"] as? Boolean ?: false,
             isImported = data["isImported"] as? Boolean ?: false,
+            isReceived = markReceived,
+            // A received recipe is always private locally (the canonical public mirror lives with the author)
+            needsReview = false,
             createdAt = (data["createdAt"] as? Number)?.toLong() ?: now,
             updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: now,
             authorId = data["authorId"] as? String,
             authorDisplayName = data["authorDisplayName"] as? String,
-            visibility = data["visibility"] as? String ?: "private"
+            visibility = if (markReceived) "private" else (data["visibility"] as? String ?: "private")
         )
 
         val sections = (data["sections"] as? List<Map<String, Any>>)?.map { s ->

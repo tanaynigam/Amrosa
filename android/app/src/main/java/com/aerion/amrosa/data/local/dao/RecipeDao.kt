@@ -16,9 +16,13 @@ abstract class RecipeDao {
     @Query("SELECT * FROM recipes WHERE isImported = 1 ORDER BY needsReview DESC, createdAt DESC")
     abstract fun getImportedRecipes(): Flow<List<RecipeEntity>>
 
-    /** All user recipes (personal + imported), pending review shown first then by recency. */
-    @Query("SELECT * FROM recipes ORDER BY needsReview DESC, updatedAt DESC")
+    /** Tab 1 — my recipes only (personal + imported), pending review first. Excludes received. */
+    @Query("SELECT * FROM recipes WHERE isReceived = 0 ORDER BY needsReview DESC, updatedAt DESC")
     abstract fun getYoursRecipes(): Flow<List<RecipeEntity>>
+
+    /** Tab 2 — recipes received from other users (read-only references), newest first. */
+    @Query("SELECT * FROM recipes WHERE isReceived = 1 ORDER BY updatedAt DESC")
+    abstract fun getReceivedRecipes(): Flow<List<RecipeEntity>>
 
     @Query("UPDATE recipes SET needsReview = :needsReview WHERE id = :id")
     abstract suspend fun updateNeedsReview(id: String, needsReview: Boolean)
@@ -86,9 +90,16 @@ abstract class RecipeDao {
     @Query("SELECT COUNT(*) FROM recipes")
     abstract suspend fun count(): Int
 
-    /** One-shot (non-Flow) read of all personal recipes — used for bulk cloud push. */
-    @Query("SELECT * FROM recipes WHERE isImported = 0 ORDER BY title ASC")
+    /**
+     * One-shot read of recipes eligible for cloud push to personal_recipes:
+     * personal (isImported=0) AND owned by me (isReceived=0). Received references are never pushed.
+     */
+    @Query("SELECT * FROM recipes WHERE isImported = 0 AND isReceived = 0 ORDER BY title ASC")
     abstract suspend fun getPersonalRecipesOnce(): List<RecipeEntity>
+
+    /** IDs of all locally-cached received recipes (Tab 2). Used by the received-reference refresh. */
+    @Query("SELECT id FROM recipes WHERE isReceived = 1")
+    abstract suspend fun getReceivedRecipeIdsOnce(): List<String>
 
     @Query("UPDATE recipes SET visibility = :visibility WHERE id = :id")
     abstract suspend fun updateVisibility(id: String, visibility: String)

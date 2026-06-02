@@ -33,8 +33,13 @@ data class RecipeDetailUiState(
     val isFollowingLoading: Boolean = false,
     /** Non-null for one compose frame after a successful direct share. */
     val shareSentToName: String? = null,
+    /** Set true after a received recipe is removed → screen navigates back. */
+    val removed: Boolean = false,
 ) {
     val isPublic: Boolean get() = recipe?.visibility == "public"
+
+    /** True when this is a received recipe (Tab 2) — read-only, "Remove" instead of edit/delete. */
+    val isReceived: Boolean get() = recipe?.isReceived == true
 
     val visibleIngredients: List<Ingredient> get() {
         val recipe = recipe ?: return emptyList()
@@ -113,10 +118,11 @@ class RecipeDetailViewModel(
         viewModelScope.launch {
             val recipe = repository.getRecipeWithDetails(recipeId)
             val currentUid = authRepository.uid
-            // A recipe is "owned" if its authorId matches the current user,
-            // OR if authorId is null (recipes created before author attribution was added).
+            // Owned = authored by me AND not a received reference. Received recipes
+            // (Tab 2) are read-only references to another user's canonical instance.
             val isOwner = currentUid != null &&
-                (recipe?.authorId == null || recipe.authorId == currentUid)
+                recipe?.authorId == currentUid &&
+                recipe.isReceived == false
 
             val defaultSubs = recipe?.ingredients
                 ?.filter { it.substituteGroupId != null }
@@ -189,6 +195,20 @@ class RecipeDetailViewModel(
                 sharedRecipeService.unpublish(recipeId)
                 stopObservingComments()
             }
+        }
+    }
+
+    // ── Received recipes (Tab 2) ────────────────────────────────────────────────
+
+    /**
+     * Remove a received recipe from my list: deletes the cloud reference and the
+     * local cached copy. The author's canonical instance is untouched.
+     */
+    fun removeReceivedRecipe() {
+        viewModelScope.launch {
+            socialRepository.removeReceivedReference(recipeId)
+            repository.removeReceivedRecipe(recipeId)
+            _uiState.update { it.copy(removed = true) }
         }
     }
 
@@ -283,16 +303,37 @@ class RecipeDetailViewModel(
         }
     }
 
-    /** Share this recipe directly to a follower. */
+    /** Share this (already-public) recipe directly to a co-chef. */
     fun shareToFollower(recipientUid: String, recipientName: String) {
-        val recipe = _uiState.value.recipe ?: return
+        viewModelScope.launch { shareToFollowerInternal(recipientUid, recipientName) }
+    }
+
+    /**
+     * Make the recipe Public (publishes the canonical mirror) and then share it.
+     * Used when the user confirms the "make public to share" prompt for a private recipe.
+     */
+    fun makePublicAndShareToFollower(recipientUid: String, recipientName: String) {
         viewModelScope.launch {
-            socialRepository.shareRecipeTo(recipientUid, recipe)
-            _uiState.update { it.copy(shareSentToName = recipientName) }
-            // Clear the toast after one frame
-            kotlinx.coroutines.delay(3000)
-            _uiState.update { it.copy(shareSentToName = null) }
+            publishCurrentRecipe()
+            shareToFollowerInternal(recipientUid, recipientName)
         }
+    }
+
+    /** Persist + publish the current recipe as Public so co-chefs can read its mirror. */
+    private suspend fun publishCurrentRecipe() {
+        repository.setVisibility(recipeId, "public")
+        val updated = _uiState.value.recipe?.copy(visibility = "public") ?: return
+        _uiState.update { it.copy(recipe = updated) }
+        sharedRecipeService.publish(updated)
+        startObservingComments()
+    }
+
+    private suspend fun shareToFollowerInternal(recipientUid: String, recipientName: String) {
+        val recipe = _uiState.value.recipe ?: return
+        socialRepository.shareRecipeTo(recipientUid, recipe)
+        _uiState.update { it.copy(shareSentToName = recipientName) }
+        kotlinx.coroutines.delay(3000)
+        _uiState.update { it.copy(shareSentToName = null) }
     }
 
     companion object {

@@ -111,7 +111,18 @@ service cloud.firestore {
         && request.auth.token.firebase.sign_in_provider != 'anonymous'
         && request.resource.data.fromUid == request.auth.uid;
 
-      allow update, delete: if false; // shared recipes are immutable
+      // Recipient may delete their own pending pointer (consume on save, or dismiss).
+      allow delete: if request.auth != null && request.auth.uid == recipientUid;
+      allow update: if false; // pointers are never edited in place
+    }
+
+    // ── Received-recipe references (Tab 2) ──────────────────────────────────
+    // Pointers a user saved to other authors' public recipes.
+    // received_recipes/{uid}/items/{recipeId} = { authorUid, authorName, recipeId, savedAt }.
+    // Fully owned by the user: they read/create/delete their own references.
+    // The actual recipe data is read from the public shared_recipes/{recipeId} mirror.
+    match /received_recipes/{uid}/items/{itemId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 
     // ── Deny everything else ────────────────────────────────────────────────
