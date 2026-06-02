@@ -147,6 +147,31 @@ fun RecipeEditorScreen(
                 MetadataCard(state = state, vm = vm)
             }
 
+            // ── Update conversions (Gemini) — sits right above the ingredients ──
+            item(key = "update_conversions") {
+                OutlinedButton(
+                    onClick = vm::updateConversions,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isConverting
+                ) {
+                    if (state.isConverting) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Updating conversions…")
+                    } else {
+                        Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Update unit conversions")
+                    }
+                }
+                Text(
+                    "Recompute metric & imperial amounts with Gemini (then Save).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                )
+            }
+
             // ── Sections ──────────────────────────────────────────────────────
             items(state.sections, key = { it.id }) { section ->
                 SectionCard(
@@ -179,32 +204,6 @@ fun RecipeEditorScreen(
                     Spacer(Modifier.width(8.dp))
                     Text("Add Section")
                 }
-            }
-
-            // ── Update conversions (Gemini) ───────────────────────────────────
-            item(key = "update_conversions") {
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = vm::updateConversions,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !state.isConverting
-                ) {
-                    if (state.isConverting) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Updating conversions…")
-                    } else {
-                        Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Update unit conversions")
-                    }
-                }
-                Text(
-                    "Recompute metric & imperial amounts with Gemini (then Save).",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp, start = 4.dp)
-                )
             }
 
             // ── Delete ────────────────────────────────────────────────────────

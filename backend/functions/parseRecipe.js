@@ -395,6 +395,19 @@ function fmtNum(n) {
 }
 
 /**
+ * Adaptive rounding for imperial amounts so small values don't collapse to 0:
+ *   >= 1   → 1 decimal  (e.g. 4.2 oz)
+ *   >= 0.1 → 2 decimals (e.g. 0.18 oz)
+ *   < 0.1  → 3 decimals (e.g. 0.035 oz)
+ * Returns a clean Number (JS prints it without trailing zeros).
+ */
+function impRound(value) {
+  if (value >= 1)   return Math.round(value * 10) / 10;
+  if (value >= 0.1) return Math.round(value * 100) / 100;
+  return Math.round(value * 1000) / 1000;
+}
+
+/**
  * Compute imperial fields deterministically from metric fields.
  * Rules:
  *   g / kg  → oz  (< 453.6 g)  or lb  (≥ 453.6 g)
@@ -418,25 +431,22 @@ function computeImperialFromMetric(recipe) {
     if (unit === "g" || unit === "kg") {
       const grams  = unit === "kg" ? val * 1000 : val;
       if (grams >= 453.6) {
-        const lb     = grams / 453.6;
-        const rounded = Math.round(lb * 100) / 100;
-        ing.quantityValueImperial   = rounded;
+        const lb     = impRound(grams / 453.6);
+        ing.quantityValueImperial   = lb;
         ing.quantityUnitImperial    = "lb";
-        ing.quantityDisplayImperial = `${fmtNum(rounded)} lb`;
+        ing.quantityDisplayImperial = `${lb} lb`;
       } else {
-        const oz     = grams / 28.35;
-        const rounded = Math.round(oz * 10) / 10;
-        ing.quantityValueImperial   = rounded;
+        const oz     = impRound(grams / 28.35);
+        ing.quantityValueImperial   = oz;
         ing.quantityUnitImperial    = "oz";
-        ing.quantityDisplayImperial = `${fmtNum(rounded)} oz`;
+        ing.quantityDisplayImperial = `${oz} oz`;
       }
     } else if (unit === "ml" || unit === "l") {
       const ml     = unit === "l" ? val * 1000 : val;
-      const floz   = ml / 29.574;
-      const rounded = Math.round(floz * 10) / 10;
-      ing.quantityValueImperial   = rounded;
+      const floz   = impRound(ml / 29.574);
+      ing.quantityValueImperial   = floz;
       ing.quantityUnitImperial    = "fl oz";
-      ing.quantityDisplayImperial = `${fmtNum(rounded)} fl oz`;
+      ing.quantityDisplayImperial = `${floz} fl oz`;
     } else {
       // Unknown or non-numeric metric unit (shouldn't happen, but be safe)
       ing.quantityValueImperial   = null;
