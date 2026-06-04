@@ -26,7 +26,8 @@ import com.aerion.amrosa.AmrosaApplication
 @Composable
 fun RecipeEditorScreen(
     recipeId: String,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onDeleted: () -> Unit = onBack
 ) {
     val app = LocalContext.current.applicationContext as AmrosaApplication
     val vm: RecipeEditorViewModel = viewModel(
@@ -49,9 +50,9 @@ fun RecipeEditorScreen(
         if (state.saveComplete) onBack()
     }
 
-    // Navigate back once delete completes
+    // Once delete completes, skip past the (now-gone) detail screen back to the list
     LaunchedEffect(state.deleteComplete) {
-        if (state.deleteComplete) onBack()
+        if (state.deleteComplete) onDeleted()
     }
 
     // Show errors as snackbar
@@ -76,7 +77,11 @@ fun RecipeEditorScreen(
             onDismissRequest = { showDeleteDialog = false },
             icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
             title = { Text("Delete Recipe?") },
-            text = { Text("\"${state.title}\" will be permanently deleted from this device. This cannot be undone.") },
+            text = {
+                val variantNote = if (state.variantCount > 0)
+                    " and its ${state.variantCount} variation${if (state.variantCount == 1) "" else "s"}" else ""
+                Text("\"${state.title}\"$variantNote will be permanently deleted from this device. This cannot be undone.")
+            },
             confirmButton = {
                 Button(
                     onClick = { showDeleteDialog = false; vm.deleteRecipe() },
@@ -304,6 +309,22 @@ private fun MetadataCard(state: EditorUiState, vm: RecipeEditorViewModel) {
                         leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) }
                     )
                 }
+            }
+
+            // Variation name — only for recipes that are a variation of another
+            if (state.isVariant) {
+                OutlinedTextField(
+                    value = state.variantName,
+                    onValueChange = vm::updateVariantName,
+                    label = { Text("Variation name") },
+                    placeholder = { Text("e.g. Spicy, Vegan") },
+                    leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                    supportingText = {
+                        Text("${state.variantName.length}/${RecipeEditorViewModel.MAX_VARIANT_NAME_LEN}")
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

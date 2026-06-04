@@ -214,7 +214,11 @@ private fun MainAppScaffold() {
                 RecipeDetailScreen(
                     recipeId = recipeId,
                     onBack = { navController.popBackStack() },
-                    onEditClick = { navController.navigate("recipe/edit/$recipeId") }
+                    onEditClick = { navController.navigate("recipe/edit/$recipeId") },
+                    // Switch to another variation in the family.
+                    onOpenRecipe = { id -> navController.navigate("recipe/$id") },
+                    // Open the editor for a freshly-created variation.
+                    onEditRecipe = { id -> navController.navigate("recipe/edit/$id") }
                 )
             }
 
@@ -242,7 +246,14 @@ private fun MainAppScaffold() {
                 val recipeId = backStackEntry.arguments?.getString("recipeId") ?: return@composable
                 RecipeEditorScreen(
                     recipeId = recipeId,
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    // On delete, pop the editor AND the underlying detail screen (which now
+                    // shows a deleted recipe), landing back on the recipe list. Falls back to
+                    // a single pop when there's no detail behind us (e.g. freeform/import edit).
+                    onDeleted = {
+                        val popped = navController.popBackStack("recipe/$recipeId", inclusive = true)
+                        if (!popped) navController.popBackStack()
+                    }
                 )
             }
         }

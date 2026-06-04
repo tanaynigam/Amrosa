@@ -28,4 +28,6 @@ data class Recipe(
     val authorId: String? = null,
     val authorDisplayName: String? = null,
     val visibility: String = "private",     // "private" or "public"
+    val parentRecipeId: String? = null,     // null = base; else id of the base this varies
+    val variantName: String? = null,        // e.g. "Spicy" — only set on variations
 )

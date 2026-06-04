@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -25,6 +26,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import android.content.Intent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.domain.model.*
@@ -40,6 +44,8 @@ fun RecipeDetailScreen(
     recipeId: String,
     onBack: () -> Unit,
     onEditClick: () -> Unit = {},
+    onOpenRecipe: (String) -> Unit = {},
+    onEditRecipe: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
@@ -57,7 +63,12 @@ fun RecipeDetailScreen(
     var showNoteInput by remember { mutableStateOf(false) }
     var noteText by remember { mutableStateOf("") }
     var showCookingMode by remember { mutableStateOf(false) }
+    // Which section cooking mode should open at (null = from the first step).
+    var cookingStartSectionId by remember { mutableStateOf<String?>(null) }
     var selectedUnit by remember { mutableStateOf(UnitMode.ORIGINAL) }
+    // Variation-name dialog state
+    var showVariantDialog by remember { mutableStateOf(false) }
+    var variantNameInput by remember { mutableStateOf("") }
     var showVisibilityDialog by remember { mutableStateOf(false) }
     var commentText by remember { mutableStateOf("") }
     // Set to true after "make public" is confirmed — opens share sheet once publish completes
@@ -72,9 +83,71 @@ fun RecipeDetailScreen(
     var showRemoveDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // Re-read the recipe from Room whenever the screen resumes (e.g. coming back
+    // from the editor) so saved edits appear immediately, no manual reload needed.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.reload()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // Navigate back once a received recipe has been removed
     LaunchedEffect(state.removed) {
         if (state.removed) onBack()
+    }
+
+    // After a variation is created, open the editor on it
+    LaunchedEffect(state.createdVariantId) {
+        state.createdVariantId?.let { newId ->
+            viewModel.clearCreatedVariant()
+            onEditRecipe(newId)
+        }
+    }
+
+    // Variation-name dialog
+    if (showVariantDialog) {
+        AlertDialog(
+            onDismissRequest = { showVariantDialog = false },
+            icon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+            title = { Text("New variation") },
+            text = {
+                Column {
+                    Text(
+                        "Creates an editable copy of this recipe. Give the variation a name:",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = variantNameInput,
+                        onValueChange = {
+                            variantNameInput = it.take(RecipeDetailViewModel.MAX_VARIANT_NAME_LEN)
+                        },
+                        label = { Text("e.g. Spicy, Vegan") },
+                        singleLine = true,
+                        supportingText = {
+                            Text("${variantNameInput.length}/${RecipeDetailViewModel.MAX_VARIANT_NAME_LEN}")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.createVariant(variantNameInput)
+                        showVariantDialog = false
+                        variantNameInput = ""
+                    },
+                    enabled = variantNameInput.isNotBlank()
+                ) { Text("Create") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showVariantDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 
     // Show snackbar when a recipe is sent successfully
@@ -106,6 +179,9 @@ fun RecipeDetailScreen(
         CookingModeScreen(
             recipe = state.recipe!!,
             state = state,
+            selectedUnit = selectedUnit,
+            onUnitChange = { selectedUnit = it },
+            startSectionId = cookingStartSectionId,
             onExit = { showCookingMode = false }
         )
         return
@@ -144,7 +220,7 @@ fun RecipeDetailScreen(
                             Icon(Icons.Default.Edit, contentDescription = "Edit Recipe")
                         }
                     }
-                    IconButton(onClick = { showCookingMode = true }) {
+                    IconButton(onClick = { cookingStartSectionId = null; showCookingMode = true }) {
                         Icon(Icons.Default.MenuBook, contentDescription = "Cooking Mode")
                     }
                 },
@@ -165,14 +241,43 @@ fun RecipeDetailScreen(
         val listState = rememberLazyListState()
         val coroutineScope = rememberCoroutineScope()
 
+        // Ingredient checklist ordered by SECTION (in step order) then by GROUP within.
+        // Each block = (sectionName? , [ (groupLabel, [ingredients]) ]). Section names are
+        // null for single-section recipes (no redundant sub-header). Ingredients with no/unknown
+        // section fall into a trailing "Other" block.
+        val ingredientBlocks: List<Pair<String?, List<Pair<String, List<Ingredient>>>>> =
+            remember(recipe, state.visibleIngredients) {
+                val multiSection = recipe.sections.size > 1
+                fun groupsOf(ings: List<Ingredient>) =
+                    ings.groupBy { it.groupLabel ?: "" }.toList()
+                        .map { (label, list) -> label to list.sortedBy { it.orderIndex } }
+
+                val blocks = mutableListOf<Pair<String?, List<Pair<String, List<Ingredient>>>>>()
+                val bySection = state.visibleIngredients.groupBy { it.sectionId }
+                recipe.sections.sortedBy { it.orderIndex }.forEach { section ->
+                    val ings = bySection[section.id].orEmpty()
+                    if (ings.isNotEmpty()) {
+                        blocks += (if (multiSection) section.name else null) to groupsOf(ings)
+                    }
+                }
+                val knownSectionIds = recipe.sections.map { it.id }.toSet()
+                val orphan = state.visibleIngredients.filter {
+                    it.sectionId == null || it.sectionId !in knownSectionIds
+                }
+                if (orphan.isNotEmpty()) {
+                    blocks += (if (blocks.isNotEmpty()) "Other" else null) to groupsOf(orphan)
+                }
+                blocks
+            }
+
         // Build an ordered list of lazy-item keys so we can find section indices
         // Structure: header, time-row, sources?, options?, "Ingredients" header,
-        //   ingredient groups..., divider, "Instructions" header,
+        //   ingredient blocks..., divider, "Instructions" header,
         //   then for each section: section-header key = "section-{sectionId}", steps...
         //   unsectioned steps, divider, notes...
 
         // Pre-compute section header indices for jump chips
-        val sectionIndices = remember(recipe, state.visibleIngredients) {
+        val sectionIndices = remember(recipe, ingredientBlocks) {
             var idx = 0
             idx++ // header
             idx++ // time-row + divider
@@ -191,10 +296,12 @@ fun RecipeDetailScreen(
             }
 
             idx++ // "Ingredients" header
-            val grouped = state.visibleIngredients.groupBy { it.groupLabel ?: "" }
-            grouped.forEach { (label, ings) ->
-                if (label.isNotBlank()) idx++ // group label
-                idx += ings.size // ingredient items
+            ingredientBlocks.forEach { (sectionName, groups) ->
+                if (sectionName != null) idx++ // section sub-header
+                groups.forEach { (label, ings) ->
+                    if (label.isNotBlank()) idx++ // group label
+                    idx += ings.size // ingredient items
+                }
             }
             idx++ // divider after ingredients
 
@@ -245,6 +352,36 @@ fun RecipeDetailScreen(
                                 )
                             }
                         )
+                    }
+
+                    // ── Variation selector ──────────────────────────────
+                    // Shows the base + its variations as switchable chips, plus an
+                    // "Add variation" chip for the owner (up to MAX_VARIANTS).
+                    if (state.variants.size > 1 || state.canAddVariant) {
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            state.variants.forEach { v ->
+                                FilterChip(
+                                    selected = v.isCurrent,
+                                    onClick = { if (!v.isCurrent) onOpenRecipe(v.id) },
+                                    leadingIcon = if (v.isBase) {
+                                        { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    label = { Text(v.label, style = MaterialTheme.typography.labelMedium) }
+                                )
+                            }
+                            if (state.canAddVariant) {
+                                AssistChip(
+                                    onClick = { variantNameInput = ""; showVariantDialog = true },
+                                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                    label = { Text("Variation", style = MaterialTheme.typography.labelMedium) }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -405,28 +542,39 @@ fun RecipeDetailScreen(
                 }
             }
 
-            val grouped = state.visibleIngredients.groupBy { it.groupLabel ?: "" }
-            grouped.forEach { (label, ings) ->
-                if (label.isNotBlank()) {
+            ingredientBlocks.forEach { (sectionName, groups) ->
+                if (sectionName != null) {
                     item {
                         Text(
-                            label,
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            sectionName,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                         )
                     }
                 }
-                items(ings, key = { it.id }) { ing ->
-                    IngredientRow(
-                        ingredient = ing,
-                        scaledQty = QuantityScaler.scale(ing, state.scaleFactor, selectedUnit),
-                        isChecked = ing.id in state.checkedIngredients,
-                        isOptional = ing.isOptional,
-                        isOptionalEnabled = ing.id in state.enabledOptionals,
-                        onCheck = { viewModel.toggleIngredientCheck(ing.id) },
-                        onToggleOptional = { viewModel.toggleOptional(ing.id) }
-                    )
+                groups.forEach { (label, ings) ->
+                    if (label.isNotBlank()) {
+                        item {
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                    items(ings, key = { it.id }) { ing ->
+                        IngredientRow(
+                            ingredient = ing,
+                            scaledQty = QuantityScaler.scale(ing, state.scaleFactor, selectedUnit),
+                            isChecked = ing.id in state.checkedIngredients,
+                            isOptional = ing.isOptional,
+                            isOptionalEnabled = ing.id in state.enabledOptionals,
+                            onCheck = { viewModel.toggleIngredientCheck(ing.id) },
+                            onToggleOptional = { viewModel.toggleOptional(ing.id) }
+                        )
+                    }
                 }
             }
 
@@ -439,11 +587,27 @@ fun RecipeDetailScreen(
 
             recipe.sections.forEach { section ->
                 item(key = "section-${section.id}") {
-                    Text(
-                        section.name,
-                        style = MaterialTheme.typography.headlineMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            section.name,
+                            style = MaterialTheme.typography.headlineMedium,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        TextButton(onClick = {
+                            cookingStartSectionId = section.id
+                            showCookingMode = true
+                        }) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Cook", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
                 }
                 val sectionSteps = recipe.steps
                     .filter { it.sectionId == section.id }
@@ -912,14 +1076,34 @@ private fun FollowerPickerSheet(
 private fun CookingModeScreen(
     recipe: Recipe,
     state: RecipeDetailUiState,
+    selectedUnit: UnitMode,
+    onUnitChange: (UnitMode) -> Unit,
+    startSectionId: String?,
     onExit: () -> Unit
 ) {
     val steps = recipe.sections
         .flatMap { section -> recipe.steps.filter { it.sectionId == section.id }.sortedBy { it.orderIndex } }
         .plus(recipe.steps.filter { it.sectionId == null }.sortedBy { it.orderIndex })
 
-    var currentIndex by remember { mutableIntStateOf(0) }
+    // First step of each section, for the jump menu + "Cook from here" entry point.
+    val sectionStarts = remember(recipe, steps) {
+        recipe.sections.mapNotNull { sec ->
+            val i = steps.indexOfFirst { it.sectionId == sec.id }
+            if (i >= 0) sec.name to i else null
+        }
+    }
+    val initialIndex = remember(startSectionId) {
+        if (startSectionId == null) 0
+        else steps.indexOfFirst { it.sectionId == startSectionId }.let { if (it < 0) 0 else it }
+    }
+
+    var currentIndex by remember { mutableIntStateOf(initialIndex) }
     val step = steps.getOrNull(currentIndex)
+    var showSectionMenu by remember { mutableStateOf(false) }
+
+    val hasConversions = recipe.ingredients.any {
+        it.quantityValueMetric != null || it.quantityValueImperial != null
+    }
 
     // Keep screen on
     val view = androidx.compose.ui.platform.LocalView.current
@@ -937,6 +1121,26 @@ private fun CookingModeScreen(
                         Icon(Icons.Default.Close, contentDescription = "Exit cooking mode")
                     }
                 },
+                actions = {
+                    if (sectionStarts.size > 1) {
+                        Box {
+                            IconButton(onClick = { showSectionMenu = true }) {
+                                Icon(Icons.Default.Menu, contentDescription = "Jump to section")
+                            }
+                            DropdownMenu(
+                                expanded = showSectionMenu,
+                                onDismissRequest = { showSectionMenu = false }
+                            ) {
+                                sectionStarts.forEach { (name, index) ->
+                                    DropdownMenuItem(
+                                        text = { Text(name) },
+                                        onClick = { currentIndex = index; showSectionMenu = false }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 )
@@ -950,7 +1154,40 @@ private fun CookingModeScreen(
                 .padding(24.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                // Unit toggle — only when conversions exist; shared with the detail screen
+                if (hasConversions) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        SingleChoiceSegmentedButtonRow {
+                            UnitMode.entries.forEachIndexed { index, mode ->
+                                SegmentedButton(
+                                    selected = selectedUnit == mode,
+                                    onClick = { onUnitChange(mode) },
+                                    shape = SegmentedButtonDefaults.itemShape(index = index, count = UnitMode.entries.size),
+                                    label = {
+                                        Text(
+                                            when (mode) {
+                                                UnitMode.ORIGINAL -> "Orig"
+                                                UnitMode.METRIC   -> "Metric"
+                                                UnitMode.IMPERIAL -> "Imp"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+
                 // Section label
                 val sectionName = recipe.sections.find { it.id == step?.sectionId }?.name
                 sectionName?.let {
@@ -984,10 +1221,12 @@ private fun CookingModeScreen(
                                 visible.forEach { ref ->
                                     val ing = recipe.ingredients.find { it.id == ref.ingredientId }
                                     val name = state.resolvedIngredientName(ref.ingredientId)
-                                    val qty = QuantityScaler.scale(
-                                        ing?.quantityValue, ing?.quantityUnit,
-                                        ref.quantityDisplay, state.scaleFactor
-                                    )
+                                    // Honour the unit toggle: scale the full ingredient amount in the
+                                    // chosen unit; fall back to the step's ref display when unknown.
+                                    val qty = if (ing != null)
+                                        QuantityScaler.scale(ing, state.scaleFactor, selectedUnit)
+                                    else
+                                        QuantityScaler.scale(null, null, ref.quantityDisplay, state.scaleFactor)
                                     Text("• $name — $qty",
                                         style = MaterialTheme.typography.bodyMedium,
                                         modifier = Modifier.padding(vertical = 2.dp))

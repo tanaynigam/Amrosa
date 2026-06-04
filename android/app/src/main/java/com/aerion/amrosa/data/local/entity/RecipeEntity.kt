@@ -30,4 +30,6 @@ data class RecipeEntity(
     val authorId: String? = null,           // Firebase UID of the ORIGINAL author (always preserved)
     val authorDisplayName: String? = null,  // ORIGINAL author display name (never overwritten with "Imported")
     val visibility: String = "private",     // "private" or "public" (public = mirrored to shared_recipes)
+    val parentRecipeId: String? = null,      // null = base recipe; else id of the base this is a variation of
+    val variantName: String? = null,         // e.g. "Spicy", "Vegan" — only set on variations
 )

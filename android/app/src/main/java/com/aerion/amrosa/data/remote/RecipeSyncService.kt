@@ -382,6 +382,8 @@ class RecipeSyncService(
             "authorId" to (recipe.authorId ?: authorIdOverride),
             "authorDisplayName" to recipe.authorDisplayName,
             "visibility" to recipe.visibility,
+            "parentRecipeId" to recipe.parentRecipeId,
+            "variantName" to recipe.variantName,
             "sections" to sections,
             "ingredients" to ingredients,
             "steps" to steps,
@@ -420,7 +422,11 @@ class RecipeSyncService(
             updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: now,
             authorId = data["authorId"] as? String,
             authorDisplayName = data["authorDisplayName"] as? String,
-            visibility = if (markReceived) "private" else (data["visibility"] as? String ?: "private")
+            visibility = if (markReceived) "private" else (data["visibility"] as? String ?: "private"),
+            // Received recipes become standalone (the sharer's base doesn't exist locally);
+            // personal-device pull preserves the variation grouping.
+            parentRecipeId = if (markReceived) null else data["parentRecipeId"] as? String,
+            variantName = if (markReceived) null else data["variantName"] as? String
         )
 
         val sections = (data["sections"] as? List<Map<String, Any>>)?.map { s ->

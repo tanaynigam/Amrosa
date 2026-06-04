@@ -6,6 +6,7 @@ import com.aerion.amrosa.data.DatabaseSeeder
 import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.AmrosaDatabase
 import com.aerion.amrosa.data.local.MIGRATION_9_10
+import com.aerion.amrosa.data.local.MIGRATION_10_11
 import com.aerion.amrosa.data.remote.RecipeSyncService
 import com.aerion.amrosa.data.remote.SharedRecipeService
 import com.aerion.amrosa.data.remote.SocialRepository
@@ -22,7 +23,7 @@ class AppContainer(context: Context) {
         AmrosaDatabase::class.java,
         "amrosa.db"
     )
-        .addMigrations(MIGRATION_9_10)            // preserve local recipes across v9 → v10
+        .addMigrations(MIGRATION_9_10, MIGRATION_10_11)  // preserve local recipes across schema bumps
         .fallbackToDestructiveMigration()         // safety net for any unhandled version jump
         .build()
 

@@ -14,6 +14,14 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+/** One member of a recipe's variation family (the base or a variation). */
+data class VariantRef(
+    val id: String,
+    val label: String,
+    val isCurrent: Boolean,
+    val isBase: Boolean,
+)
+
 data class RecipeDetailUiState(
     val recipe: Recipe? = null,
     val selectedServings: Int = 0,
@@ -35,6 +43,13 @@ data class RecipeDetailUiState(
     val shareSentToName: String? = null,
     /** Set true after a received recipe is removed → screen navigates back. */
     val removed: Boolean = false,
+    // ── Variations ──
+    /** Base + variations in this recipe's family. Empty for recipes with no family context. */
+    val variants: List<VariantRef> = emptyList(),
+    /** True when the owner can still add a variation (under the cap of 4). */
+    val canAddVariant: Boolean = false,
+    /** Non-null for one frame after a variation is created → screen navigates to its editor. */
+    val createdVariantId: String? = null,
 ) {
     val isPublic: Boolean get() = recipe?.visibility == "public"
 
@@ -114,7 +129,14 @@ class RecipeDetailViewModel(
         observeNotes()
     }
 
-    private fun loadRecipe() {
+    /**
+     * Re-read the recipe from Room. Called when the screen resumes (e.g. returning
+     * from the editor) so edits show immediately without a manual reload. The user's
+     * current scaling / substitute / optional selections are preserved.
+     */
+    fun reload() = loadRecipe(preserveSelections = true)
+
+    private fun loadRecipe(preserveSelections: Boolean = false) {
         viewModelScope.launch {
             val recipe = repository.getRecipeWithDetails(recipeId)
             val currentUid = authRepository.uid
@@ -134,14 +156,40 @@ class RecipeDetailViewModel(
                 recipe.ingredients.find { it.id == anchorId }?.quantityValue
             }
 
-            _uiState.update {
-                it.copy(
+            // Build the variation family (base + its variations) for the selector chips.
+            var variantRefs = emptyList<VariantRef>()
+            var canAdd = false
+            if (recipe != null) {
+                val baseId = recipe.parentRecipeId ?: recipe.id
+                val baseRecipe = if (recipe.parentRecipeId == null) recipe
+                                 else repository.getRecipeWithDetails(baseId)
+                val variants = repository.getVariants(baseId)
+                variantRefs = buildList {
+                    baseRecipe?.let {
+                        // Base chip uses a fixed short label (recipe titles can be long).
+                        add(VariantRef(it.id, "Original", it.id == recipe.id, isBase = true))
+                    }
+                    variants.forEach { v ->
+                        add(VariantRef(v.id, v.variantName?.ifBlank { "Variation" } ?: "Variation",
+                            v.id == recipe.id, isBase = false))
+                    }
+                }
+                canAdd = isOwner && variants.size < MAX_VARIANTS
+            }
+
+            _uiState.update { prev ->
+                prev.copy(
                     recipe = recipe,
-                    selectedServings = recipe?.baseServings ?: 1,
-                    scaleAnchorQty = anchorQty,
-                    selectedSubstitutes = defaultSubs,
+                    selectedServings = if (preserveSelections && prev.selectedServings > 0)
+                        prev.selectedServings else recipe?.baseServings ?: 1,
+                    scaleAnchorQty = if (preserveSelections)
+                        (prev.scaleAnchorQty ?: anchorQty) else anchorQty,
+                    selectedSubstitutes = if (preserveSelections && prev.selectedSubstitutes.isNotEmpty())
+                        prev.selectedSubstitutes else defaultSubs,
                     isLoading = false,
-                    isOwner = isOwner
+                    isOwner = isOwner,
+                    variants = variantRefs,
+                    canAddVariant = canAdd
                 )
             }
 
@@ -336,7 +384,30 @@ class RecipeDetailViewModel(
         _uiState.update { it.copy(shareSentToName = null) }
     }
 
+    // ── Variations ──────────────────────────────────────────────────────────────
+
+    /**
+     * Create a new variation of the current recipe (a fresh editable copy), then emit
+     * its id so the screen can open the editor on it.
+     */
+    fun createVariant(name: String) {
+        viewModelScope.launch {
+            val newId = repository.duplicateAsVariant(
+                sourceId = recipeId,
+                variantName = name.trim().ifBlank { "Variation" },
+                currentUid = authRepository.uid,
+                displayName = authRepository.displayName ?: authRepository.email
+            )
+            if (newId != null) _uiState.update { it.copy(createdVariantId = newId) }
+        }
+    }
+
+    fun clearCreatedVariant() = _uiState.update { it.copy(createdVariantId = null) }
+
     companion object {
+        const val MAX_VARIANTS = 4
+        const val MAX_VARIANT_NAME_LEN = 20
+
         fun factory(
             repository: RecipeRepository,
             authRepository: AuthRepository,

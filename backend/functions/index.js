@@ -201,6 +201,10 @@ exports.formatRecipeText = onCall(
  * Output: { ingredients: [{ id, quantityValueMetric, quantityUnitMetric, quantityDisplayMetric,
  *                           quantityValueImperial, quantityUnitImperial, quantityDisplayImperial }] }
  */
+// Number of independent observations before a learned density is trusted enough
+// to be SERVED back as a deterministic override. Below this it only accumulates.
+const LEARN_PROMOTE_COUNT = 3;
+
 exports.convertIngredients = onCall(
   {
     secrets: [geminiKey],
@@ -219,8 +223,56 @@ exports.convertIngredients = onCall(
       throw new HttpsError("internal", "Gemini API key is not configured.");
     }
 
+    const db = admin.firestore();
+
+    // 1. Load the learned density table (promoted entries only) into a lookup map.
+    const learnedMap = {};
     try {
-      const converted = await convertIngredientsFromList(ingredients, apiKey);
+      const snap = await db.collection("ingredient_densities").get();
+      snap.forEach((doc) => {
+        const d = doc.data() || {};
+        if (d.count >= LEARN_PROMOTE_COUNT && d.sumDensity > 0) {
+          learnedMap[doc.id] = d.sumDensity / d.count;
+        }
+      });
+    } catch (err) {
+      console.error("Failed to read ingredient_densities:", err.message);
+    }
+
+    try {
+      const { ingredients: converted, candidates } =
+        await convertIngredientsFromList(ingredients, apiKey, learnedMap);
+
+      // 2. Persist fresh observations so the table grows for ingredients that recur.
+      //    Store running sum + count; the served average = sumDensity / count.
+      if (Array.isArray(candidates) && candidates.length > 0) {
+        try {
+          const agg = {};
+          for (const c of candidates) {
+            if (!agg[c.key]) agg[c.key] = { name: c.name, sum: 0, n: 0 };
+            agg[c.key].sum += c.density;
+            agg[c.key].n += 1;
+          }
+          const batch = db.batch();
+          for (const [key, v] of Object.entries(agg)) {
+            const ref = db.collection("ingredient_densities").doc(key);
+            batch.set(
+              ref,
+              {
+                name: v.name,
+                sumDensity: admin.firestore.FieldValue.increment(v.sum),
+                count: admin.firestore.FieldValue.increment(v.n),
+                updatedAt: Date.now(),
+              },
+              { merge: true }
+            );
+          }
+          await batch.commit();
+        } catch (err) {
+          console.error("Failed to persist learned densities:", err.message);
+        }
+      }
+
       return { ingredients: converted };
     } catch (err) {
       throw toHttpsError(err);

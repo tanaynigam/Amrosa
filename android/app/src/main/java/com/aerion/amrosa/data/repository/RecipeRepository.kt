@@ -8,6 +8,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.util.UUID
 
 class RecipeRepository(
     private val recipeDao: RecipeDao,
@@ -163,6 +164,114 @@ class RecipeRepository(
     /** Remove a received recipe's local cache (the cloud reference is removed separately). */
     suspend fun removeReceivedRecipe(recipeId: String) = recipeDao.deleteFullRecipe(recipeId)
 
+    // ─── Recipe variations ──────────────────────────────────────────────────────
+
+    /** All variations of a base recipe (basic domain — no children loaded). */
+    suspend fun getVariants(parentId: String): List<Recipe> =
+        recipeDao.getVariantsOnce(parentId).map { it.toBasicDomain() }
+
+    /**
+     * Deep-copies a recipe into a new variation with fresh ids. Every internal reference
+     * (section / ingredient / step ids, step→ingredient refs, the scale anchor, and
+     * substitute-group ids) is remapped so the copy is fully self-contained.
+     * The new variation points at the *original* base ([Recipe.parentRecipeId] of the source,
+     * or the source itself), so variations-of-variations still group under one base.
+     *
+     * @return the new recipe id, or null if the source can't be loaded.
+     */
+    suspend fun duplicateAsVariant(
+        sourceId: String,
+        variantName: String,
+        currentUid: String?,
+        displayName: String?
+    ): String? {
+        val source = getRecipeWithDetails(sourceId) ?: return null
+        val baseId = source.parentRecipeId ?: source.id
+        val now = System.currentTimeMillis()
+        val newRecipeId = "recipe-var-${UUID.randomUUID()}"
+
+        val sectionIdMap = source.sections.associate { it.id to "sec-${UUID.randomUUID()}" }
+        val ingredientIdMap = source.ingredients.associate { it.id to "ing-${UUID.randomUUID()}" }
+        val stepIdMap = source.steps.associate { it.id to "step-${UUID.randomUUID()}" }
+        val subGroupMap = source.ingredients.mapNotNull { it.substituteGroupId }.distinct()
+            .associateWith { "subg-${UUID.randomUUID()}" }
+
+        val recipeEntity = RecipeEntity(
+            id = newRecipeId,
+            title = source.title,
+            description = source.description,
+            sourceUrls = gson.toJson(source.sourceUrls),
+            baseServings = source.baseServings,
+            baseServingsMin = source.baseServingsMin,
+            baseServingsMax = source.baseServingsMax,
+            scaleIngredientId = source.scaleIngredientId?.let { ingredientIdMap[it] },
+            scaleStep = source.scaleStep,
+            prepTimeMinutes = source.prepTimeMinutes,
+            cookTimeMinutes = source.cookTimeMinutes,
+            imageUrl = source.imageUrl,
+            tags = gson.toJson(source.tags),
+            isCustomized = true,
+            isImported = source.isImported,
+            isReceived = false,
+            needsReview = false,
+            version = 1,
+            changeLog = "[]",
+            createdAt = now,
+            updatedAt = now,
+            syncedAt = null,
+            authorId = currentUid ?: source.authorId,
+            authorDisplayName = displayName ?: source.authorDisplayName,
+            visibility = "private",
+            parentRecipeId = baseId,
+            variantName = variantName
+        )
+
+        val sections = source.sections.map { s ->
+            RecipeSectionEntity(
+                id = sectionIdMap.getValue(s.id),
+                recipeId = newRecipeId,
+                name = s.name,
+                orderIndex = s.orderIndex
+            )
+        }
+        val ingredients = source.ingredients.map { i ->
+            IngredientEntity(
+                id = ingredientIdMap.getValue(i.id),
+                recipeId = newRecipeId,
+                sectionId = i.sectionId?.let { sectionIdMap[it] },
+                name = i.name,
+                quantityValue = i.quantityValue, quantityUnit = i.quantityUnit, quantityDisplay = i.quantityDisplay,
+                quantityValueMetric = i.quantityValueMetric, quantityUnitMetric = i.quantityUnitMetric,
+                quantityDisplayMetric = i.quantityDisplayMetric,
+                quantityValueImperial = i.quantityValueImperial, quantityUnitImperial = i.quantityUnitImperial,
+                quantityDisplayImperial = i.quantityDisplayImperial,
+                groupLabel = i.groupLabel, isOptional = i.isOptional,
+                substituteGroupId = i.substituteGroupId?.let { subGroupMap[it] },
+                substituteRatio = i.substituteRatio,
+                orderIndex = i.orderIndex
+            )
+        }
+        val steps = source.steps.map { st ->
+            StepEntity(
+                id = stepIdMap.getValue(st.id),
+                recipeId = newRecipeId,
+                sectionId = st.sectionId?.let { sectionIdMap[it] },
+                instruction = st.instruction,
+                orderIndex = st.orderIndex
+            )
+        }
+        val refs = source.steps.flatMap { st ->
+            val newStepId = stepIdMap.getValue(st.id)
+            st.ingredientRefs.mapNotNull { ref ->
+                val newIngId = ingredientIdMap[ref.ingredientId] ?: return@mapNotNull null
+                StepIngredientRefEntity(stepId = newStepId, ingredientId = newIngId, quantityDisplay = ref.quantityDisplay)
+            }
+        }
+
+        recipeDao.insertFullRecipe(recipeEntity, sections, ingredients, steps, refs)
+        return newRecipeId
+    }
+
     // ─── Domain mapping ───────────────────────────────────────────────────────
 
     private fun changeLogList(json: String): List<RecipeChange> =
@@ -189,7 +298,8 @@ class RecipeRepository(
         version = version, changeLog = changeLogList(changeLog),
         createdAt = createdAt, updatedAt = updatedAt,
         authorId = authorId, authorDisplayName = authorDisplayName,
-        visibility = visibility
+        visibility = visibility,
+        parentRecipeId = parentRecipeId, variantName = variantName
     )
 
     private fun RecipeEntity.toDomain(
@@ -210,7 +320,8 @@ class RecipeRepository(
         version = version, changeLog = changeLogList(changeLog),
         createdAt = createdAt, updatedAt = updatedAt,
         authorId = authorId, authorDisplayName = authorDisplayName,
-        visibility = visibility
+        visibility = visibility,
+        parentRecipeId = parentRecipeId, variantName = variantName
     )
 
     private fun RecipeSectionEntity.toDomain() = RecipeSection(id, name, orderIndex)

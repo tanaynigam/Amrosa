@@ -7,18 +7,24 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 abstract class RecipeDao {
 
-    @Query("SELECT * FROM recipes ORDER BY title ASC")
+    // List queries show BASE recipes only (parentRecipeId IS NULL); variations are reached
+    // via the base recipe's detail screen, never as standalone list cards.
+    @Query("SELECT * FROM recipes WHERE parentRecipeId IS NULL ORDER BY title ASC")
     abstract fun getAllRecipes(): Flow<List<RecipeEntity>>
 
-    @Query("SELECT * FROM recipes WHERE isImported = 0 ORDER BY title ASC")
+    @Query("SELECT * FROM recipes WHERE isImported = 0 AND parentRecipeId IS NULL ORDER BY title ASC")
     abstract fun getPersonalRecipes(): Flow<List<RecipeEntity>>
 
-    @Query("SELECT * FROM recipes WHERE isImported = 1 ORDER BY needsReview DESC, createdAt DESC")
+    @Query("SELECT * FROM recipes WHERE isImported = 1 AND parentRecipeId IS NULL ORDER BY needsReview DESC, createdAt DESC")
     abstract fun getImportedRecipes(): Flow<List<RecipeEntity>>
 
-    /** Tab 1 — my recipes only (personal + imported), pending review first. Excludes received. */
-    @Query("SELECT * FROM recipes WHERE isReceived = 0 ORDER BY needsReview DESC, updatedAt DESC")
+    /** Tab 1 — my recipes only (personal + imported), pending review first. Excludes received + variations. */
+    @Query("SELECT * FROM recipes WHERE isReceived = 0 AND parentRecipeId IS NULL ORDER BY needsReview DESC, updatedAt DESC")
     abstract fun getYoursRecipes(): Flow<List<RecipeEntity>>
+
+    /** All variations of a base recipe (one-shot), oldest first. */
+    @Query("SELECT * FROM recipes WHERE parentRecipeId = :parentId ORDER BY createdAt ASC")
+    abstract suspend fun getVariantsOnce(parentId: String): List<RecipeEntity>
 
     /** Tab 2 — recipes received from other users (read-only references), newest first. */
     @Query("SELECT * FROM recipes WHERE isReceived = 1 ORDER BY updatedAt DESC")

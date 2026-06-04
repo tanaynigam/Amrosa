@@ -488,6 +488,16 @@ function densityFor(name) {
   return null;
 }
 
+// Normalised key used to look up / accumulate a learned density for an ingredient.
+// Lowercased, punctuation stripped, whitespace collapsed → e.g. "Almond Flour!" → "almond flour".
+function normalizeKey(name) {
+  return (name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Round + format a metric amount (g or ml), choosing kg/L for large values. */
 function metricFields(value, baseUnit) {
   // baseUnit: "g" or "ml"
@@ -519,12 +529,19 @@ const CONVERT_SYSTEM_INSTRUCTION =
  * Convert ingredients to metric + imperial with validation.
  * Gemini supplies ml and/or grams; the server then:
  *   - overrides grams with a curated density when the ingredient is known (deterministic)
+ *   - else uses a *learned* density (from `learnedMap`) for ingredients we've seen recur
  *   - validates the implied density (grams / ml) is physically plausible; if not, drops
  *     the weight and falls back to the volume (ml → fl oz)
  *   - prefers weight (g → oz/lb) when valid, else volume (ml → fl oz)
  * Imperial is always computed deterministically from the chosen metric.
+ *
+ * @param {object} learnedMap  { normalizedKey: density(g/ml) } promoted learned densities.
+ * @returns {{ ingredients: Array, candidates: Array }}
+ *   `candidates` = fresh, Gemini-derived volume→weight observations (not from any table)
+ *   whose implied density passed the plausibility bounds — the caller persists these so the
+ *   density table grows over time for ingredients that recur.
  */
-async function convertIngredientsFromList(ingredients, apiKey) {
+async function convertIngredientsFromList(ingredients, apiKey, learnedMap = {}) {
   if (!Array.isArray(ingredients) || ingredients.length === 0) {
     throw new Error("Please provide ingredients to convert.");
   }
@@ -564,21 +581,46 @@ async function convertIngredientsFromList(ingredients, apiKey) {
   // Map results by id so we can match back to the requested ingredients.
   const byId = new Map(parsed.map((p) => [p.id, p]));
 
+  // Fresh volume→weight observations to persist (so the table grows over time).
+  const candidates = [];
+
   const out = ingredients.map((ing) => {
     const p = byId.get(ing.id) || {};
     let ml = typeof p.ml === "number" && p.ml > 0 ? p.ml : null;
     let grams = typeof p.grams === "number" && p.grams > 0 ? p.grams : null;
+    // Where the weight came from: "gemini" (raw), "table" (curated), "learned" (accumulated).
+    let gramsSource = grams != null ? "gemini" : null;
 
-    // Deterministic density override for known dry ingredients (needs the volume).
+    // Density override for dry ingredients measured by volume.
+    // Priority: curated table (authoritative) → learned density → Gemini's own number.
     if (ml != null) {
       const tableD = densityFor(ing.name);
-      if (tableD != null) grams = ml * tableD;
+      if (tableD != null) {
+        grams = ml * tableD;
+        gramsSource = "table";
+      } else {
+        const learnedD = learnedMap[normalizeKey(ing.name)];
+        if (typeof learnedD === "number" && learnedD > 0) {
+          grams = ml * learnedD;
+          gramsSource = "learned";
+        }
+      }
     }
 
     // Validate volume→weight density; reject implausible weights.
     if (grams != null && ml != null) {
       const density = grams / ml;
-      if (density < MIN_DENSITY || density > MAX_DENSITY) grams = null; // fall back to volume
+      if (density < MIN_DENSITY || density > MAX_DENSITY) {
+        grams = null; // fall back to volume
+        gramsSource = null;
+      }
+    }
+
+    // Record a learning candidate only for genuine Gemini-derived volume→weight
+    // conversions that survived validation and aren't already in a table.
+    if (gramsSource === "gemini" && grams != null && ml != null) {
+      const key = normalizeKey(ing.name);
+      if (key) candidates.push({ key, name: (ing.name || "").trim(), density: grams / ml });
     }
 
     // Choose metric: prefer weight when we have a trustworthy one, else volume.
@@ -600,7 +642,7 @@ async function convertIngredientsFromList(ingredients, apiKey) {
 
   // Imperial is always derived from the chosen metric with exact math.
   computeImperialFromMetric({ ingredients: out });
-  return out;
+  return { ingredients: out, candidates };
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────

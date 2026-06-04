@@ -78,6 +78,11 @@ data class EditorUiState(
     val sourceUrlsText: String = "",   // newline-separated
     // Author attribution: true = Personal (user's own recipe), false = Imported
     val isPersonalAuthor: Boolean = false,
+    // Variations: true when this recipe is a variation of another (shows the name field)
+    val isVariant: Boolean = false,
+    val variantName: String = "",
+    /** Number of variations this base recipe has (0 when not a base) — used in the delete prompt. */
+    val variantCount: Int = 0,
     // Content
     val sections: List<EditorSection> = emptyList(),
     // Deleted IDs — used to clean up DB rows on save
@@ -116,6 +121,7 @@ class RecipeEditorViewModel(
     private var originalAuthorId: String? = null
     private var originalAuthorDisplayName: String? = null
     private var originalVisibility: String = "private"
+    private var originalParentRecipeId: String? = null
 
     init { loadRecipe() }
 
@@ -144,6 +150,11 @@ class RecipeEditorViewModel(
             originalAuthorDisplayName = recipe.authorDisplayName
                 ?: authRepository.displayName ?: authRepository.email
             originalVisibility = recipe.visibility
+            originalParentRecipeId = recipe.parentRecipeId
+
+            // Count variations if this is a base recipe (for the delete prompt + cascade).
+            val variantCount = if (recipe.parentRecipeId == null)
+                repository.getVariants(recipe.id).size else 0
 
             val sections = if (recipe.sections.isEmpty()) {
                 // No explicit sections — wrap everything in one implicit section
@@ -190,6 +201,9 @@ class RecipeEditorViewModel(
                     baseServingsMax = recipe.baseServingsMax?.toString() ?: "",
                     tagsText = recipe.tags.joinToString(", "),
                     sourceUrlsText = recipe.sourceUrls.joinToString("\n"),
+                    isVariant = recipe.parentRecipeId != null,
+                    variantName = recipe.variantName ?: "",
+                    variantCount = variantCount,
                     sections = sections
                 )
             }
@@ -209,6 +223,8 @@ class RecipeEditorViewModel(
     fun updateTags(v: String) = _uiState.update { it.copy(tagsText = v) }
     fun updateSourceUrls(v: String) = _uiState.update { it.copy(sourceUrlsText = v) }
     fun updateIsPersonalAuthor(v: Boolean) = _uiState.update { it.copy(isPersonalAuthor = v) }
+    fun updateVariantName(v: String) =
+        _uiState.update { it.copy(variantName = v.take(MAX_VARIANT_NAME_LEN)) }
 
     // ─── Section operations ───────────────────────────────────────────────────
 
@@ -344,7 +360,10 @@ class RecipeEditorViewModel(
                     authorDisplayName = if (state.isPersonalAuthor)
                         (authRepository.displayName ?: authRepository.email)
                     else "Imported",
-                    visibility = originalVisibility
+                    visibility = originalVisibility,
+                    parentRecipeId = originalParentRecipeId,
+                    variantName = if (originalParentRecipeId != null)
+                        state.variantName.trim().ifBlank { "Variation" } else null
                 )
 
                 val sectionEntities = state.sections.mapIndexed { idx, section ->
@@ -564,6 +583,17 @@ class RecipeEditorViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isDeleting = true) }
             withContext(Dispatchers.IO) {
+                // If this is a base recipe, cascade-delete its variations first so they
+                // aren't left orphaned (a variation points at this id as its parent).
+                if (originalParentRecipeId == null) {
+                    repository.getVariants(recipeId).forEach { variant ->
+                        repository.deleteFullRecipe(variant.id)
+                        syncService.deletePersonalRecipe(variant.id)
+                        if (variant.visibility == "public") {
+                            sharedRecipeService.unpublish(variant.id)
+                        }
+                    }
+                }
                 repository.deleteFullRecipe(recipeId)
                 // Remove the cloud copy too, otherwise the next pull resurrects it.
                 syncService.deletePersonalRecipe(recipeId)
@@ -577,6 +607,8 @@ class RecipeEditorViewModel(
     }
 
     companion object {
+        const val MAX_VARIANT_NAME_LEN = 20
+
         fun factory(
             repository: RecipeRepository,
             syncService: RecipeSyncService,
