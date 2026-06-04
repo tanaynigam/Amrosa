@@ -17,7 +17,7 @@
 | **Min SDK (Android)** | API 26 (Android 8.0+) |
 | **Min OS (iOS)** | iOS 17+ (SwiftData) |
 | **Architecture** | MVVM + Repository Pattern (both platforms) |
-| **Database (local — Android)** | Room (SQLite) — **current: DB v9, seeder key `seeded_v11`** |
+| **Database (local — Android)** | Room (SQLite) — **current: DB v11** (real migrations preserve data; seeder is a no-op) |
 | **Database (local — iOS)** | SwiftData (ModelContainer, no manual migrations) |
 | **Database (cloud)** | Firebase Firestore (`amrosa-2ec82`) |
 | **Cloud Storage** | Firebase Storage (planned — images) |
@@ -191,7 +191,7 @@ label = if (isImported) "Imported by $name" else name
 
 ### F1 — Recipe Storage
 
-**Room DB v9** — all entities below are current.
+**Room DB v11** — all entities below are current.
 
 ```kotlin
 @Entity(tableName = "recipes")
@@ -211,7 +211,7 @@ data class RecipeEntity(
     val tags: String,                    // JSON List<String>
     val isCustomized: Boolean = false,
     val isImported: Boolean = false,     // URL/file import vs typed; drives "Imported by X" label
-    val isReceived: Boolean = false,     // PLANNED (v2): true = received from another user → Tab 2, read-only
+    val isReceived: Boolean = false,     // true = received from another user → Tab 2, read-only (v2)
     val needsReview: Boolean = false,    // true = imported but not yet confirmed by user
     val version: Int = 1,
     val changeLog: String = "[]",        // JSON List<RecipeChange>
@@ -220,9 +220,12 @@ data class RecipeEntity(
     val syncedAt: Long? = null,
     val authorId: String? = null,        // Firebase UID of the ORIGINAL author (always preserved)
     val authorDisplayName: String? = null, // ORIGINAL author display name (never overwritten with "Imported")
-    val visibility: String = "private"   // "private" | "public" (public = mirrored to shared_recipes)
+    val visibility: String = "private",  // "private" | "public" (public = mirrored to shared_recipes)
+    val parentRecipeId: String? = null,  // F10: null = base recipe; else id of the base this varies (variations)
+    val variantName: String? = null      // F10: e.g. "Spicy", "Vegan" — only set on variations
 )
-// v2 note: isReceived added via Room migration (DB version bump). Tab 1 = isReceived=false; Tab 2 = isReceived=true.
+// isReceived added via MIGRATION_9_10. Tab 1 = isReceived=false; Tab 2 = isReceived=true.
+// parentRecipeId + variantName added via MIGRATION_10_11 (non-destructive). See F10.
 // authorId == null special-case (old "official/seeded") is retired — see Recipe Ownership Model.
 ```
 
@@ -323,7 +326,7 @@ Comments are stored in Firestore only (`shared_recipes/{recipeId}/comments/{comm
 
 **Seeder:** `DatabaseSeeder.seedIfNeeded()` is a **complete no-op**. Fresh installs start blank. Bump seed key together with DB version if schema changes, but no seeding logic runs.
 
-**DB versioning:** `fallbackToDestructiveMigration()`. Current: **DB v9, seeder key `seeded_v11`**. Always bump both together.
+**DB versioning:** Current **DB v11**. Real Room migrations are registered in `AppContainer` (`MIGRATION_9_10` adds `isReceived`; `MIGRATION_10_11` adds `parentRecipeId` + `variantName`) so user data survives schema bumps. `fallbackToDestructiveMigration()` remains only as a safety net for unhandled jumps. Because real users now have data, **prefer adding a `MIGRATION_(n)_(n+1)` (ALTER TABLE) over relying on destructive fallback** when changing the schema.
 
 **Version control:** Every editor save increments `version` and appends `RecipeChange(version, timestamp, summary)` to `changeLog`. Summary is auto-generated from what fields changed.
 
@@ -392,8 +395,9 @@ Freeform flow passes `null` for `onIsOwnRecipeChange` — author toggle is hidde
 Full inline editor. Entry points: pencil icon on detail screen; Edit button on review sheet.
 
 - **Fork dialog** when editing a seeded or shared-copied recipe (becomes a personal copy)
-- Editable fields: title, description, prep/cook times, yield (single or range), tags, source URLs, **author (dropdown)**, sections, ingredients (name, quantity display, unit, group label, optional flag), steps
+- Editable fields: title, description, prep/cook times, yield (single or range), tags, source URLs, **author (dropdown)**, **variation name (only for variations — see F10)**, sections, ingredients (name, quantity display, unit, group label, optional flag), steps
 - Every save increments `version`, appends `RecipeChange`, pushes to `personal_recipes/{uid}/recipes/`
+- **Delete returns to the recipe list** (pops past the detail screen). Deleting a **base** recipe **cascade-deletes its variations** (confirmation copy notes the count).
 
 #### Author dropdown (editor)
 
@@ -407,7 +411,7 @@ Changing the dropdown on save also updates `isImported` in Room, keeping the My 
 - `val personalAuthorName: String` — the signed-in user's display name (used for the "Personal" option label)
 - `updateIsPersonalAuthor(Boolean)` — updates `EditorUiState.isPersonalAuthor`
 
-**Preserved on save (not exposed in UI):** `originalAuthorId`, `originalVisibility`. When forking a seeded recipe (`authorId == null`), stamps the current user's UID as `authorId`.
+**Preserved on save (not exposed in UI):** `originalAuthorId`, `originalVisibility`, `originalParentRecipeId`. When forking a seeded recipe (`authorId == null`), stamps the current user's UID as `authorId`.
 
 ---
 
@@ -472,6 +476,13 @@ For recipes that predate conversions or have stale ones, the **Recipe Editor** h
 - Button is placed **directly above the ingredients/sections** in the editor (after the metadata card).
 - **`EditorIngredient` carries the 6 conversion fields** and the save mapping writes them — fixing a prior bug where editing a recipe wiped its conversions.
 - **Note:** after conversion, a dry ingredient's *Metric* column is weight-based (e.g. flour `120 g`, not `480 ml`) since imperial-as-weight (oz/lb) requires metric-as-weight. Original column is unchanged.
+
+#### Density validation + self-growing density table (`parseRecipe.js`)
+
+To stop Gemini from producing believable-but-wrong volume→weight numbers, the server validates and overrides densities:
+- **Curated `DENSITY_TABLE`** (~12 common ingredients, substring-matched) is **authoritative** — when an ingredient matches, its density overrides Gemini's grams.
+- **Bounded check:** any implied density (`grams / ml`) outside **0.1–2.5 g/ml** is rejected; the ingredient falls back to a volume conversion (ml → fl oz) so a wrong weight can never slip through.
+- **Self-growing learned table** (`ingredient_densities` Firestore collection, Admin-SDK-only — no client rule): `convertIngredients` reads promoted learned densities, merges them **after** the curated table, and records every fresh Gemini-derived volume→weight observation that passes the bounds (running `sumDensity` + `count`, keyed by a normalized ingredient name). A learned density is **promoted/served only after 3+ sightings** (`LEARN_PROMOTE_COUNT`) so the table grows slowly for ingredients that recur. Priority: curated → learned → Gemini's raw value.
 
 ---
 
@@ -841,6 +852,29 @@ This is a **review screen**, mirroring the import pending-review pattern: the sh
 
 ---
 
+### F10 — Recipe Variations ✅
+
+Spin off up to **4 editable variations** of a recipe (e.g. "Spicy", "Vegan") without re-typing it.
+
+**Model — linked separate copies.** A variation is a full standalone recipe (its own sections/ingredients/steps) tagged with:
+- `parentRecipeId` — id of the **base** recipe (`source.parentRecipeId ?: source.id`, so variations-of-variations still group under one base)
+- `variantName` — short label, **capped at 20 chars** (`MAX_VARIANT_NAME_LEN`)
+
+**Hidden from lists.** All list queries (`getYoursRecipes`, `getPersonalRecipes`, `getAllRecipes`, `getImportedRecipes`) filter `parentRecipeId IS NULL`, so variations never appear as standalone cards. They are reached only via the base recipe's detail.
+
+**Detail selector.** `RecipeDetailScreen` shows a horizontally-scrolling chip row (when the family has >1 member or the owner can add one):
+- First chip is the base, **always labelled "Original"** (recipe titles can be long — fixed short label).
+- One `FilterChip` per variation (its `variantName`); tapping switches to that recipe (`onOpenRecipe` → `recipe/{id}`).
+- Trailing **"＋ Variation"** `AssistChip` (owner only, while under `MAX_VARIANTS = 4`) → name dialog → `vm.createVariant(name)` → opens the new copy in the editor.
+
+**Duplication** — `RecipeRepository.duplicateAsVariant(sourceId, variantName, currentUid, displayName)`: deep-copies with **all ids regenerated and every internal reference remapped** (section/ingredient/step ids, step→ingredient refs, `scaleIngredientId`, `substituteGroupId`). New recipe: `version=1`, `visibility="private"`, `isReceived=false`, fresh timestamps. Returns the new id.
+
+**Editor** preserves `parentRecipeId`; shows a "Variation name" field (with `n/20` counter) only when `parentRecipeId != null`. Deleting a base cascade-deletes its variations.
+
+**Sync:** a personal variation syncs to `personal_recipes` with its `parentRecipeId`/`variantName` preserved (multi-device keeps the grouping). A **received** recipe becomes standalone (`parentRecipeId = null`) since the sharer's base doesn't exist locally.
+
+---
+
 ## Screen Map
 
 ```
@@ -923,12 +957,15 @@ UserSearchScreen  (pushed route "user_search")
 ── Push routes (from any tab) ─────────────────────────────────────────
 RecipeDetailScreen  (pushed route "recipe/{recipeId}")
   ├── Title, source URLs (tappable), prep/cook time
+  ├── Variation chips: Original · <variation names> · ＋ Variation (F10; owner, ≤4)
   ├── Yield adjuster (+/−, reset)
   ├── Section jump chips (auto-scroll)
   ├── Unit toggle: Original | Metric | Imperial (shown when conversions exist)
-  ├── Substitute selectors, optional toggles, ingredient checklist
-  ├── Recipe steps with inline ingredient refs
+  ├── Substitute selectors, optional toggles
+  ├── Ingredient checklist grouped by SECTION (step order) then by group label
+  ├── Recipe steps with inline ingredient refs; each section header has "▶ Cook" (start cooking mode there)
   ├── Notes (timestamped, add/edit/delete)
+  ├── Reloads from Room on resume (edits show without reopening)
   ├── Cooking Mode button → CookingModeScreen
   ├── Top bar actions (owners only):
   │     [Share icon] → ShareOptionsSheet (ModalBottomSheet)
@@ -969,11 +1006,15 @@ RecipeEditorScreen  (pushed route "recipe/edit/{recipeId}")
   │     Default: Imported for imported recipes; Personal for freeform recipes
   ├── Sections with ingredients + steps (add/reorder/delete)
   ├── Save → Room (updates isImported + authorDisplayName) + push to personal_recipes Firestore
-  └── "Delete Recipe" button (red outlined, bottom) → confirmation dialog → deleteFullRecipe() → navigate back
+  ├── "Variation name" field (with n/20 counter) — shown only for variations (F10)
+  └── "Delete Recipe" button (red outlined, bottom) → confirmation dialog → deleteFullRecipe()
+        → returns to the recipe LIST (base delete cascades to variations)
 
 CookingModeScreen  (pushed from RecipeDetailScreen)
-  ├── Fullscreen, one step at a time, large text
-  ├── Section label, ingredient card (scaled + unit-converted)
+  ├── Fullscreen, one step at a time, large text — content SCROLLS (long steps no longer clipped)
+  ├── Section label, ingredient card (scaled + unit-converted, honours the unit toggle)
+  ├── Unit toggle (Orig | Metric | Imp) in-screen when conversions exist — shared with detail
+  ├── Section jump menu (☰ in top bar) when >1 section; can also open AT a section via "▶ Cook"
   ├── Prev / Next navigation
   └── Screen-on lock (keepScreenOn flag)
 ```
@@ -1033,7 +1074,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 | Area | Detail |
 |---|---|
-| **Room DB v9** | All entities: recipes, sections, ingredients, steps, step_ingredient_refs, recipe_notes |
+| **Room DB v11** | All entities: recipes, sections, ingredients, steps, step_ingredient_refs, recipe_notes. Real migrations (`MIGRATION_9_10`, `MIGRATION_10_11`) preserve user data |
 | **Recipe detail** | Yield scaling (servings + anchor-based), ingredient checklist, step-ingredient refs, substitute selectors, optional toggles, section jump chips |
 | **Cooking mode** | Fullscreen step-by-step, screen-on lock |
 | **Notes system** | Per-recipe, timestamped, add/edit/delete |
@@ -1077,6 +1118,11 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **Recipe Ownership Model v2** | ✅ End-to-end (iOS↔Android). No official recipes; Tab 1 = mine (editable), Tab 2 = received references (read-only, "Remove"); reference-based shares via `shared_recipes` mirror gated by Public; auto-removal on unpublish/delete; author labels "me / Imported by X". See "Recipe Ownership Model (v2)". |
 | **Notification deep links** | Tapping a push routes to the target screen: `recipe_shared` → `received/{shareId}`; follow notifications → Account tab. `MainActivity` reads FCM extras → `AmrosaApplication.pendingDeepLink` → nav graph navigates. |
 | **Update unit conversions (existing recipes)** | `convertIngredients` Cloud Function (Gemini metric w/ density for dry → weight, liquids → volume) + deterministic imperial; editor "Update unit conversions" button above ingredients; `EditorIngredient` now preserves the 6 conversion fields on save (fixes edit wiping conversions); adaptive `impRound()` so tiny amounts don't show `0 oz`. |
+| **Convert validation + learned densities** | Curated `DENSITY_TABLE` is authoritative; bounded density check (0.1–2.5 g/ml) falls back to fl oz; self-growing `ingredient_densities` Firestore table (Admin-SDK-only) learns volume→weight densities and serves them after 3+ sightings. |
+| **F10 — Recipe Variations** | Up to 4 linked editable copies per recipe (`parentRecipeId` + `variantName`, 20-char cap); hidden from lists; "Original / <name> / ＋ Variation" chips on detail; `duplicateAsVariant()` deep-copy with full id remap; cascade delete; sync-aware. |
+| **Cooking mode upgrades** | Honours the unit toggle (Orig/Metric/Imp, switchable mid-cook); content scrolls (long steps no longer clipped); section jump menu + "▶ Cook from here" on detail section headers. |
+| **Ingredient ordering** | Detail checklist grouped by SECTION (in step order) then by group label; trailing "Other" bucket for section-less ingredients. |
+| **Detail refresh / delete UX** | Detail re-reads from Room on resume so edits show immediately; deleting from the editor returns to the recipe list (not the stale detail). |
 
 ### Planned — In Priority Order
 
@@ -1155,6 +1201,9 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 | Gap | Detail |
 |---|---|
+| **F10 — Recipe Variations** | Android-only so far. iOS needs `parentRecipeId` + `variantName` on the SwiftData model, variation chips on detail, duplicate-with-remap, cascade delete, list filtering. |
+| **Cooking-mode parity** | iOS cooking mode lacks the unit toggle, scrolling, and section jump/start-at-section added on Android. |
+| **Ingredient ordering** | iOS detail still shows a flat ingredient list; Android now groups by section (step order) then group. |
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
 
@@ -1194,8 +1243,8 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 
 ### Database
-- **DB versioning**: `fallbackToDestructiveMigration()`. Always bump `AmrosaDatabase.DB_VERSION` and `DatabaseSeeder` seeder key (`seeded_vN`) together. **Current: DB v9, seeder `seeded_v11`**.
-- **Seeder**: `seedIfNeeded()` is a no-op. Do not add seeding logic. Bump key only when schema changes.
+- **DB versioning**: **Current DB v11.** Real migrations are registered in `AppContainer.addMigrations(...)` and **must be preferred** now that users have data — add a `MIGRATION_(n)_(n+1)` (ALTER TABLE) for every schema change. `fallbackToDestructiveMigration()` stays only as a last-resort safety net (it WIPES local data — avoid relying on it).
+- **Seeder**: `seedIfNeeded()` is a no-op. Do not add seeding logic.
 - **IngredientEntity field order**: F6 conversion fields are **last** (after `orderIndex`). Do not insert new fields before them — it breaks positional `DatabaseSeeder` calls.
 
 ### Recipe Logic
@@ -1203,6 +1252,9 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 - **Substitute resolution**: when substitute selected, apply `substituteRatio` to quantity; show substitute name in step inline text.
 - **StepIngredientRef quantities**: always derived from base value × ratio — never store pre-scaled values.
 - **Version tracking**: every editor save must increment `version` and append to `changeLog`.
+- **Variations (F10)**: a variation is a full recipe with `parentRecipeId` set. List queries filter `parentRecipeId IS NULL`. Create via `RecipeRepository.duplicateAsVariant()` — **regenerate every id and remap all references** (sections, ingredients, steps, step refs, `scaleIngredientId`, `substituteGroupId`); never reuse the source's ids. Base label is the fixed string "Original"; variation names cap at `MAX_VARIANT_NAME_LEN` (20). Deleting a base must cascade-delete its variations. Received recipes are forced standalone (`parentRecipeId = null`).
+- **Ingredient checklist order (detail)**: group by section (in `recipe.sections` order) then by `groupLabel`; the precompute for jump-chip indices and the render loop both consume the same `ingredientBlocks` list — keep them in sync if you change the layout.
+- **Cooking mode**: scale step ingredient amounts with `QuantityScaler.scale(ingredient, scaleFactor, selectedUnit)` (unit-aware), not the legacy display-only overload; the unit toggle and start-section are passed in from `RecipeDetailScreen`.
 
 ### Author Attribution
 - `authorId` + `authorDisplayName` are stamped at creation time (freeform, import, editor fork of seeded recipe).
