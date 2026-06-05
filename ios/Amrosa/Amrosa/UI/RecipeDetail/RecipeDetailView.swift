@@ -16,11 +16,19 @@ struct RecipeDetailView: View {
     @State private var showRemoveConfirm = false
     // "Make public to share" prompt for a private recipe
     @State private var pendingShareRecipient: (uid: String, name: String)? = nil
+    // Variations (F10)
+    @State private var openVariant: RecipeModel? = nil
+    @State private var showAddVariant = false
+    @State private var newVariantName = ""
 
     var body: some View {
         Group {
             if let vm = viewModel {
-                RecipeDetailContent(viewModel: vm)
+                RecipeDetailContent(
+                    viewModel: vm,
+                    onOpenVariant: { openVariant = $0 },
+                    onAddVariant: { newVariantName = ""; showAddVariant = true }
+                )
             } else {
                 ProgressView()
             }
@@ -117,6 +125,24 @@ struct RecipeDetailView: View {
             Text("It will be removed from your recipes. The original author keeps their copy.")
         }
         .onChange(of: viewModel?.removed) { _, isRemoved in if isRemoved == true { dismiss() } }
+        .alert("New Variation", isPresented: $showAddVariant) {
+            TextField("Name (e.g. Spicy, Vegan)", text: $newVariantName)
+            Button("Create") { viewModel?.createVariant(name: newVariantName) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Creates an editable copy you can tweak. Max 20 characters.")
+        }
+        // Variation just created → open its editor
+        .navigationDestination(item: Binding(
+            get: { viewModel?.createdVariantId.flatMap { viewModel?.recipeModel(id: $0) } },
+            set: { _ in viewModel?.createdVariantId = nil }
+        )) { newVariant in
+            RecipeEditorView(recipe: newVariant)
+        }
+        // Switch to another family member (variation chip tap)
+        .navigationDestination(item: $openVariant) { model in
+            RecipeDetailView(recipe: model)
+        }
         .onAppear {
             if viewModel == nil {
                 viewModel = RecipeDetailViewModel(
@@ -124,10 +150,18 @@ struct RecipeDetailView: View {
                     repository: container.recipeRepository,
                     authRepository: container.authRepository,
                     sharedRecipeService: container.sharedRecipeService,
-                    socialRepository: container.socialRepository
+                    socialRepository: container.socialRepository,
+                    syncService: container.syncService
                 )
                 viewModel?.startCommentListener()
+                viewModel?.loadVariants()
+            } else {
+                // Returning from editor / variant switch — refresh + detect deletion
+                viewModel?.reload()
             }
+        }
+        .onChange(of: viewModel?.recipeDeleted) { _, deleted in
+            if deleted == true { dismiss() }
         }
     }
 }
@@ -145,11 +179,48 @@ struct ShareSheet: UIViewControllerRepresentable {
 
 private struct RecipeDetailContent: View {
     @Bindable var viewModel: RecipeDetailViewModel
+    var onOpenVariant: (RecipeModel) -> Void = { _ in }
+    var onAddVariant: () -> Void = {}
 
     var body: some View {
         ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+
+                // ── Variation chips (F10): Original · <names> · ＋ Variation ──
+                if viewModel.variants.count > 1 || viewModel.canAddVariant {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(viewModel.variants) { v in
+                                Button {
+                                    if !v.isCurrent, let model = viewModel.recipeModel(id: v.id) {
+                                        onOpenVariant(model)
+                                    }
+                                } label: {
+                                    Text(v.label)
+                                        .font(.caption).fontWeight(.medium)
+                                        .padding(.horizontal, 12).padding(.vertical, 6)
+                                        .background(v.isCurrent ? Color.accentColor : Color(.secondarySystemBackground))
+                                        .foregroundStyle(v.isCurrent ? Color.white : Color.primary)
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            if viewModel.canAddVariant {
+                                Button(action: onAddVariant) {
+                                    Label("Variation", systemImage: "plus")
+                                        .font(.caption).fontWeight(.medium)
+                                        .padding(.horizontal, 12).padding(.vertical, 6)
+                                        .overlay(Capsule().stroke(Color.accentColor, lineWidth: 1))
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                    }
+                }
 
                 // ── Header: description + visibility chip ─────────────
                 if let desc = viewModel.recipe.recipeDescription {

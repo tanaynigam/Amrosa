@@ -19,14 +19,14 @@ final class SocialRepository {
 
     // MARK: - Profile
 
-    /// Create or merge the current user's public profile document.
-    /// Store the FCM device token in `users/{uid}.fcmToken` so the
-    /// `sendPushNotification` Cloud Function can deliver push notifications.
+    /// Store the FCM device token in a private subdoc `users/{uid}/private/push`
+    /// (owner-only readable) so it isn't world-readable. The `sendPushNotification`
+    /// Cloud Function reads it via the Admin SDK.
     func storeFcmToken(_ token: String) async {
         guard let uid = authRepository.uid else { return }
-        try? await db.collection("users").document(uid).setData(
-            ["fcmToken": token], merge: true
-        )
+        try? await db.collection("users").document(uid)
+            .collection("private").document("push")
+            .setData(["fcmToken": token, "updatedAt": Int64(Date().timeIntervalSince1970 * 1000)])
     }
 
     func upsertProfile() async {

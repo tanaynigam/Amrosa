@@ -30,6 +30,7 @@ final class RecipeRepository {
     }
 
     /// Push-eligible recipes: personal (not imported) AND owned by me (not received). Never pushes references.
+    /// (Variations ARE pushed — they're real personal recipes — so no parentRecipeId filter here.)
     func fetchPersonalRecipes() throws -> [RecipeModel] {
         let descriptor = FetchDescriptor<RecipeModel>(
             predicate: #Predicate { !$0.isImported && !$0.isReceived },
@@ -38,20 +39,29 @@ final class RecipeRepository {
         return try context.fetch(descriptor)
     }
 
-    /// Tab 1 — my recipes only (excludes received references).
+    /// Tab 1 — my base recipes only (excludes received references AND variations).
     func fetchMyRecipes() throws -> [RecipeModel] {
         let descriptor = FetchDescriptor<RecipeModel>(
-            predicate: #Predicate { !$0.isReceived },
+            predicate: #Predicate { !$0.isReceived && $0.parentRecipeId == nil },
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
         )
         return try context.fetch(descriptor)
     }
 
-    /// Tab 2 — recipes received from other users (read-only references).
+    /// Tab 2 — base recipes received from other users (read-only references; variations excluded).
     func fetchReceivedRecipes() throws -> [RecipeModel] {
         let descriptor = FetchDescriptor<RecipeModel>(
-            predicate: #Predicate { $0.isReceived },
+            predicate: #Predicate { $0.isReceived && $0.parentRecipeId == nil },
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+        return try context.fetch(descriptor)
+    }
+
+    /// All variations of a base recipe, oldest first (F10).
+    func getVariants(parentId: String) throws -> [RecipeModel] {
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { $0.parentRecipeId == parentId },
+            sortBy: [SortDescriptor(\.createdAt)]
         )
         return try context.fetch(descriptor)
     }
@@ -284,6 +294,102 @@ final class RecipeRepository {
         try deleteRecipe(id: id)
     }
 
+    // MARK: - Recipe variations (F10)
+
+    /// Deep-copies a recipe into a new variation with fresh ids. Every internal reference
+    /// (section/ingredient/step ids, step→ingredient refs, the scale anchor, substitute-group
+    /// ids) is remapped so the copy is fully self-contained. Points at the *base* (the source's
+    /// parent, or the source itself) so variations-of-variations still group under one base.
+    /// Returns the new recipe id, or nil if the source can't be loaded.
+    @discardableResult
+    func duplicateAsVariant(sourceId: String, variantName: String, currentUid: String?, displayName: String?) throws -> String? {
+        guard let source = try fetchRecipe(id: sourceId) else { return nil }
+        let baseId = source.parentRecipeId ?? source.id
+        let now = Date()
+        let newId = "recipe-var-\(UUID().uuidString)"
+
+        // ID remap tables
+        let sectionIdMap = Dictionary(uniqueKeysWithValues: source.sections.map { ($0.id, "sec-\(UUID().uuidString)") })
+        let ingredientIdMap = Dictionary(uniqueKeysWithValues: source.ingredients.map { ($0.id, "ing-\(UUID().uuidString)") })
+        let stepIdMap = Dictionary(uniqueKeysWithValues: source.steps.map { ($0.id, "step-\(UUID().uuidString)") })
+        let subGroupIds = Set(source.ingredients.compactMap { $0.substituteGroupId })
+        let subGroupMap = Dictionary(uniqueKeysWithValues: subGroupIds.map { ($0, "subg-\(UUID().uuidString)") })
+
+        let variant = RecipeModel(
+            id: newId,
+            title: source.title,
+            recipeDescription: source.recipeDescription,
+            sourceUrls: source.sourceUrls,
+            baseServings: source.baseServings,
+            baseServingsMin: source.baseServingsMin,
+            baseServingsMax: source.baseServingsMax,
+            scaleIngredientId: source.scaleIngredientId.flatMap { ingredientIdMap[$0] },
+            scaleStep: source.scaleStep,
+            prepTimeMinutes: source.prepTimeMinutes,
+            cookTimeMinutes: source.cookTimeMinutes,
+            imageUrl: source.imageUrl,
+            tags: source.tags,
+            isCustomized: true,
+            isImported: source.isImported,
+            isReceived: false,
+            needsReview: false,
+            version: 1,
+            createdAt: now,
+            updatedAt: now,
+            authorId: currentUid ?? source.authorId,
+            authorDisplayName: displayName ?? source.authorDisplayName,
+            visibility: "private",
+            parentRecipeId: baseId,
+            variantName: variantName
+        )
+        context.insert(variant)
+
+        let newSections = source.sections.sorted { $0.orderIndex < $1.orderIndex }.map { s -> RecipeSectionModel in
+            let m = RecipeSectionModel(id: sectionIdMap[s.id]!, name: s.name, orderIndex: s.orderIndex)
+            context.insert(m); m.recipe = variant; return m
+        }
+        let sectionMap = Dictionary(uniqueKeysWithValues: newSections.map { ($0.id, $0) })
+
+        let newIngredients = source.ingredients.sorted { $0.orderIndex < $1.orderIndex }.map { i -> IngredientModel in
+            let m = IngredientModel(
+                id: ingredientIdMap[i.id]!, name: i.name,
+                quantityValue: i.quantityValue, quantityUnit: i.quantityUnit, quantityDisplay: i.quantityDisplay,
+                groupLabel: i.groupLabel, isOptional: i.isOptional,
+                substituteGroupId: i.substituteGroupId.flatMap { subGroupMap[$0] },
+                substituteRatio: i.substituteRatio, orderIndex: i.orderIndex,
+                quantityValueMetric: i.quantityValueMetric, quantityUnitMetric: i.quantityUnitMetric,
+                quantityDisplayMetric: i.quantityDisplayMetric,
+                quantityValueImperial: i.quantityValueImperial, quantityUnitImperial: i.quantityUnitImperial,
+                quantityDisplayImperial: i.quantityDisplayImperial
+            )
+            context.insert(m); m.recipe = variant
+            if let sid = i.section?.id { m.section = sectionMap[sectionIdMap[sid]!] }
+            return m
+        }
+        let ingMap = Dictionary(uniqueKeysWithValues: newIngredients.map { ($0.id, $0) })
+
+        let newSteps = source.steps.sorted { $0.orderIndex < $1.orderIndex }.map { st -> StepModel in
+            let m = StepModel(id: stepIdMap[st.id]!, instruction: st.instruction, orderIndex: st.orderIndex)
+            context.insert(m); m.recipe = variant
+            if let sid = st.section?.id { m.section = sectionMap[sectionIdMap[sid]!] }
+            return m
+        }
+        let stepMap = Dictionary(uniqueKeysWithValues: newSteps.map { ($0.id, $0) })
+
+        for st in source.steps {
+            for ref in st.ingredientRefs {
+                guard let oldIngId = ref.ingredient?.id,
+                      let newIng = ingMap[ingredientIdMap[oldIngId] ?? ""],
+                      let newStep = stepMap[stepIdMap[st.id] ?? ""] else { continue }
+                let refModel = StepIngredientRefModel(quantityDisplay: ref.quantityDisplay)
+                context.insert(refModel); refModel.step = newStep; refModel.ingredient = newIng
+            }
+        }
+
+        try context.save()
+        return newId
+    }
+
     // MARK: - Update
 
     /// Atomically saves editor changes: deletes removed items, upserts survivors.
@@ -300,6 +406,7 @@ final class RecipeRepository {
         tags: [String],
         isImported: Bool,
         authorDisplayName: String?,
+        variantName: String? = nil,
         sections: [EditorSection],
         deletedSectionIds: [String],
         deletedIngredientIds: [String],
@@ -340,6 +447,8 @@ final class RecipeRepository {
         recipe.isImported = isImported
         recipe.isCustomized = true
         recipe.authorDisplayName = authorDisplayName
+        // F10: only variations carry a variantName; bases keep nil. parentRecipeId is preserved.
+        if recipe.parentRecipeId != nil { recipe.variantName = variantName }
         recipe.version += 1
         recipe.updatedAt = Date()
 
@@ -437,6 +546,8 @@ final class RecipeRepository {
             if let v = data["isImported"] as? Bool { existing.isImported = v }
             if let v = data["version"] as? Int { existing.version = v }
             if let v = data["visibility"] as? String { existing.visibility = v }
+            existing.parentRecipeId = data["parentRecipeId"] as? String   // F10: preserve grouping
+            existing.variantName = data["variantName"] as? String
             existing.updatedAt = firestoreUpdatedAt
             existing.syncedAt = now
         } else {
@@ -446,7 +557,7 @@ final class RecipeRepository {
             let authorName = data["authorDisplayName"] as? String
             let isImported = data["isImported"] as? Bool ?? false
             let visibility = data["visibility"] as? String ?? "private"
-            _ = try insertFullRecipeFromParsed(
+            let recipe = try insertFullRecipeFromParsed(
                 recipeId: id,
                 parsed: parsed,
                 authorId: authorId,
@@ -455,6 +566,10 @@ final class RecipeRepository {
                 needsReview: false,
                 visibility: visibility
             )
+            // F10: preserve variation grouping on multi-device personal pull
+            recipe.parentRecipeId = data["parentRecipeId"] as? String
+            recipe.variantName = data["variantName"] as? String
+            try context.save()
             return
         }
         try context.save()

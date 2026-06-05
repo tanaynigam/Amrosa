@@ -2,6 +2,14 @@ import SwiftData
 import Observation
 import Foundation
 
+/// One member of a recipe's variation family (the base or a variation).
+struct VariantRef: Identifiable {
+    let id: String
+    let label: String
+    let isCurrent: Bool
+    let isBase: Bool
+}
+
 @Observable
 @MainActor
 final class RecipeDetailViewModel {
@@ -33,17 +41,27 @@ final class RecipeDetailViewModel {
     var newCommentText = ""
     var commentListenerTask: Task<Void, Never>? = nil
 
+    // Variations (F10)
+    static let maxVariants = 4
+    static let maxVariantNameLen = 20
+    var variants: [VariantRef] = []
+    var canAddVariant = false
+    /// Set to a freshly created variation's id so the view can open its editor.
+    var createdVariantId: String? = nil
+
     private let repository: RecipeRepository
     private let authRepository: AuthRepository
     private let sharedRecipeService: SharedRecipeService
     private let socialRepository: SocialRepository
+    private let syncService: RecipeSyncService?
 
-    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService, socialRepository: SocialRepository) {
+    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService, socialRepository: SocialRepository, syncService: RecipeSyncService? = nil) {
         self.recipe = recipe
         self.repository = repository
         self.authRepository = authRepository
         self.sharedRecipeService = sharedRecipeService
         self.socialRepository = socialRepository
+        self.syncService = syncService
         self.selectedServings = recipe.baseServings
         // Seed anchor quantity from the anchor ingredient's base value
         if let anchorId = recipe.scaleIngredientId,
@@ -326,6 +344,65 @@ final class RecipeDetailViewModel {
         let urlString = "https://amrosa-2ec82.web.app/shared/\(recipe.id)"
         shareURL = URL(string: urlString)
         showShareSheet = true
+    }
+
+    // MARK: - Variations (F10)
+
+    /// True once the underlying recipe no longer exists (deleted in the editor) →
+    /// the detail screen should pop back to the list.
+    var recipeDeleted = false
+
+    /// Re-read on resume (e.g. returning from the editor) so edits show immediately,
+    /// and detect deletion so the screen can navigate back to the list.
+    func reload() {
+        let stillExists = (try? repository.fetchRecipe(id: recipe.id)) ?? nil
+        if stillExists == nil {
+            recipeDeleted = true
+            return
+        }
+        loadVariants()
+    }
+
+    /// Build the variation family (base + its variations) for the selector chips.
+    func loadVariants() {
+        let baseId = recipe.parentRecipeId ?? recipe.id
+        let baseRecipe = recipe.parentRecipeId == nil ? recipe : try? repository.fetchRecipe(id: baseId)
+        let variations = (try? repository.getVariants(parentId: baseId)) ?? []
+        var refs: [VariantRef] = []
+        if let base = baseRecipe {
+            // Base chip uses a fixed short label (recipe titles can be long).
+            refs.append(VariantRef(id: base.id, label: "Original", isCurrent: base.id == recipe.id, isBase: true))
+        }
+        for v in variations {
+            let name = (v.variantName?.isEmpty == false) ? v.variantName! : "Variation"
+            refs.append(VariantRef(id: v.id, label: name, isCurrent: v.id == recipe.id, isBase: false))
+        }
+        variants = refs
+        canAddVariant = isOwner && variations.count < Self.maxVariants
+    }
+
+    /// Fetch a recipe model by id (for navigating between variation family members).
+    func recipeModel(id: String) -> RecipeModel? {
+        try? repository.fetchRecipe(id: id)
+    }
+
+    /// Create a new variation of the current recipe, then emit its id so the view opens the editor.
+    func createVariant(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        let finalName = trimmed.isEmpty ? "Variation" : String(trimmed.prefix(Self.maxVariantNameLen))
+        let newId = try? repository.duplicateAsVariant(
+            sourceId: recipe.id,
+            variantName: finalName,
+            currentUid: authRepository.uid,
+            displayName: authRepository.displayName ?? authRepository.email
+        )
+        if let newId = newId {
+            createdVariantId = newId
+            // Push the new variation to the cloud (it's a real personal recipe).
+            if let model = try? repository.fetchRecipe(id: newId) {
+                Task { await syncService?.pushPersonalRecipe(model) }
+            }
+        }
     }
 
     // MARK: - Comments

@@ -112,6 +112,12 @@ final class RecipeEditorViewModel {
     var deleteComplete = false
     /// true = Personal (isImported=false), false = Imported (isImported=true)
     var isPersonalAuthor: Bool = true
+    // Variations (F10)
+    var isVariant: Bool = false
+    var variantName: String = ""
+    /// Number of variations this base recipe has (0 when not a base) — used in the delete prompt.
+    var variantCount: Int = 0
+    static let maxVariantNameLen = 20
 
     var existingRecipe: RecipeModel?
     private let repository: RecipeRepository
@@ -191,6 +197,16 @@ final class RecipeEditorViewModel {
         }
         // Default: imported recipes start as "Imported"; personal/freeform as "Personal"
         self.isPersonalAuthor = !recipe.isImported
+        // F10 variations
+        self.isVariant = recipe.parentRecipeId != nil
+        self.variantName = recipe.variantName ?? ""
+        if !forking, recipe.parentRecipeId == nil {
+            self.variantCount = (try? repository.getVariants(parentId: recipe.id).count) ?? 0
+        }
+    }
+
+    func updateVariantName(_ v: String) {
+        variantName = String(v.prefix(Self.maxVariantNameLen))
     }
 
     // MARK: - Section CRUD
@@ -288,6 +304,7 @@ final class RecipeEditorViewModel {
                     tags: tags,
                     isImported: !isPersonalAuthor,
                     authorDisplayName: isPersonalAuthor ? personalAuthorName : "Imported",
+                    variantName: isVariant ? (variantName.trimmed.isEmpty ? "Variation" : variantName.trimmed) : nil,
                     sections: sections,
                     deletedSectionIds: Array(deletedSectionIds),
                     deletedIngredientIds: Array(deletedIngredientIds),
@@ -330,8 +347,19 @@ final class RecipeEditorViewModel {
         guard let existing = existingRecipe else { return }
         let wasPublic = existing.visibility == "public"
         let id = existing.id
+        let isBase = existing.parentRecipeId == nil
         isDeleting = true
         Task {
+            // F10: deleting a base cascade-deletes its variations (else they're orphaned).
+            if isBase, let variations = try? repository.getVariants(parentId: id) {
+                for v in variations {
+                    let vId = v.id
+                    let vPublic = v.visibility == "public"
+                    try? repository.deleteRecipe(id: vId)
+                    await syncService?.deletePersonalRecipe(vId)
+                    if vPublic { _ = await sharedRecipeService?.unpublish(vId) }
+                }
+            }
             try? repository.deleteRecipe(id: id)
             // Remove the cloud copy too, otherwise the next pull resurrects it.
             await syncService?.deletePersonalRecipe(id)

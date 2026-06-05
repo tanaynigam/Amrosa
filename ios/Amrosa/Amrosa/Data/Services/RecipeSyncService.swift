@@ -147,6 +147,8 @@ final class RecipeSyncService {
         if let v = recipe.baseServingsMin   { data["baseServingsMin"] = v }
         if let v = recipe.baseServingsMax   { data["baseServingsMax"] = v }
         if let v = recipe.scaleIngredientId { data["scaleIngredientId"] = v }
+        if let v = recipe.parentRecipeId    { data["parentRecipeId"] = v }   // F10: preserve grouping multi-device
+        if let v = recipe.variantName       { data["variantName"] = v }
 
         data["tags"] = recipe.tags
         data["sourceUrls"] = recipe.sourceUrls

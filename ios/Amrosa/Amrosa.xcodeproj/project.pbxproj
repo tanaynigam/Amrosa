@@ -89,7 +89,7 @@
 		2B8469CC13DE9050F4218D4A /* AmrosaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmrosaApp.swift; sourceTree = "<group>"; };
 		2B9563ED088CACA5E660CA22 /* SocialModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialModels.swift; sourceTree = "<group>"; };
 		2B9F58D556EDEC241EC090D1 /* ReceivedRecipeSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceivedRecipeSummary.swift; sourceTree = "<group>"; };
-		2CC76E521A7C1E67DB54C861 /* Amrosa.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Amrosa.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2CC76E521A7C1E67DB54C861 /* Amrosa.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Amrosa.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		356CE035A2F5D33FB8375930 /* SharedRecipeDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedRecipeDetailView.swift; sourceTree = "<group>"; };
 		35DE5A5FDE9B5749BAE51750 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		3B8FC9CAC1EE41E1C53784B1 /* AllRecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllRecipesView.swift; sourceTree = "<group>"; };
@@ -565,7 +565,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Amrosa/Amrosa.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 7S2FY6WF5V;
 				INFOPLIST_FILE = Amrosa/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -661,7 +661,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Amrosa/Amrosa.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 7S2FY6WF5V;
 				INFOPLIST_FILE = Amrosa/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;

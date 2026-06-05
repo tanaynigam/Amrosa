@@ -131,6 +131,20 @@ private struct RecipeEditorContent: View {
                 .pickerStyle(.menu)
             }
 
+            // F10: variation name field — only shown when editing a variation
+            if viewModel.isVariant {
+                Section("Variation Name") {
+                    HStack {
+                        TextField("e.g. Spicy, Vegan", text: Binding(
+                            get: { viewModel.variantName },
+                            set: { viewModel.updateVariantName($0) }
+                        ))
+                        Text("\(viewModel.variantName.count)/\(RecipeEditorViewModel.maxVariantNameLen)")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
             Section("Tags") {
                 TextField("Dinner, Italian, Baking…", text: $viewModel.tagsText)
             }

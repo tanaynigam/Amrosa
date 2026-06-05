@@ -30,6 +30,10 @@ final class RecipeModel {
     var authorDisplayName: String?
     /// "private" or "public". Controls visibility in shared_recipes.
     var visibility: String
+    /// F10: null = base recipe; else id of the base this is a variation of.
+    var parentRecipeId: String? = nil
+    /// F10: e.g. "Spicy", "Vegan" — only set on variations.
+    var variantName: String? = nil
 
     @Relationship(deleteRule: .cascade, inverse: \RecipeSectionModel.recipe)
     var sections: [RecipeSectionModel] = []
@@ -68,7 +72,9 @@ final class RecipeModel {
         syncedAt: Date? = nil,
         authorId: String? = nil,
         authorDisplayName: String? = nil,
-        visibility: String = "private"
+        visibility: String = "private",
+        parentRecipeId: String? = nil,
+        variantName: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -95,6 +101,8 @@ final class RecipeModel {
         self.authorId = authorId
         self.authorDisplayName = authorDisplayName
         self.visibility = visibility
+        self.parentRecipeId = parentRecipeId
+        self.variantName = variantName
     }
 
     private static func encode<T: Encodable>(_ value: T) -> String {
