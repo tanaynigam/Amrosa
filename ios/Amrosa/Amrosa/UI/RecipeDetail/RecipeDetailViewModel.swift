@@ -217,6 +217,54 @@ final class RecipeDetailViewModel {
             }
     }
 
+    struct IngredientGroup: Identifiable {
+        let id = UUID()
+        let label: String           // "" = ungrouped
+        let ingredients: [IngredientModel]
+    }
+    struct IngredientSectionBlock: Identifiable {
+        let id: String              // section id, or "__other__"
+        let title: String?          // nil when only one section / no section headers needed
+        let groups: [IngredientGroup]
+    }
+
+    /// Ingredient checklist grouped by SECTION (in step/section order), then by group label.
+    /// Section-less ingredients fall into a trailing "Other" block. Matches Android's ordering.
+    var ingredientSectionBlocks: [IngredientSectionBlock] {
+        let visible = visibleIngredients
+        let multiSection = sortedSections.count > 1
+        let hasSectionless = visible.contains { $0.section == nil }
+
+        func groups(_ ings: [IngredientModel]) -> [IngredientGroup] {
+            guard !ings.isEmpty else { return [] }
+            var result: [IngredientGroup] = []
+            let ungrouped = ings.filter { ($0.groupLabel ?? "").isEmpty }
+            if !ungrouped.isEmpty { result.append(IngredientGroup(label: "", ingredients: ungrouped)) }
+            var seen = Set<String>()
+            for ing in ings {
+                guard let label = ing.groupLabel, !label.isEmpty, !seen.contains(label) else { continue }
+                seen.insert(label)
+                result.append(IngredientGroup(label: label, ingredients: ings.filter { $0.groupLabel == label }))
+            }
+            return result
+        }
+
+        var blocks: [IngredientSectionBlock] = []
+        for section in sortedSections {
+            let g = groups(visible.filter { $0.section?.id == section.id })
+            if !g.isEmpty {
+                blocks.append(IngredientSectionBlock(id: section.id,
+                    title: (multiSection || hasSectionless) ? section.name : nil, groups: g))
+            }
+        }
+        let otherGroups = groups(visible.filter { $0.section == nil })
+        if !otherGroups.isEmpty {
+            blocks.append(IngredientSectionBlock(id: "__other__",
+                title: blocks.isEmpty ? nil : "Other", groups: otherGroups))
+        }
+        return blocks
+    }
+
     func toggleOptional(_ ingredientId: String) {
         if enabledOptionals.contains(ingredientId) {
             enabledOptionals.remove(ingredientId)

@@ -2,11 +2,30 @@ import SwiftUI
 
 struct CookingModeView: View {
     @Bindable var viewModel: RecipeDetailViewModel
+    /// Optional section to start cooking from ("▶ Cook from here").
+    var startSectionId: String? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var currentStepIndex = 0
+    @State private var didApplyStart = false
 
     private var allSteps: [StepModel] {
         viewModel.recipe.steps.sorted { $0.orderIndex < $1.orderIndex }
+    }
+
+    /// Sections that actually contain steps, in step order (for the jump menu).
+    private var stepSections: [RecipeSectionModel] {
+        var seen = Set<String>()
+        var result: [RecipeSectionModel] = []
+        for step in allSteps {
+            if let s = step.section, !seen.contains(s.id) {
+                seen.insert(s.id); result.append(s)
+            }
+        }
+        return result
+    }
+
+    private func firstStepIndex(ofSection sectionId: String) -> Int? {
+        allSteps.firstIndex { $0.section?.id == sectionId }
     }
 
     var body: some View {
@@ -20,6 +39,31 @@ struct CookingModeView: View {
                         .font(.headline)
 
                     Spacer()
+
+                    // Unit toggle (shared with detail) — only when conversions exist
+                    if viewModel.hasConversionData {
+                        Picker("Units", selection: Binding(
+                            get: { viewModel.unitMode },
+                            set: { viewModel.unitMode = $0 }
+                        )) {
+                            ForEach(UnitMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 160)
+                    }
+
+                    // Section jump menu — only when >1 section has steps
+                    if stepSections.count > 1 {
+                        Menu {
+                            ForEach(stepSections) { section in
+                                Button(section.name) {
+                                    if let idx = firstStepIndex(ofSection: section.id) { currentStepIndex = idx }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "list.bullet")
+                        }
+                    }
 
                     Text("\(currentStepIndex + 1) / \(allSteps.count)")
                         .font(.subheadline)
@@ -63,7 +107,8 @@ struct CookingModeView: View {
                                     ForEach(refs) { ref in
                                         if let ing = ref.ingredient {
                                             HStack {
-                                                Text(ref.quantityDisplay ?? viewModel.scaledQuantity(for: ing))
+                                                // Unit-aware + scaled (honours the toggle), not the static ref display
+                                                Text(viewModel.scaledQuantity(for: ing))
                                                     .fontWeight(.medium)
                                                 Text(ing.name)
                                             }
@@ -123,6 +168,11 @@ struct CookingModeView: View {
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
+            // Start at the requested section, if any ("▶ Cook from here")
+            if !didApplyStart, let sid = startSectionId, let idx = firstStepIndex(ofSection: sid) {
+                currentStepIndex = idx
+            }
+            didApplyStart = true
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false

@@ -482,6 +482,13 @@ final class RecipeRepository {
                     existing.isOptional = edIng.isOptional
                     existing.orderIndex = idx
                     existing.section = section
+                    // F6 conversion fields (preserved / updated by the convert button)
+                    existing.quantityValueMetric = edIng.quantityValueMetric
+                    existing.quantityUnitMetric = edIng.quantityUnitMetric
+                    existing.quantityDisplayMetric = edIng.quantityDisplayMetric
+                    existing.quantityValueImperial = edIng.quantityValueImperial
+                    existing.quantityUnitImperial = edIng.quantityUnitImperial
+                    existing.quantityDisplayImperial = edIng.quantityDisplayImperial
                 } else {
                     let ing = IngredientModel(
                         id: edIng.id,
@@ -491,7 +498,13 @@ final class RecipeRepository {
                         quantityDisplay: edIng.quantityDisplay.isEmpty ? nil : edIng.quantityDisplay,
                         groupLabel: edIng.groupLabel.isEmpty ? nil : edIng.groupLabel,
                         isOptional: edIng.isOptional,
-                        orderIndex: idx
+                        orderIndex: idx,
+                        quantityValueMetric: edIng.quantityValueMetric,
+                        quantityUnitMetric: edIng.quantityUnitMetric,
+                        quantityDisplayMetric: edIng.quantityDisplayMetric,
+                        quantityValueImperial: edIng.quantityValueImperial,
+                        quantityUnitImperial: edIng.quantityUnitImperial,
+                        quantityDisplayImperial: edIng.quantityDisplayImperial
                     )
                     context.insert(ing)
                     ing.recipe = recipe

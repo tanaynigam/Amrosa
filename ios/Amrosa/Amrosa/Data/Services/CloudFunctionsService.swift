@@ -35,6 +35,21 @@ final class CloudFunctionsService {
         return try mapToParsedRecipeData(data)
     }
 
+    /// Update unit conversions for a list of ingredients (F6). Returns id → 6 conversion fields.
+    /// Input: [{id, name, quantityDisplay}]. Output keyed by id.
+    func convertIngredients(_ ingredients: [[String: Any]]) async throws -> [String: [String: Any]] {
+        let result = try await functions.httpsCallable("convertIngredients").call(["ingredients": ingredients])
+        guard let data = result.data as? [String: Any],
+              let list = data["ingredients"] as? [[String: Any]] else {
+            throw CloudFunctionError.invalidResponse
+        }
+        var byId: [String: [String: Any]] = [:]
+        for item in list {
+            if let id = item["id"] as? String { byId[id] = item }
+        }
+        return byId
+    }
+
     // MARK: - Mapping
 
     private func mapToParsedRecipeData(_ data: [String: Any]) throws -> ParsedRecipeData {

@@ -1153,6 +1153,16 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 - **Author-name resolution ("Imported by Imported" fix):** at save, when the mirror name is blank/"Imported" the sender IS the author → use `fromDisplayName`. On refresh, `resolveAuthorName()` reads `users/{authorUid}.displayName` (authoritative) so legacy/iOS recipes stored as literal "Imported" display the real name.
 - **Notification deep links:** `recipe_shared` tap → Shared tab → `SharedInboxView` consumes the shareId and opens the `ReceivedRecipeView` review screen; `follow_*` → Account tab.
 
+**F10 Recipe Variations + QOL — ported:**
+- `RecipeModel.parentRecipeId` + `variantName` (SwiftData auto-migrates). Base lists (`fetchMyRecipes`/`fetchReceivedRecipes`) filter `parentRecipeId == nil`; `getVariants(parentId:)`; `duplicateAsVariant()` deep-copies with full id remap (sections/ingredients/steps/refs/`scaleIngredientId`/`substituteGroupId`).
+- `RecipeDetailView`: Original / `<name>` / ＋ Variation chips; chip tap navigates to the family member; ＋ → name alert → `createVariant()` → opens editor (and pushes to cloud). Reloads on resume; dismisses to the list when the recipe was deleted.
+- `RecipeEditorView`: variation-name field (n/20) for variations; cascade-deletes variations when a base is deleted; preserves `parentRecipeId`.
+- Sync: push/pull carry `parentRecipeId`/`variantName`; received recipes forced standalone (`parentRecipeId = nil`).
+- **Cooking mode:** in-screen unit toggle (shared with detail), section jump menu, "▶ Cook from here" on detail section headers (start-at-section), unit-aware ingredient amounts. Already scrolled.
+- **Ingredient ordering:** detail checklist grouped by SECTION (step order) then group label, trailing "Other" bucket (`ingredientSectionBlocks`).
+- **"Update unit conversions" button** in the editor → `convertIngredients` CF → merges metric/imperial into `EditorIngredient` (now carries the 6 conversion fields); Save persists. `updateFullRecipe` writes the conversion fields (no more wiping).
+- **fcmToken privacy:** stored in `users/{uid}/private/push` (owner-only), not the world-readable profile doc.
+
 ### iOS ✅ Implemented & Matching Android
 
 | Feature | Notes |
@@ -1201,9 +1211,6 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 | Gap | Detail |
 |---|---|
-| **F10 — Recipe Variations** | Android-only so far. iOS needs `parentRecipeId` + `variantName` on the SwiftData model, variation chips on detail, duplicate-with-remap, cascade delete, list filtering. |
-| **Cooking-mode parity** | iOS cooking mode lacks the unit toggle, scrolling, and section jump/start-at-section added on Android. |
-| **Ingredient ordering** | iOS detail still shows a flat ingredient list; Android now groups by section (step order) then group. |
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
 

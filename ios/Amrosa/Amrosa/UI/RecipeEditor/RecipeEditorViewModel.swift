@@ -12,6 +12,14 @@ struct EditorIngredient: Identifiable {
     var quantityDisplay: String
     var groupLabel: String
     var isOptional: Bool
+    // F6 conversion fields — carried so editing doesn't wipe them and the
+    // "Update unit conversions" button can populate them.
+    var quantityValueMetric: Double? = nil
+    var quantityUnitMetric: String? = nil
+    var quantityDisplayMetric: String? = nil
+    var quantityValueImperial: Double? = nil
+    var quantityUnitImperial: String? = nil
+    var quantityDisplayImperial: String? = nil
 
     init(id: String = UUID().uuidString,
          name: String = "",
@@ -37,6 +45,12 @@ struct EditorIngredient: Identifiable {
         self.quantityDisplay = model.quantityDisplay ?? ""
         self.groupLabel = model.groupLabel ?? ""
         self.isOptional = model.isOptional
+        self.quantityValueMetric = model.quantityValueMetric
+        self.quantityUnitMetric = model.quantityUnitMetric
+        self.quantityDisplayMetric = model.quantityDisplayMetric
+        self.quantityValueImperial = model.quantityValueImperial
+        self.quantityUnitImperial = model.quantityUnitImperial
+        self.quantityDisplayImperial = model.quantityDisplayImperial
     }
 }
 
@@ -124,6 +138,11 @@ final class RecipeEditorViewModel {
     private let authRepository: AuthRepository
     private let syncService: RecipeSyncService?
     private let sharedRecipeService: SharedRecipeService?
+    private let cloudFunctions: CloudFunctionsService?
+
+    // Unit conversions (F6 "Update unit conversions" button)
+    var isConverting = false
+    var conversionMessage: String? = nil
 
     /// Display name shown in the "Personal" dropdown option
     var personalAuthorName: String {
@@ -132,11 +151,12 @@ final class RecipeEditorViewModel {
 
     // MARK: - Init for new recipe
 
-    init(repository: RecipeRepository, authRepository: AuthRepository, syncService: RecipeSyncService? = nil, sharedRecipeService: SharedRecipeService? = nil) {
+    init(repository: RecipeRepository, authRepository: AuthRepository, syncService: RecipeSyncService? = nil, sharedRecipeService: SharedRecipeService? = nil, cloudFunctions: CloudFunctionsService? = nil) {
         self.repository = repository
         self.authRepository = authRepository
         self.syncService = syncService
         self.sharedRecipeService = sharedRecipeService
+        self.cloudFunctions = cloudFunctions
         self.title = ""
         self.description = ""
         self.prepTimeMinutes = ""
@@ -158,11 +178,13 @@ final class RecipeEditorViewModel {
          authRepository: AuthRepository,
          syncService: RecipeSyncService? = nil,
          sharedRecipeService: SharedRecipeService? = nil,
+         cloudFunctions: CloudFunctionsService? = nil,
          forking: Bool = false) {
         self.repository = repository
         self.authRepository = authRepository
         self.syncService = syncService
         self.sharedRecipeService = sharedRecipeService
+        self.cloudFunctions = cloudFunctions
         self.existingRecipe = forking ? nil : recipe
         self.title = forking ? "\(recipe.title) (copy)" : recipe.title
         self.description = recipe.recipeDescription ?? ""
@@ -340,6 +362,47 @@ final class RecipeEditorViewModel {
             errorMessage = error.localizedDescription
         }
     }
+
+    // MARK: - Update unit conversions (F6)
+
+    /// Re-derive metric/imperial conversions for all ingredients via the
+    /// `convertIngredients` Cloud Function, then merge into editor state.
+    /// The user must Save afterwards to persist.
+    func updateConversions() {
+        let allIngs = sections.flatMap { $0.ingredients }
+        guard !allIngs.isEmpty, let cf = cloudFunctions else { return }
+        isConverting = true
+        Task {
+            do {
+                let payload: [[String: Any]] = allIngs.map { ing in
+                    ["id": ing.id, "name": ing.name, "quantityDisplay": ing.quantityDisplay]
+                }
+                let byId = try await cf.convertIngredients(payload)
+                sections = sections.map { section in
+                    var s = section
+                    s.ingredients = section.ingredients.map { ing in
+                        guard let r = byId[ing.id] else { return ing }
+                        var updated = ing
+                        updated.quantityValueMetric = (r["quantityValueMetric"] as? NSNumber)?.doubleValue
+                        updated.quantityUnitMetric = r["quantityUnitMetric"] as? String
+                        updated.quantityDisplayMetric = r["quantityDisplayMetric"] as? String
+                        updated.quantityValueImperial = (r["quantityValueImperial"] as? NSNumber)?.doubleValue
+                        updated.quantityUnitImperial = r["quantityUnitImperial"] as? String
+                        updated.quantityDisplayImperial = r["quantityDisplayImperial"] as? String
+                        return updated
+                    }
+                    return s
+                }
+                isConverting = false
+                conversionMessage = "Conversions updated — Save to keep them"
+            } catch {
+                isConverting = false
+                conversionMessage = "Conversion failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func clearConversionMessage() { conversionMessage = nil }
 
     // MARK: - Delete
 

@@ -20,14 +20,28 @@ struct RecipeDetailView: View {
     @State private var openVariant: RecipeModel? = nil
     @State private var showAddVariant = false
     @State private var newVariantName = ""
+    // Cooking mode start-at-section ("▶ Cook from here")
+    @State private var cookFromSectionId: String? = nil
 
     var body: some View {
+        navAndSheets
+            .onAppear { onAppearSetup() }
+            .onChange(of: viewModel?.recipeDeleted) { _, deleted in
+                if deleted == true { dismiss() }
+            }
+    }
+
+    // Split into helper builders so SwiftUI's type-checker handles each chunk independently.
+
+    @ViewBuilder
+    private var coreView: some View {
         Group {
             if let vm = viewModel {
                 RecipeDetailContent(
                     viewModel: vm,
                     onOpenVariant: { openVariant = $0 },
-                    onAddVariant: { newVariantName = ""; showAddVariant = true }
+                    onAddVariant: { newVariantName = ""; showAddVariant = true },
+                    onCookFromSection: { cookFromSectionId = $0; showCookingMode = true }
                 )
             } else {
                 ProgressView()
@@ -35,134 +49,166 @@ struct RecipeDetailView: View {
         }
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .navigationBarTrailing) {
-                if viewModel?.isReceived == true {
-                    // Received (Tab 2) — read-only: Remove + Cooking Mode only
-                    Button(role: .destructive) { showRemoveConfirm = true } label: {
-                        Image(systemName: "trash")
-                    }
-                    Button { showCookingMode = true } label: {
-                        Image(systemName: "book.closed")
-                    }
-                } else {
-                    // Owned recipe — Share + Edit + Cooking Mode
-                    if viewModel?.isOwner == true {
-                        Button { viewModel?.loadFollowing(); showShareOptions = true } label: {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                    }
-                    Button { navigateToEditor = true } label: {
-                        Image(systemName: "pencil")
-                    }
-                    Button { showCookingMode = true } label: {
-                        Image(systemName: "book.closed")
+        .toolbar { toolbarContent }
+    }
+
+    @ViewBuilder
+    private var navAndSheets: some View {
+        shareDialogs
+            .navigationDestination(isPresented: $navigateToEditor) {
+                RecipeEditorView(recipe: recipe, forking: isForkMode)
+            }
+            .fullScreenCover(isPresented: $showCookingMode) {
+                if let vm = viewModel { CookingModeView(viewModel: vm, startSectionId: cookFromSectionId) }
+            }
+            .alert("New Variation", isPresented: $showAddVariant) {
+                TextField("Name (e.g. Spicy, Vegan)", text: $newVariantName)
+                Button("Create") { viewModel?.createVariant(name: newVariantName) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Creates an editable copy you can tweak. Max 20 characters.")
+            }
+            .navigationDestination(item: createdVariantBinding) { newVariant in
+                RecipeEditorView(recipe: newVariant)
+            }
+            .navigationDestination(item: $openVariant) { model in
+                RecipeDetailView(recipe: model)
+            }
+    }
+
+    @ViewBuilder
+    private var shareDialogs: some View {
+        coreView
+            .sheet(isPresented: $showShareOptions) {
+                if let vm = viewModel {
+                    ShareOptionsSheet(
+                        isPresented: $showShareOptions,
+                        onSendToFollower: { showShareOptions = false; showFollowerPicker = true },
+                        onShareLink: { showShareOptions = false; vm.handleShareTap() }
+                    )
+                }
+            }
+            .sheet(isPresented: Binding(get: { viewModel?.showShareSheet ?? false },
+                                        set: { viewModel?.showShareSheet = $0 })) {
+                if let url = viewModel?.shareURL { ShareSheet(items: [url]) }
+            }
+            .alert("Share Recipe?", isPresented: Binding(get: { viewModel?.showShareConfirmDialog ?? false },
+                                                          set: { viewModel?.showShareConfirmDialog = $0 })) {
+                Button("Share") { viewModel?.publishAndShare() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This recipe will be visible to anyone with the link. You can make it private again at any time.")
+            }
+            .sheet(isPresented: $showFollowerPicker) {
+                if let vm = viewModel {
+                    FollowerPickerSheet(viewModel: vm, isPresented: $showFollowerPicker) { uid, name in
+                        if vm.isPublic { vm.shareToFollower(uid: uid, name: name) }
+                        else { pendingShareRecipient = (uid, name) }
                     }
                 }
             }
+            .modifier(SentAndRemoveDialogs(
+                showSentConfirmation: $showSentConfirmation,
+                showRemoveConfirm: $showRemoveConfirm,
+                pendingShareRecipient: $pendingShareRecipient,
+                viewModel: viewModel
+            ))
+    }
+
+    private func onAppearSetup() {
+        if viewModel == nil {
+            viewModel = RecipeDetailViewModel(
+                recipe: recipe,
+                repository: container.recipeRepository,
+                authRepository: container.authRepository,
+                sharedRecipeService: container.sharedRecipeService,
+                socialRepository: container.socialRepository,
+                syncService: container.syncService
+            )
+            viewModel?.startCommentListener()
+            viewModel?.loadVariants()
+        } else {
+            viewModel?.reload()
         }
-        .navigationDestination(isPresented: $navigateToEditor) {
-            RecipeEditorView(recipe: recipe, forking: isForkMode)
-        }
-        .fullScreenCover(isPresented: $showCookingMode) {
-            if let vm = viewModel { CookingModeView(viewModel: vm) }
-        }
-        .sheet(isPresented: $showShareOptions) {
-            if let vm = viewModel {
-                ShareOptionsSheet(
-                    isPresented: $showShareOptions,
-                    onSendToFollower: { showShareOptions = false; showFollowerPicker = true },
-                    onShareLink: { showShareOptions = false; vm.handleShareTap() }
-                )
-            }
-        }
-        .sheet(isPresented: Binding(get: { viewModel?.showShareSheet ?? false },
-                                    set: { viewModel?.showShareSheet = $0 })) {
-            if let url = viewModel?.shareURL { ShareSheet(items: [url]) }
-        }
-        .alert("Share Recipe?", isPresented: Binding(get: { viewModel?.showShareConfirmDialog ?? false },
-                                                      set: { viewModel?.showShareConfirmDialog = $0 })) {
-            Button("Share") { viewModel?.publishAndShare() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This recipe will be visible to anyone with the link. You can make it private again at any time.")
-        }
-        .sheet(isPresented: $showFollowerPicker) {
-            if let vm = viewModel {
-                FollowerPickerSheet(viewModel: vm, isPresented: $showFollowerPicker) { uid, name in
-                    // Gate on Public — sharing a private recipe prompts to make it public first
-                    if vm.isPublic {
-                        vm.shareToFollower(uid: uid, name: name)
-                    } else {
-                        pendingShareRecipient = (uid, name)
-                    }
-                }
-            }
-        }
-        .alert("Sent!", isPresented: $showSentConfirmation) {
-            Button("OK", role: .cancel) { viewModel?.shareSentToName = nil }
-        } message: {
-            if let name = viewModel?.shareSentToName { Text("Recipe sent to \(name).") }
-        }
-        .onChange(of: viewModel?.shareSentToName) { _, newVal in if newVal != nil { showSentConfirmation = true } }
-        .alert(
-            "Share with \(pendingShareRecipient?.name ?? "")?",
-            isPresented: Binding(get: { pendingShareRecipient != nil },
-                                 set: { if !$0 { pendingShareRecipient = nil } })
-        ) {
-            Button("Share") {
-                if let r = pendingShareRecipient { viewModel?.makePublicAndShareToFollower(uid: r.uid, name: r.name) }
-                pendingShareRecipient = nil
-            }
-            Button("Cancel", role: .cancel) { pendingShareRecipient = nil }
-        } message: {
-            Text("Sharing makes this recipe public so they can view it. You can make it private again later.")
-        }
-        .confirmationDialog("Remove this recipe?", isPresented: $showRemoveConfirm, titleVisibility: .visible) {
-            Button("Remove", role: .destructive) { viewModel?.removeReceivedRecipe() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("It will be removed from your recipes. The original author keeps their copy.")
-        }
-        .onChange(of: viewModel?.removed) { _, isRemoved in if isRemoved == true { dismiss() } }
-        .alert("New Variation", isPresented: $showAddVariant) {
-            TextField("Name (e.g. Spicy, Vegan)", text: $newVariantName)
-            Button("Create") { viewModel?.createVariant(name: newVariantName) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Creates an editable copy you can tweak. Max 20 characters.")
-        }
-        // Variation just created → open its editor
-        .navigationDestination(item: Binding(
-            get: { viewModel?.createdVariantId.flatMap { viewModel?.recipeModel(id: $0) } },
+    }
+
+    /// Navigates to a just-created variation's editor (extracted to ease the type-checker).
+    private var createdVariantBinding: Binding<RecipeModel?> {
+        Binding(
+            get: {
+                guard let id = viewModel?.createdVariantId else { return nil }
+                return viewModel?.recipeModel(id: id)
+            },
             set: { _ in viewModel?.createdVariantId = nil }
-        )) { newVariant in
-            RecipeEditorView(recipe: newVariant)
-        }
-        // Switch to another family member (variation chip tap)
-        .navigationDestination(item: $openVariant) { model in
-            RecipeDetailView(recipe: model)
-        }
-        .onAppear {
-            if viewModel == nil {
-                viewModel = RecipeDetailViewModel(
-                    recipe: recipe,
-                    repository: container.recipeRepository,
-                    authRepository: container.authRepository,
-                    sharedRecipeService: container.sharedRecipeService,
-                    socialRepository: container.socialRepository,
-                    syncService: container.syncService
-                )
-                viewModel?.startCommentListener()
-                viewModel?.loadVariants()
+        )
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            if viewModel?.isReceived == true {
+                Button(role: .destructive) { showRemoveConfirm = true } label: {
+                    Image(systemName: "trash")
+                }
+                Button { cookFromSectionId = nil; showCookingMode = true } label: {
+                    Image(systemName: "book.closed")
+                }
             } else {
-                // Returning from editor / variant switch — refresh + detect deletion
-                viewModel?.reload()
+                if viewModel?.isOwner == true {
+                    Button { viewModel?.loadFollowing(); showShareOptions = true } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+                Button { navigateToEditor = true } label: {
+                    Image(systemName: "pencil")
+                }
+                Button { cookFromSectionId = nil; showCookingMode = true } label: {
+                    Image(systemName: "book.closed")
+                }
             }
         }
-        .onChange(of: viewModel?.recipeDeleted) { _, deleted in
-            if deleted == true { dismiss() }
-        }
+    }
+}
+
+// MARK: - "Sent" + "Remove" + "make public to share" dialogs (extracted to ease the type-checker)
+
+private struct SentAndRemoveDialogs: ViewModifier {
+    @Binding var showSentConfirmation: Bool
+    @Binding var showRemoveConfirm: Bool
+    @Binding var pendingShareRecipient: (uid: String, name: String)?
+    let viewModel: RecipeDetailViewModel?
+
+    func body(content: Content) -> some View {
+        content
+            .alert("Sent!", isPresented: $showSentConfirmation) {
+                Button("OK", role: .cancel) { viewModel?.shareSentToName = nil }
+            } message: {
+                if let name = viewModel?.shareSentToName { Text("Recipe sent to \(name).") }
+            }
+            .onChange(of: viewModel?.shareSentToName) { _, newVal in
+                if newVal != nil { showSentConfirmation = true }
+            }
+            .alert(
+                "Share with \(pendingShareRecipient?.name ?? "")?",
+                isPresented: Binding(get: { pendingShareRecipient != nil },
+                                     set: { if !$0 { pendingShareRecipient = nil } })
+            ) {
+                Button("Share") {
+                    if let r = pendingShareRecipient {
+                        viewModel?.makePublicAndShareToFollower(uid: r.uid, name: r.name)
+                    }
+                    pendingShareRecipient = nil
+                }
+                Button("Cancel", role: .cancel) { pendingShareRecipient = nil }
+            } message: {
+                Text("Sharing makes this recipe public so they can view it. You can make it private again later.")
+            }
+            .confirmationDialog("Remove this recipe?", isPresented: $showRemoveConfirm, titleVisibility: .visible) {
+                Button("Remove", role: .destructive) { viewModel?.removeReceivedRecipe() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("It will be removed from your recipes. The original author keeps their copy.")
+            }
     }
 }
 
@@ -181,6 +227,7 @@ private struct RecipeDetailContent: View {
     @Bindable var viewModel: RecipeDetailViewModel
     var onOpenVariant: (RecipeModel) -> Void = { _ in }
     var onAddVariant: () -> Void = {}
+    var onCookFromSection: (String) -> Void = { _ in }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -331,26 +378,22 @@ private struct RecipeDetailContent: View {
                 .padding(.top, 12)
                 .padding(.bottom, 4)
 
-                let allIngredients = viewModel.visibleIngredients
-                let groupedIngredients = Dictionary(grouping: allIngredients) { $0.groupLabel ?? "" }
-                let groupOrder = allIngredients.compactMap { $0.groupLabel }.uniqued()
-
-                // Ungrouped first
-                let ungrouped = allIngredients.filter { $0.groupLabel == nil || $0.groupLabel!.isEmpty }
-                ForEach(ungrouped) { ing in
-                    IngredientRow(ingredient: ing, viewModel: viewModel)
-                }
-
-                // Labelled groups
-                ForEach(groupOrder, id: \.self) { label in
-                    if let ings = groupedIngredients[label], !ings.isEmpty {
-                        Text(label)
-                            .font(.footnote).fontWeight(.semibold)
+                // Grouped by section (step order) then group label — matches Android.
+                ForEach(viewModel.ingredientSectionBlocks) { block in
+                    if let title = block.title {
+                        Text(title.uppercased())
+                            .font(.caption).fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, 16)
-                            .padding(.top, 8)
-                            .padding(.bottom, 2)
-                        ForEach(ings) { ing in
+                            .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 2)
+                    }
+                    ForEach(block.groups) { group in
+                        if !group.label.isEmpty {
+                            Text(group.label)
+                                .font(.footnote).fontWeight(.semibold)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 2)
+                        }
+                        ForEach(group.ingredients) { ing in
                             IngredientRow(ingredient: ing, viewModel: viewModel)
                         }
                     }
@@ -369,11 +412,23 @@ private struct RecipeDetailContent: View {
                     }
                 } else {
                     ForEach(sections) { section in
-                        Text(section.name)
-                            .font(.title3).fontWeight(.semibold)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 6)
-                            .id(section.id)
+                        HStack {
+                            Text(section.name)
+                                .font(.title3).fontWeight(.semibold)
+                            Spacer()
+                            // "▶ Cook from here" — starts cooking mode at this section
+                            Button {
+                                onCookFromSection(section.id)
+                            } label: {
+                                Label("Cook", systemImage: "play.fill")
+                                    .font(.caption).fontWeight(.medium)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.accentColor)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .id(section.id)
                         let sectionSteps = viewModel.steps(for: section)
                         ForEach(Array(sectionSteps.enumerated()), id: \.element.id) { idx, step in
                             StepRow(step: step, index: idx + 1)

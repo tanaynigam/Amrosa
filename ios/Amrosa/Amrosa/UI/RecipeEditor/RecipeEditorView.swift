@@ -41,6 +41,7 @@ struct RecipeEditorView: View {
                         authRepository: container.authRepository,
                         syncService: container.syncService,
                         sharedRecipeService: container.sharedRecipeService,
+                        cloudFunctions: container.cloudFunctions,
                         forking: forking
                     )
                 } else {
@@ -48,7 +49,8 @@ struct RecipeEditorView: View {
                         repository: container.recipeRepository,
                         authRepository: container.authRepository,
                         syncService: container.syncService,
-                        sharedRecipeService: container.sharedRecipeService
+                        sharedRecipeService: container.sharedRecipeService,
+                        cloudFunctions: container.cloudFunctions
                     )
                 }
             }
@@ -153,6 +155,27 @@ private struct RecipeEditorContent: View {
                 TextField("Paste URLs (one per line)", text: $viewModel.sourceUrlsText, axis: .vertical)
                     .lineLimit(2...5)
                     .autocapitalization(.none)
+            }
+
+            // ── Update unit conversions (F6) — above the ingredients ─────
+            Section {
+                Button {
+                    viewModel.updateConversions()
+                } label: {
+                    HStack {
+                        if viewModel.isConverting {
+                            ProgressView()
+                        } else {
+                            Label("Update unit conversions", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    }
+                }
+                .disabled(viewModel.isConverting)
+                if let msg = viewModel.conversionMessage {
+                    Text(msg).font(.caption).foregroundStyle(.secondary)
+                }
+            } footer: {
+                Text("Re-derives Metric/Imperial amounts (weight for dry items, fl oz for liquids). Save to keep them.")
             }
 
             // ── Sections ────────────────────────────────────────────────
