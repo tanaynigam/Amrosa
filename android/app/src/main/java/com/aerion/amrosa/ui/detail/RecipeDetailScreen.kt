@@ -26,9 +26,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import android.content.Intent
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.domain.model.*
@@ -46,6 +43,7 @@ fun RecipeDetailScreen(
     onEditClick: () -> Unit = {},
     onOpenRecipe: (String) -> Unit = {},
     onEditRecipe: (String) -> Unit = {},
+    onShoppingClick: (servings: Int, anchorQty: Double?) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
@@ -83,16 +81,9 @@ fun RecipeDetailScreen(
     var showRemoveDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Re-read the recipe from Room whenever the screen resumes (e.g. coming back
-    // from the editor) so saved edits appear immediately, no manual reload needed.
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) viewModel.reload()
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
+    // Cooking-mode step checklist: ticked ingredient ids, scoped to this recipe screen so it
+    // clears automatically when you leave the recipe (session-only, never persisted).
+    val cookingChecked = remember { mutableStateListOf<String>() }
 
     // Navigate back once a received recipe has been removed
     LaunchedEffect(state.removed) {
@@ -182,6 +173,10 @@ fun RecipeDetailScreen(
             selectedUnit = selectedUnit,
             onUnitChange = { selectedUnit = it },
             startSectionId = cookingStartSectionId,
+            checkedIngredients = cookingChecked,
+            onToggleIngredient = { id ->
+                if (id in cookingChecked) cookingChecked.remove(id) else cookingChecked.add(id)
+            },
             onExit = { showCookingMode = false }
         )
         return
@@ -219,6 +214,14 @@ fun RecipeDetailScreen(
                         IconButton(onClick = onEditClick) {
                             Icon(Icons.Default.Edit, contentDescription = "Edit Recipe")
                         }
+                    }
+                    IconButton(onClick = {
+                        onShoppingClick(
+                            state.selectedServings,
+                            if (state.usesAnchorScaling) state.scaleAnchorQty else null
+                        )
+                    }) {
+                        Icon(Icons.Default.ShoppingCart, contentDescription = "Shopping List")
                     }
                     IconButton(onClick = { cookingStartSectionId = null; showCookingMode = true }) {
                         Icon(Icons.Default.MenuBook, contentDescription = "Cooking Mode")
@@ -568,10 +571,8 @@ fun RecipeDetailScreen(
                         IngredientRow(
                             ingredient = ing,
                             scaledQty = QuantityScaler.scale(ing, state.scaleFactor, selectedUnit),
-                            isChecked = ing.id in state.checkedIngredients,
                             isOptional = ing.isOptional,
                             isOptionalEnabled = ing.id in state.enabledOptionals,
-                            onCheck = { viewModel.toggleIngredientCheck(ing.id) },
                             onToggleOptional = { viewModel.toggleOptional(ing.id) }
                         )
                     }
@@ -1079,6 +1080,8 @@ private fun CookingModeScreen(
     selectedUnit: UnitMode,
     onUnitChange: (UnitMode) -> Unit,
     startSectionId: String?,
+    checkedIngredients: List<String>,
+    onToggleIngredient: (String) -> Unit,
     onExit: () -> Unit
 ) {
     val steps = recipe.sections
@@ -1217,7 +1220,7 @@ private fun CookingModeScreen(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
+                            Column(modifier = Modifier.padding(8.dp)) {
                                 visible.forEach { ref ->
                                     val ing = recipe.ingredients.find { it.id == ref.ingredientId }
                                     val name = state.resolvedIngredientName(ref.ingredientId)
@@ -1227,9 +1230,26 @@ private fun CookingModeScreen(
                                         QuantityScaler.scale(ing, state.scaleFactor, selectedUnit)
                                     else
                                         QuantityScaler.scale(null, null, ref.quantityDisplay, state.scaleFactor)
-                                    Text("• $name — $qty",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        modifier = Modifier.padding(vertical = 2.dp))
+                                    // Tick off ingredients as they're added (session-only; clears on recipe exit).
+                                    val checked = ref.ingredientId in checkedIngredients
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Checkbox(
+                                            checked = checked,
+                                            onCheckedChange = { onToggleIngredient(ref.ingredientId) }
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            "$name — $qty",
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                textDecoration = if (checked) TextDecoration.LineThrough else null
+                                            ),
+                                            color = if (checked) MaterialTheme.colorScheme.onSurfaceVariant
+                                            else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1296,16 +1316,16 @@ private fun SubstituteSelector(
 private fun IngredientRow(
     ingredient: Ingredient,
     scaledQty: String,
-    isChecked: Boolean,
     isOptional: Boolean,
     isOptionalEnabled: Boolean,
-    onCheck: () -> Unit,
     onToggleOptional: () -> Unit
 ) {
+    // Display-only row. The checkable list lives on the Shopping List screen now;
+    // optional ingredients keep their enable/disable switch (it affects scaling).
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp),
+            .padding(horizontal = 12.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (isOptional) {
@@ -1314,20 +1334,20 @@ private fun IngredientRow(
                 onCheckedChange = { onToggleOptional() },
                 modifier = Modifier.size(36.dp)
             )
+            Spacer(Modifier.width(8.dp))
         } else {
-            Checkbox(
-                checked = isChecked,
-                onCheckedChange = { onCheck() }
+            Text(
+                "•",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(start = 4.dp, end = 12.dp)
             )
         }
-        Spacer(Modifier.width(8.dp))
         Text(
             text = "${ingredient.name}  —  $scaledQty",
-            style = MaterialTheme.typography.bodyMedium.copy(
-                textDecoration = if (isChecked && !isOptional) TextDecoration.LineThrough else null,
-                color = if (isOptional && !isOptionalEnabled) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.onSurface
-            )
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isOptional && !isOptionalEnabled) MaterialTheme.colorScheme.onSurfaceVariant
+            else MaterialTheme.colorScheme.onSurface
         )
     }
 }

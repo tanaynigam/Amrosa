@@ -28,7 +28,6 @@ data class RecipeDetailUiState(
     val scaleAnchorQty: Double? = null,
     val selectedSubstitutes: Map<String, String> = emptyMap(),
     val enabledOptionals: Set<String> = emptySet(),
-    val checkedIngredients: Set<String> = emptySet(),
     val notes: List<RecipeNote> = emptyList(),
     val isLoading: Boolean = true,
     // Ownership + visibility
@@ -127,6 +126,23 @@ class RecipeDetailViewModel(
     init {
         loadRecipe()
         observeNotes()
+        observeRecipeChanges()
+    }
+
+    /**
+     * Auto-refresh the screen whenever the recipe row changes in Room (e.g. after an editor
+     * save bumps version/updatedAt). Room is the source of truth, so edits reflect immediately
+     * without depending on lifecycle/resume events. The first emission is the already-loaded
+     * state, so it's dropped.
+     */
+    private fun observeRecipeChanges() {
+        viewModelScope.launch {
+            repository.observeRecipe(recipeId)
+                .map { it?.updatedAt to it?.version }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { reload() }
+        }
     }
 
     /**
@@ -305,14 +321,6 @@ class RecipeDetailViewModel(
             val updated = if (ingredientId in state.enabledOptionals)
                 state.enabledOptionals - ingredientId else state.enabledOptionals + ingredientId
             state.copy(enabledOptionals = updated)
-        }
-    }
-
-    fun toggleIngredientCheck(ingredientId: String) {
-        _uiState.update { state ->
-            val updated = if (ingredientId in state.checkedIngredients)
-                state.checkedIngredients - ingredientId else state.checkedIngredients + ingredientId
-            state.copy(checkedIngredients = updated)
         }
     }
 

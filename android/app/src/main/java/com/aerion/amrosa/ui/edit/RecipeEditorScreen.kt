@@ -641,6 +641,29 @@ private fun IngredientRow(
                 )
                 Text("Optional ingredient", style = MaterialTheme.typography.bodySmall)
             }
+
+            // Row 4: optional shopping note — unobtrusive, hidden until requested
+            var showNote by remember(ingredient.id) { mutableStateOf(ingredient.shoppingNote.isNotBlank()) }
+            if (showNote) {
+                OutlinedTextField(
+                    value = ingredient.shoppingNote,
+                    onValueChange = { onUpdate(ingredient.copy(shoppingNote = it)) },
+                    label = { Text("Shopping note (brand / comment)") },
+                    placeholder = { Text("e.g. Amul butter; ask for fine sugar") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 2,
+                    textStyle = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                TextButton(
+                    onClick = { showNote = true },
+                    contentPadding = PaddingValues(horizontal = 4.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Shopping note", style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
     }
 }

@@ -26,4 +26,8 @@ data class IngredientEntity(
     val quantityValueImperial: Double? = null,
     val quantityUnitImperial: String? = null,
     val quantityDisplayImperial: String? = null,
+
+    // Author-entered shopping note (brand/substitute/comment, e.g. "Amul butter").
+    // Optional; travels with the recipe. Shown on the Shopping List, edited in the editor.
+    val shoppingNote: String? = null,
 )

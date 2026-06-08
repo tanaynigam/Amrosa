@@ -20,5 +20,8 @@ data class Ingredient(
     val isOptional: Boolean,
     val substituteGroupId: String?,
     val substituteRatio: Float,
-    val orderIndex: Int
+    val orderIndex: Int,
+
+    // Author-entered shopping note (brand/substitute/comment). Shown on the Shopping List.
+    val shoppingNote: String? = null
 )

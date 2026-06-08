@@ -40,7 +40,9 @@ data class EditorIngredient(
     val quantityDisplayMetric: String? = null,
     val quantityValueImperial: Double? = null,
     val quantityUnitImperial: String? = null,
-    val quantityDisplayImperial: String? = null
+    val quantityDisplayImperial: String? = null,
+    // Author-entered shopping note (brand/comment); shown on the Shopping List.
+    val shoppingNote: String = ""
 )
 
 data class EditorStep(
@@ -396,7 +398,8 @@ class RecipeEditorViewModel(
                             quantityDisplayMetric = ing.quantityDisplayMetric,
                             quantityValueImperial = ing.quantityValueImperial,
                             quantityUnitImperial = ing.quantityUnitImperial,
-                            quantityDisplayImperial = ing.quantityDisplayImperial
+                            quantityDisplayImperial = ing.quantityDisplayImperial,
+                            shoppingNote = ing.shoppingNote.trim().ifBlank { null }
                         )
                     }
                 }
@@ -509,7 +512,8 @@ class RecipeEditorViewModel(
         quantityDisplayMetric = quantityDisplayMetric,
         quantityValueImperial = quantityValueImperial,
         quantityUnitImperial = quantityUnitImperial,
-        quantityDisplayImperial = quantityDisplayImperial
+        quantityDisplayImperial = quantityDisplayImperial,
+        shoppingNote = shoppingNote ?: ""
     )
 
     private fun Step.toEditor() = EditorStep(id = id, instruction = instruction)

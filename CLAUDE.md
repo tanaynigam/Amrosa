@@ -17,7 +17,7 @@
 | **Min SDK (Android)** | API 26 (Android 8.0+) |
 | **Min OS (iOS)** | iOS 17+ (SwiftData) |
 | **Architecture** | MVVM + Repository Pattern (both platforms) |
-| **Database (local — Android)** | Room (SQLite) — **current: DB v11** (real migrations preserve data; seeder is a no-op) |
+| **Database (local — Android)** | Room (SQLite) — **current: DB v12** (real migrations preserve data; seeder is a no-op) |
 | **Database (local — iOS)** | SwiftData (ModelContainer, no manual migrations) |
 | **Database (cloud)** | Firebase Firestore (`amrosa-2ec82`) |
 | **Cloud Storage** | Firebase Storage (planned — images) |
@@ -191,7 +191,7 @@ label = if (isImported) "Imported by $name" else name
 
 ### F1 — Recipe Storage
 
-**Room DB v11** — all entities below are current.
+**Room DB v12** — all entities below are current.
 
 ```kotlin
 @Entity(tableName = "recipes")
@@ -261,7 +261,8 @@ data class IngredientEntity(
     val quantityDisplayMetric: String? = null,
     val quantityValueImperial: Double? = null,
     val quantityUnitImperial: String? = null,
-    val quantityDisplayImperial: String? = null
+    val quantityDisplayImperial: String? = null,
+    val shoppingNote: String? = null    // F11: author-entered brand/comment, shown on the Shopping List
 )
 ```
 
@@ -283,6 +284,10 @@ data class RecipeNoteEntity(
     val content: String,
     val createdAt: Long, val updatedAt: Long
 )
+
+// F11 — persisted shopping-list checks. Presence of a row = checked. Local only (never synced).
+@Entity(tableName = "shopping_checks", primaryKeys = ["recipeId", "itemKey"])
+data class ShoppingCheckEntity(val recipeId: String, val itemKey: String)  // itemKey = normalized ingredient name
 ```
 
 **Domain model** (mapped from entities, used by ViewModels and UI):
@@ -326,7 +331,7 @@ Comments are stored in Firestore only (`shared_recipes/{recipeId}/comments/{comm
 
 **Seeder:** `DatabaseSeeder.seedIfNeeded()` is a **complete no-op**. Fresh installs start blank. Bump seed key together with DB version if schema changes, but no seeding logic runs.
 
-**DB versioning:** Current **DB v11**. Real Room migrations are registered in `AppContainer` (`MIGRATION_9_10` adds `isReceived`; `MIGRATION_10_11` adds `parentRecipeId` + `variantName`) so user data survives schema bumps. `fallbackToDestructiveMigration()` remains only as a safety net for unhandled jumps. Because real users now have data, **prefer adding a `MIGRATION_(n)_(n+1)` (ALTER TABLE) over relying on destructive fallback** when changing the schema.
+**DB versioning:** Current **DB v12**. Real Room migrations are registered in `AppContainer` (`MIGRATION_9_10` adds `isReceived`; `MIGRATION_10_11` adds `parentRecipeId` + `variantName`; `MIGRATION_11_12` adds `ingredients.shoppingNote` + the `shopping_checks` table) so user data survives schema bumps. `fallbackToDestructiveMigration()` remains only as a safety net for unhandled jumps. Because real users now have data, **prefer adding a `MIGRATION_(n)_(n+1)` (ALTER TABLE / CREATE TABLE) over relying on destructive fallback** when changing the schema.
 
 **Version control:** Every editor save increments `version` and appends `RecipeChange(version, timestamp, summary)` to `changeLog`. Summary is auto-generated from what fields changed.
 
@@ -875,6 +880,25 @@ Spin off up to **4 editable variations** of a recipe (e.g. "Spicy", "Vegan") wit
 
 ---
 
+### F11 — Shopping List ✅
+
+A per-recipe **combined ingredient checklist**, reached via the cart icon in the `RecipeDetailScreen` top bar.
+
+**Combine quantities.** `ShoppingAggregator` (`ui/shopping/ShoppingAggregator.kt`) groups ingredients by **normalized name** (mirrors the backend `normalizeKey`) and **sums** their amounts, so an ingredient used across several sections/steps shows as **one line with the total**. Summing is per-unit in the active `UnitMode`: Metric reduces most items to clean g/ml; same-unit groups add directly; otherwise buckets join with " + ". Non-numeric amounts ("to taste") pass through. Reuses `QuantityScaler` for formatting. One member per substitute group is included; the `itemKey` is the normalized name.
+
+**Persisted checks.** Checking an item writes a `shopping_checks` row (`recipeId` + `itemKey`); unchecking deletes it. Checks **survive app restarts** (real shopping over trips) and are observed as a Room `Flow`. A **Reset** action clears them. `RecipeDao.deleteFullRecipe` cascades to `shopping_checks`. Personal + local only — never synced.
+
+**Author notes (no Gemini).** `IngredientEntity.shoppingNote` is an optional author-entered brand/comment (e.g. "Amul butter", "ask for fine sugar"). It **travels with the recipe** (carried in all ingredient mappers + sync + share). Edited via an unobtrusive **"＋ Shopping note"** field per ingredient in the **Recipe Editor only** — deliberately **absent from the import review sheet and freeform screen** so authors aren't overwhelmed while creating. Shown under the combined line on the Shopping List (notes for a merged line are de-duplicated + joined). Gemini-suggested brands/substitutes are deferred for later.
+
+**Scale.** The cart passes the detail screen's current servings/anchor as nav args (`shopping/{recipeId}?servings=&anchor=`); the screen also has its own `+/−` yield adjuster + unit toggle.
+
+**Detail page change.** The old **checkbox + strike-through was removed from the detail ingredient list** (now display-only bullets; optional switches + substitute selectors stay). The checklist lives only on the Shopping List.
+
+#### Cooking-mode step checklist
+Separately, each ingredient in a **cooking-mode step card** is a checkbox row — tick items off as you add them (useful for spice-heavy steps). **Session-only**: the ticked set is `remember`ed at the `RecipeDetailScreen` scope, so it persists across steps and across re-entering cooking mode, and **clears when you leave the recipe**.
+
+---
+
 ## Screen Map
 
 ```
@@ -962,18 +986,19 @@ RecipeDetailScreen  (pushed route "recipe/{recipeId}")
   ├── Section jump chips (auto-scroll)
   ├── Unit toggle: Original | Metric | Imperial (shown when conversions exist)
   ├── Substitute selectors, optional toggles
-  ├── Ingredient checklist grouped by SECTION (step order) then by group label
+  ├── Ingredient list grouped by SECTION (step order) then group label — DISPLAY ONLY (no checkboxes)
   ├── Recipe steps with inline ingredient refs; each section header has "▶ Cook" (start cooking mode there)
   ├── Notes (timestamped, add/edit/delete)
-  ├── Reloads from Room on resume (edits show without reopening)
-  ├── Cooking Mode button → CookingModeScreen
-  ├── Top bar actions (owners only):
+  ├── Auto-refreshes via Room Flow on the recipe row (edits reflect immediately, no reopening)
+  ├── Top bar actions:
+  │     [Cart icon] → ShoppingListScreen (combined checklist; passes current scale)
+  │     [Cooking Mode book] → CookingModeScreen
+  │     (owners only):
   │     [Share icon] → ShareOptionsSheet (ModalBottomSheet)
   │           Option A (default): "Send to follower" → FollowerPickerSheet
   │           Option B: "Share link" → if public: Android share sheet with HTTPS URL
   │                                    if private: publish dialog → setVisibility("public") → share sheet
   │     [Edit pencil] → RecipeEditorScreen
-  │     [Cooking Mode book]
   ├── Visibility FilterChip in body (owner only): 🔒 Private | 🌐 Public
   │     Confirms before toggling; public → comments section shown
   └── Comments section (when recipe is public)
@@ -1010,9 +1035,16 @@ RecipeEditorScreen  (pushed route "recipe/edit/{recipeId}")
   └── "Delete Recipe" button (red outlined, bottom) → confirmation dialog → deleteFullRecipe()
         → returns to the recipe LIST (base delete cascades to variations)
 
+ShoppingListScreen  (pushed route "shopping/{recipeId}?servings=&anchor=")
+  ├── Combined checklist: ingredients merged by name, quantities summed (ShoppingAggregator)
+  ├── Checkbox + strike-through per line; checks PERSIST (shopping_checks); Reset action
+  ├── Author note shown under a line (💡 …) when present
+  └── Own yield +/− adjuster + unit toggle (starts from the detail screen's scale)
+
 CookingModeScreen  (pushed from RecipeDetailScreen)
   ├── Fullscreen, one step at a time, large text — content SCROLLS (long steps no longer clipped)
-  ├── Section label, ingredient card (scaled + unit-converted, honours the unit toggle)
+  ├── Section label + step ingredient card: each ingredient is a CHECKBOX row (tick as you add;
+  │     session-only, clears when you leave the recipe), scaled + unit-converted
   ├── Unit toggle (Orig | Metric | Imp) in-screen when conversions exist — shared with detail
   ├── Section jump menu (☰ in top bar) when >1 section; can also open AT a section via "▶ Cook"
   ├── Prev / Next navigation
@@ -1074,7 +1106,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 | Area | Detail |
 |---|---|
-| **Room DB v11** | All entities: recipes, sections, ingredients, steps, step_ingredient_refs, recipe_notes. Real migrations (`MIGRATION_9_10`, `MIGRATION_10_11`) preserve user data |
+| **Room DB v12** | Entities: recipes, sections, ingredients, steps, step_ingredient_refs, recipe_notes, shopping_checks. Real migrations (`MIGRATION_9_10` → `11_12`) preserve user data |
 | **Recipe detail** | Yield scaling (servings + anchor-based), ingredient checklist, step-ingredient refs, substitute selectors, optional toggles, section jump chips |
 | **Cooking mode** | Fullscreen step-by-step, screen-on lock |
 | **Notes system** | Per-recipe, timestamped, add/edit/delete |
@@ -1122,7 +1154,9 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F10 — Recipe Variations** | Up to 4 linked editable copies per recipe (`parentRecipeId` + `variantName`, 20-char cap); hidden from lists; "Original / <name> / ＋ Variation" chips on detail; `duplicateAsVariant()` deep-copy with full id remap; cascade delete; sync-aware. |
 | **Cooking mode upgrades** | Honours the unit toggle (Orig/Metric/Imp, switchable mid-cook); content scrolls (long steps no longer clipped); section jump menu + "▶ Cook from here" on detail section headers. |
 | **Ingredient ordering** | Detail checklist grouped by SECTION (in step order) then by group label; trailing "Other" bucket for section-less ingredients. |
-| **Detail refresh / delete UX** | Detail re-reads from Room on resume so edits show immediately; deleting from the editor returns to the recipe list (not the stale detail). |
+| **Detail refresh / delete UX** | Detail **auto-refreshes via a Room `Flow`** on the recipe row (`RecipeDao.observeRecipe`) — editor saves reflect immediately, no reopening (replaced the unreliable lifecycle/resume reload). Deleting from the editor returns to the recipe list (not the stale detail). |
+| **F11 — Shopping List** | Cart icon → `ShoppingListScreen`; `ShoppingAggregator` combines ingredients by name with summed totals (unit-aware); persisted checks (`shopping_checks` table, Reset action); author `shoppingNote` per ingredient (editor only, travels with recipe, absent from import/freeform); old detail checkbox/strike removed. |
+| **Cooking-mode step checklist** | Each ingredient in a step card is a checkbox row (tick as you add); session-only, scoped to the recipe screen so it clears on exit. |
 
 ### Planned — In Priority Order
 
@@ -1211,6 +1245,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 | Gap | Detail |
 |---|---|
+| **Android-ahead features** | These ship on Android only so far: **F10 Variations** (`parentRecipeId`/`variantName`), **F11 Shopping List** (combined checklist + persisted checks + `shoppingNote`), **cooking-mode** unit toggle / scroll / section jump / step checklist, **section-then-group** ingredient ordering, and **Room-Flow auto-refresh** of the detail screen. iOS needs the schema fields + UI to match. |
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
 
@@ -1250,7 +1285,8 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 
 ### Database
-- **DB versioning**: **Current DB v11.** Real migrations are registered in `AppContainer.addMigrations(...)` and **must be preferred** now that users have data — add a `MIGRATION_(n)_(n+1)` (ALTER TABLE) for every schema change. `fallbackToDestructiveMigration()` stays only as a last-resort safety net (it WIPES local data — avoid relying on it).
+- **DB versioning**: **Current DB v12.** Real migrations are registered in `AppContainer.addMigrations(...)` and **must be preferred** now that users have data — add a `MIGRATION_(n)_(n+1)` (ALTER TABLE / CREATE TABLE) for every schema change. `fallbackToDestructiveMigration()` stays only as a last-resort safety net (it WIPES local data — avoid relying on it).
+- **Detail auto-refresh**: the detail VM observes `RecipeDao.observeRecipe(id)` (a Room `Flow`) and reloads on `updatedAt`/`version` change. Do NOT rely on Compose lifecycle/`ON_RESUME` for cross-screen refresh — `LocalLifecycleOwner` may resolve to the Activity and miss intra-NavHost navigation. Room Flow is the source of truth.
 - **Seeder**: `seedIfNeeded()` is a no-op. Do not add seeding logic.
 - **IngredientEntity field order**: F6 conversion fields are **last** (after `orderIndex`). Do not insert new fields before them — it breaks positional `DatabaseSeeder` calls.
 
@@ -1261,7 +1297,8 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 - **Version tracking**: every editor save must increment `version` and append to `changeLog`.
 - **Variations (F10)**: a variation is a full recipe with `parentRecipeId` set. List queries filter `parentRecipeId IS NULL`. Create via `RecipeRepository.duplicateAsVariant()` — **regenerate every id and remap all references** (sections, ingredients, steps, step refs, `scaleIngredientId`, `substituteGroupId`); never reuse the source's ids. Base label is the fixed string "Original"; variation names cap at `MAX_VARIANT_NAME_LEN` (20). Deleting a base must cascade-delete its variations. Received recipes are forced standalone (`parentRecipeId = null`).
 - **Ingredient checklist order (detail)**: group by section (in `recipe.sections` order) then by `groupLabel`; the precompute for jump-chip indices and the render loop both consume the same `ingredientBlocks` list — keep them in sync if you change the layout.
-- **Cooking mode**: scale step ingredient amounts with `QuantityScaler.scale(ingredient, scaleFactor, selectedUnit)` (unit-aware), not the legacy display-only overload; the unit toggle and start-section are passed in from `RecipeDetailScreen`.
+- **Cooking mode**: scale step ingredient amounts with `QuantityScaler.scale(ingredient, scaleFactor, selectedUnit)` (unit-aware), not the legacy display-only overload; the unit toggle and start-section are passed in from `RecipeDetailScreen`. The step ingredient card is a **session-only checklist** (`mutableStateListOf` of ingredient ids held at the `RecipeDetailScreen` scope so it clears on recipe exit).
+- **Shopping List (F11)**: `ShoppingAggregator.build()` merges ingredients by normalized name and **sums per-unit in the active `UnitMode`** — never store these totals, recompute from base × `scaleFactor`. The `itemKey` (normalized name) keys both the merge and the persisted `shopping_checks`. `shoppingNote` lives on the ingredient (travels with the recipe); it's edited **only in the editor**, never in the import/freeform review flow. Checks are local — never include `shopping_checks` in sync/share.
 
 ### Author Attribution
 - `authorId` + `authorDisplayName` are stamped at creation time (freeform, import, editor fork of seeded recipe).

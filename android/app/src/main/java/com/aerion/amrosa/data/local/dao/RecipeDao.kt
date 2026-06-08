@@ -39,6 +39,10 @@ abstract class RecipeDao {
     @Query("SELECT * FROM recipes WHERE id = :id")
     abstract suspend fun getRecipeById(id: String): RecipeEntity?
 
+    /** Observe a single recipe row. Emits on every edit (version/updatedAt bump) → drives auto-refresh. */
+    @Query("SELECT * FROM recipes WHERE id = :id")
+    abstract fun observeRecipe(id: String): Flow<RecipeEntity?>
+
     @Query("SELECT * FROM recipe_sections WHERE recipeId = :recipeId ORDER BY orderIndex ASC")
     abstract suspend fun getSectionsForRecipe(recipeId: String): List<RecipeSectionEntity>
 
@@ -92,6 +96,20 @@ abstract class RecipeDao {
 
     @Query("DELETE FROM recipe_notes WHERE recipeId = :recipeId")
     abstract suspend fun deleteNotesForRecipe(recipeId: String)
+
+    // ─── Shopping list checked items ──────────────────────────────────────────
+
+    @Query("SELECT itemKey FROM shopping_checks WHERE recipeId = :recipeId")
+    abstract fun getShoppingChecks(recipeId: String): Flow<List<String>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    abstract suspend fun insertShoppingCheck(check: ShoppingCheckEntity)
+
+    @Query("DELETE FROM shopping_checks WHERE recipeId = :recipeId AND itemKey = :itemKey")
+    abstract suspend fun deleteShoppingCheck(recipeId: String, itemKey: String)
+
+    @Query("DELETE FROM shopping_checks WHERE recipeId = :recipeId")
+    abstract suspend fun deleteShoppingChecksForRecipe(recipeId: String)
 
     @Query("SELECT COUNT(*) FROM recipes")
     abstract suspend fun count(): Int
@@ -185,6 +203,7 @@ abstract class RecipeDao {
     open suspend fun deleteFullRecipe(recipeId: String) {
         deleteStepRefsForRecipe(recipeId)
         deleteNotesForRecipe(recipeId)
+        deleteShoppingChecksForRecipe(recipeId)
         deleteStepsForRecipe(recipeId)
         deleteIngredientsForRecipe(recipeId)
         deleteSectionsForRecipe(recipeId)

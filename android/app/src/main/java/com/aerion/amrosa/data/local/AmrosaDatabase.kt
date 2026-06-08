@@ -15,6 +15,7 @@ import com.aerion.amrosa.data.local.entity.*
         StepEntity::class,
         StepIngredientRefEntity::class,
         RecipeNoteEntity::class,
+        ShoppingCheckEntity::class,
     ],
     version = AmrosaDatabase.DB_VERSION,
     exportSchema = false
@@ -25,6 +26,6 @@ abstract class AmrosaDatabase : RoomDatabase() {
     abstract fun recipeNoteDao(): RecipeNoteDao
 
     companion object {
-        const val DB_VERSION = 11
+        const val DB_VERSION = 12
     }
 }

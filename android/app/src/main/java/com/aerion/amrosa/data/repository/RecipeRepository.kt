@@ -32,6 +32,10 @@ class RecipeRepository(
     fun getReceivedRecipes(): Flow<List<Recipe>> =
         recipeDao.getReceivedRecipes().map { list -> list.map { it.toBasicDomain() } }
 
+    /** Emits whenever the recipe row changes (e.g. after an editor save) — drives detail auto-refresh. */
+    fun observeRecipe(id: String): Flow<com.aerion.amrosa.data.local.entity.RecipeEntity?> =
+        recipeDao.observeRecipe(id)
+
     suspend fun getRecipeWithDetails(id: String): Recipe? {
         val entity = recipeDao.getRecipeById(id) ?: return null
         val sections = recipeDao.getSectionsForRecipe(id)
@@ -145,7 +149,8 @@ class RecipeRepository(
                 quantityValueMetric = it.quantityValueMetric, quantityUnitMetric = it.quantityUnitMetric,
                 quantityDisplayMetric = it.quantityDisplayMetric,
                 quantityValueImperial = it.quantityValueImperial, quantityUnitImperial = it.quantityUnitImperial,
-                quantityDisplayImperial = it.quantityDisplayImperial
+                quantityDisplayImperial = it.quantityDisplayImperial,
+                shoppingNote = it.shoppingNote
             )
         }
         val steps = recipe.steps.map {
@@ -163,6 +168,19 @@ class RecipeRepository(
 
     /** Remove a received recipe's local cache (the cloud reference is removed separately). */
     suspend fun removeReceivedRecipe(recipeId: String) = recipeDao.deleteFullRecipe(recipeId)
+
+    // ─── Shopping list checked items ────────────────────────────────────────────
+
+    fun checkedShoppingItems(recipeId: String): Flow<List<String>> =
+        recipeDao.getShoppingChecks(recipeId)
+
+    suspend fun setShoppingChecked(recipeId: String, itemKey: String, checked: Boolean) {
+        if (checked) recipeDao.insertShoppingCheck(ShoppingCheckEntity(recipeId, itemKey))
+        else recipeDao.deleteShoppingCheck(recipeId, itemKey)
+    }
+
+    suspend fun clearShoppingChecks(recipeId: String) =
+        recipeDao.deleteShoppingChecksForRecipe(recipeId)
 
     // ─── Recipe variations ──────────────────────────────────────────────────────
 
@@ -248,7 +266,8 @@ class RecipeRepository(
                 groupLabel = i.groupLabel, isOptional = i.isOptional,
                 substituteGroupId = i.substituteGroupId?.let { subGroupMap[it] },
                 substituteRatio = i.substituteRatio,
-                orderIndex = i.orderIndex
+                orderIndex = i.orderIndex,
+                shoppingNote = i.shoppingNote
             )
         }
         val steps = source.steps.map { st ->
@@ -335,7 +354,8 @@ class RecipeRepository(
         quantityDisplayImperial = quantityDisplayImperial,
         groupLabel = groupLabel, isOptional = isOptional,
         substituteGroupId = substituteGroupId, substituteRatio = substituteRatio,
-        orderIndex = orderIndex
+        orderIndex = orderIndex,
+        shoppingNote = shoppingNote
     )
 
     private fun StepEntity.toDomain(refs: List<StepIngredientRefEntity>) = Step(

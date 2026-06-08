@@ -201,7 +201,8 @@ class SharedRecipeService(
                 "isOptional" to ing.isOptional,
                 "substituteGroupId" to ing.substituteGroupId,
                 "substituteRatio" to ing.substituteRatio,
-                "orderIndex" to ing.orderIndex
+                "orderIndex" to ing.orderIndex,
+                "shoppingNote" to ing.shoppingNote
             )
         }
         val stepRefs = recipe.steps.flatMap { step ->
@@ -265,7 +266,8 @@ class SharedRecipeService(
                 isOptional = ing["isOptional"] as? Boolean ?: false,
                 substituteGroupId = ing["substituteGroupId"] as? String,
                 substituteRatio = (ing["substituteRatio"] as? Number)?.toFloat() ?: 1.0f,
-                orderIndex = (ing["orderIndex"] as? Number)?.toInt() ?: 0
+                orderIndex = (ing["orderIndex"] as? Number)?.toInt() ?: 0,
+                shoppingNote = ing["shoppingNote"] as? String
             )
         } ?: emptyList()
 

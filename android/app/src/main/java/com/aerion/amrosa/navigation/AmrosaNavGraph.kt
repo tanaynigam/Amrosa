@@ -32,6 +32,7 @@ import com.aerion.amrosa.ui.home.HomeScreen
 import com.aerion.amrosa.ui.home.RecipeFilter
 import com.aerion.amrosa.ui.import_recipe.ImportScreen
 import com.aerion.amrosa.ui.shared.SharedRecipeDetailScreen
+import com.aerion.amrosa.ui.shopping.ShoppingListScreen
 import com.aerion.amrosa.ui.social.FriendsScreen
 import com.aerion.amrosa.ui.social.ReceivedRecipeScreen
 import com.aerion.amrosa.ui.social.SharedInboxScreen
@@ -218,7 +219,32 @@ private fun MainAppScaffold() {
                     // Switch to another variation in the family.
                     onOpenRecipe = { id -> navController.navigate("recipe/$id") },
                     // Open the editor for a freshly-created variation.
-                    onEditRecipe = { id -> navController.navigate("recipe/edit/$id") }
+                    onEditRecipe = { id -> navController.navigate("recipe/edit/$id") },
+                    // Open the combined shopping list at the current scale.
+                    onShoppingClick = { servings, anchor ->
+                        val a = anchor?.toString() ?: ""
+                        navController.navigate("shopping/$recipeId?servings=$servings&anchor=$a")
+                    }
+                )
+            }
+
+            // ── Shopping list (combined ingredient checklist) ─────────────────
+            composable(
+                route = "shopping/{recipeId}?servings={servings}&anchor={anchor}",
+                arguments = listOf(
+                    navArgument("recipeId") { type = NavType.StringType },
+                    navArgument("servings") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("anchor") { type = NavType.StringType; defaultValue = "" }
+                )
+            ) { backStackEntry ->
+                val rid = backStackEntry.arguments?.getString("recipeId") ?: return@composable
+                val servings = backStackEntry.arguments?.getString("servings")?.toIntOrNull()
+                val anchor = backStackEntry.arguments?.getString("anchor")?.toDoubleOrNull()
+                ShoppingListScreen(
+                    recipeId = rid,
+                    initialServings = servings,
+                    initialAnchorQty = anchor,
+                    onBack = { navController.popBackStack() }
                 )
             }
 
