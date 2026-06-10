@@ -325,9 +325,13 @@ Comments are stored in Firestore only (`shared_recipes/{recipeId}/comments/{comm
 | `shared_to/{recipientUid}/recipes/{shareId}` | Recipes shared directly to a specific user. Full recipe data + fromUid + fromDisplayName + sharedAt. Only the sender can write; only the recipient can read. |
 
 **Sync behaviour:**
-- **Pull sync** on app launch (if signed in): fetches `personal_recipes/{uid}/recipes/` where `updatedAt > lastSyncTimestamp`, upserts into Room.
+- **Pull sync** on app launch / sign-in: `pullPersonalRecipes()` fetches **ALL** docs in `personal_recipes/{uid}/recipes/` and REPLACE-inserts them into Room — there is **no delta filter and no updatedAt conflict check** (cloud wins). Then `pushAllPersonalRecipes()` pushes every local personal recipe back up.
 - **Push sync** on personal recipe save: `RecipeSyncService.pushPersonalRecipe(recipeId)` → `personal_recipes/{uid}/recipes/{recipeId}`. Fire-and-forget — push failure does not block local save.
-- **Sync on sign-in**: `AmrosaApplication.authStateFlow` observer calls `syncService.sync()` + `syncPersonalRecipes()` whenever a real user is detected.
+- **Sync on sign-in**: `AmrosaApplication.authStateFlow` observer calls `syncPersonalRecipes()` + `syncReceivedRecipes()` whenever a real user is detected.
+- ⚠️ **Known sync limitations** (acceptable single-user, revisit before multi-device gets heavy use):
+  1. *Cloud-wins on launch*: local edits made offline (not yet pushed) are overwritten by the cloud copy on next launch.
+  2. *Orphan child rows on pull*: `insertFullRecipe` REPLACEs by id but never deletes local sections/ingredients/steps that the cloud doc no longer contains — an ingredient deleted on device B can linger as a ghost row on device A. (Editor saves via `replaceFullRecipe` handle deletions correctly; only the pull path has this gap.)
+  3. *Editor push lifetime*: the post-save cloud push runs in the editor's `viewModelScope` right before the screen pops — it can be cancelled mid-flight. The launch-time `pushAllPersonalRecipes()` self-heals this.
 
 **Seeder:** `DatabaseSeeder.seedIfNeeded()` is a **complete no-op**. Fresh installs start blank. Bump seed key together with DB version if schema changes, but no seeding logic runs.
 
@@ -1232,7 +1236,8 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 | **F9 — Push notifications only** | In-app `NotificationsView` + notification reading removed; Firestore notification writes remain to trigger `sendPushNotification`. `AppDelegate` + `FirebaseMessaging`; APNs bridge; token stored on sign-in; tap routing (follow → Account, recipe shared → Shared) |
 | **Shared recipe author attribution** | `buildSharedToDocument` stores `authorDisplayName` (original author) separate from `fromDisplayName` (sender); `getReceivedRecipe` returns `ReceivedRecipeData(recipe, fromDisplayName)`; `ReceivedRecipeView` "Shared by [sender]" banner + Sources section + "Save Recipe" → dismiss back |
 | **Co-Chef stale-data repair** | `repairFriendships()` on sign-in creates missing reverse follow docs for pre-mutual-friendship data |
-| **Recipe detail (flat layout)** | Ingredients flat under "Ingredients" header (all ingredients visible regardless of sectionId); steps grouped by section under "Instructions"; section jump chips scroll via `ScrollViewReader`; step-ingredient ref chips shown inline |
+| **Recipe detail (section-grouped)** | Ingredients grouped by section (step order) then group label via `ingredientSectionBlocks` — matches Android; steps grouped by section under "Instructions"; section jump chips scroll via `ScrollViewReader`; step-ingredient ref chips shown inline. (Still has per-ingredient check circles — see Remaining Gaps.) |
+| **Cooking mode (parity)** | Unit toggle (Orig/Metric/Imp), scrolling content, section jump menu, "▶ Cook from here" start-at-section — matches Android (step tick-off checklist NOT yet ported) |
 | **isOwner for pre-auth recipes** | `authorId == nil` → `isOwner = true` (seeded/pre-auth recipes editable by anyone) |
 | **Author dropdown in editor** | `RecipeEditorView` has Picker("Author") — "Imported" or "Personal — [Name]"; backed by `isPersonalAuthor: Bool` in VM; applied on save |
 | **FAB bottom sheet** | `AddRecipeSheet` (presentationDetent) with descriptive options, matching Android ModalBottomSheet |
@@ -1245,7 +1250,9 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 | Gap | Detail |
 |---|---|
-| **Android-ahead features** | These ship on Android only so far: **F10 Variations** (`parentRecipeId`/`variantName`), **F11 Shopping List** (combined checklist + persisted checks + `shoppingNote`), **cooking-mode** unit toggle / scroll / section jump / step checklist, **section-then-group** ingredient ordering, and **Room-Flow auto-refresh** of the detail screen. iOS needs the schema fields + UI to match. |
+| **F11 — Shopping List** | Android-only. iOS lacks `shoppingNote` on `IngredientModel`, the Shopping List screen, persisted checks, and the editor note field. ⚠️ Until added, an iOS edit+push of a recipe **drops its `shoppingNote`s** (push payload omits the field → next Android pull nulls them). Port the field to iOS (and have iOS round-trip unknown fields) before relying on notes cross-device. |
+| **Cooking-mode step checklist** | Android-only: step ingredient card is a tick-off checklist (session-scoped). iOS cooking mode shows plain rows. |
+| **Detail ingredient checklist removal** | Android removed per-ingredient check circles from the detail list (moved to Shopping List); iOS `RecipeDetailView` still has `checkedIngredientIds` check circles. Align when porting F11. |
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
 
