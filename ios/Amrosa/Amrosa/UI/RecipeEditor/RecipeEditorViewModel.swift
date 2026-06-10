@@ -20,6 +20,8 @@ struct EditorIngredient: Identifiable {
     var quantityValueImperial: Double? = nil
     var quantityUnitImperial: String? = nil
     var quantityDisplayImperial: String? = nil
+    /// F11: author-entered shopping note (brand/comment); shown on the Shopping List.
+    var shoppingNote: String = ""
 
     init(id: String = UUID().uuidString,
          name: String = "",
@@ -51,6 +53,7 @@ struct EditorIngredient: Identifiable {
         self.quantityValueImperial = model.quantityValueImperial
         self.quantityUnitImperial = model.quantityUnitImperial
         self.quantityDisplayImperial = model.quantityDisplayImperial
+        self.shoppingNote = model.shoppingNote ?? ""
     }
 }
 

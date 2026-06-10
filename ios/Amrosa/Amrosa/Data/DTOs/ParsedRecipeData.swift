@@ -40,6 +40,8 @@ struct ParsedIngredient: Codable {
     let quantityValueImperial: Double?
     let quantityUnitImperial: String?
     let quantityDisplayImperial: String?
+    /// F11 shopping note — set by Firestore pull paths, never by Gemini import/freeform.
+    var shoppingNote: String? = nil
 }
 
 struct ParsedStep: Codable {

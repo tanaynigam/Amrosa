@@ -156,7 +156,8 @@ final class SharedRecipeService {
                 quantityDisplayMetric: ing.quantityDisplayMetric,
                 quantityValueImperial: ing.quantityValueImperial,
                 quantityUnitImperial: ing.quantityUnitImperial,
-                quantityDisplayImperial: ing.quantityDisplayImperial
+                quantityDisplayImperial: ing.quantityDisplayImperial,
+                shoppingNote: ing.shoppingNote
             )
         }
         let ingIdMap = Dictionary(uniqueKeysWithValues: zip(sharedRecipe.ingredients.map(\.id), ingredients.map(\.id)))
@@ -238,6 +239,7 @@ final class SharedRecipeService {
             if let v = ing.quantityValueImperial   { d["quantityValueImperial"] = v }
             if let v = ing.quantityUnitImperial    { d["quantityUnitImperial"] = v }
             if let v = ing.quantityDisplayImperial { d["quantityDisplayImperial"] = v }
+            if let v = ing.shoppingNote            { d["shoppingNote"] = v }
             return d
         }
         let steps = recipe.steps.sorted { $0.orderIndex < $1.orderIndex }.map { step -> [String: Any] in
@@ -315,7 +317,8 @@ final class SharedRecipeService {
                 quantityDisplayMetric: i["quantityDisplayMetric"] as? String,
                 quantityValueImperial: (i["quantityValueImperial"] as? NSNumber)?.doubleValue,
                 quantityUnitImperial: i["quantityUnitImperial"] as? String,
-                quantityDisplayImperial: i["quantityDisplayImperial"] as? String
+                quantityDisplayImperial: i["quantityDisplayImperial"] as? String,
+                shoppingNote: i["shoppingNote"] as? String
             )
         }.sorted { $0.orderIndex < $1.orderIndex }
 

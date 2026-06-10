@@ -20,6 +20,8 @@ final class IngredientModel {
     var quantityValueImperial: Double?
     var quantityUnitImperial: String?
     var quantityDisplayImperial: String?
+    /// F11: author-entered brand/comment, shown on the Shopping List. Travels with the recipe.
+    var shoppingNote: String? = nil
 
     var recipe: RecipeModel?
     var section: RecipeSectionModel?
@@ -43,7 +45,8 @@ final class IngredientModel {
         quantityDisplayMetric: String? = nil,
         quantityValueImperial: Double? = nil,
         quantityUnitImperial: String? = nil,
-        quantityDisplayImperial: String? = nil
+        quantityDisplayImperial: String? = nil,
+        shoppingNote: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -61,6 +64,7 @@ final class IngredientModel {
         self.quantityValueImperial = quantityValueImperial
         self.quantityUnitImperial = quantityUnitImperial
         self.quantityDisplayImperial = quantityDisplayImperial
+        self.shoppingNote = shoppingNote
     }
 
     var hasConversionData: Bool {

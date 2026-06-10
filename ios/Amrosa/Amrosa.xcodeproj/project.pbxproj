@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00032AFB9A48CA62784BF33E /* ShoppingAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948936D66254FB6EE8220D33 /* ShoppingAggregator.swift */; };
 		01600A5A1AE04FEEADCBD01C /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35DE5A5FDE9B5749BAE51750 /* AppDelegate.swift */; };
 		016559535A3E4F36A9490EAA /* SharedRecipeDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 356CE035A2F5D33FB8375930 /* SharedRecipeDetailView.swift */; };
 		065C4321EC6217B66A9BB187 /* ImportViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43F5529CD66E002D66C50F9A /* ImportViewModel.swift */; };
@@ -23,6 +24,7 @@
 		30954FD37384DF1E56269195 /* CookingModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46BF688B28270B48045818A /* CookingModeView.swift */; };
 		316D86CEEB80CE03F7EB877C /* ReceivedRecipeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30129D1C7369FBE2238CCDF /* ReceivedRecipeView.swift */; };
 		36B5D19C418119BBE0507C21 /* RecipeDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60494666244275FAD1EDFD14 /* RecipeDetailViewModel.swift */; };
+		46202045A9EC218DA2EFE9B8 /* ShoppingCheckModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C798BBD7F6B0EEAE1309950 /* ShoppingCheckModel.swift */; };
 		47372214248102AB1A9FF176 /* StepModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8EA712966F37787B422B017 /* StepModel.swift */; };
 		4D255AE3ABD954B00FABD663 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 702396BB1261F9EC052A6931 /* GoogleSignIn */; };
 		5B856AF237F4DE0D0C56FF6E /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5BAB215538DE97F5F21243F /* AuthView.swift */; };
@@ -53,6 +55,7 @@
 		DB81577245389BE685EAC0D5 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = C97CA4955DBC0B3EC6E80FCA /* FirebaseFirestore */; };
 		DBA887E690B2F0DB33C5619C /* RecipeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E7BDFCD472813185D69085 /* RecipeCard.swift */; };
 		DE2A32F8152AED40A322ACC1 /* AmrosaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B651CAEFC9F7CC85EDD13FAE /* AmrosaTests.swift */; };
+		DF08E7024E54D96A17F3F8ED /* ShoppingListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2047D19B5EE506356DA10A31 /* ShoppingListView.swift */; };
 		E17B4D5CB6AE25D0BD57CC44 /* IngredientModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B871401338956467B2069D /* IngredientModel.swift */; };
 		E3C48CA15A6025D69F83F232 /* YourRecipesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F610DCBD0BFE5231A23E1FED /* YourRecipesView.swift */; };
 		E7352C774EA41B121EAA8E27 /* RecipeSectionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 925B8424F95DC3A52E367D19 /* RecipeSectionModel.swift */; };
@@ -82,14 +85,16 @@
 		0B9B4FFFD105CA55172BCC0F /* SharedRecipeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedRecipeService.swift; sourceTree = "<group>"; };
 		13DBB3085AD0A466A41D2F8A /* RecipeReviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeReviewSheet.swift; sourceTree = "<group>"; };
 		17C0BB8E75558D8FCBF02229 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1C798BBD7F6B0EEAE1309950 /* ShoppingCheckModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShoppingCheckModel.swift; sourceTree = "<group>"; };
 		1CAB3448ED1B556557B17339 /* ImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportView.swift; sourceTree = "<group>"; };
+		2047D19B5EE506356DA10A31 /* ShoppingListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShoppingListView.swift; sourceTree = "<group>"; };
 		224692654A7AFE7D9F606882 /* YourRecipesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YourRecipesViewModel.swift; sourceTree = "<group>"; };
 		2A3703A2D1269D448C9F7CBD /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		2A62C74A95949EA2C4D6096F /* AppContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppContainer.swift; sourceTree = "<group>"; };
 		2B8469CC13DE9050F4218D4A /* AmrosaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmrosaApp.swift; sourceTree = "<group>"; };
 		2B9563ED088CACA5E660CA22 /* SocialModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialModels.swift; sourceTree = "<group>"; };
 		2B9F58D556EDEC241EC090D1 /* ReceivedRecipeSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceivedRecipeSummary.swift; sourceTree = "<group>"; };
-		2CC76E521A7C1E67DB54C861 /* Amrosa.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Amrosa.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2CC76E521A7C1E67DB54C861 /* Amrosa.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Amrosa.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		356CE035A2F5D33FB8375930 /* SharedRecipeDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedRecipeDetailView.swift; sourceTree = "<group>"; };
 		35DE5A5FDE9B5749BAE51750 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		3B8FC9CAC1EE41E1C53784B1 /* AllRecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllRecipesView.swift; sourceTree = "<group>"; };
@@ -107,6 +112,7 @@
 		890EB3690AA95791DCE9A037 /* UserSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserSearchView.swift; sourceTree = "<group>"; };
 		8DAFCFC124ADAD46C9273847 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		925B8424F95DC3A52E367D19 /* RecipeSectionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeSectionModel.swift; sourceTree = "<group>"; };
+		948936D66254FB6EE8220D33 /* ShoppingAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShoppingAggregator.swift; sourceTree = "<group>"; };
 		94D4377EB49AA9DBC9BA5605 /* AccountViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountViewModel.swift; sourceTree = "<group>"; };
 		962CD3D6DE0869F0A0D7FFAC /* RecipeDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeDetailView.swift; sourceTree = "<group>"; };
 		9B78CFA17DD71B75C3BF7A2A /* RecipeRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeRepository.swift; sourceTree = "<group>"; };
@@ -207,6 +213,15 @@
 				B651CAEFC9F7CC85EDD13FAE /* AmrosaTests.swift */,
 			);
 			path = AmrosaTests;
+			sourceTree = "<group>";
+		};
+		3267BEAA897196C69E588523 /* Shopping */ = {
+			isa = PBXGroup;
+			children = (
+				948936D66254FB6EE8220D33 /* ShoppingAggregator.swift */,
+				2047D19B5EE506356DA10A31 /* ShoppingListView.swift */,
+			);
+			path = Shopping;
 			sourceTree = "<group>";
 		};
 		3F026ADE9891895B2AEBA165 /* Social */ = {
@@ -323,6 +338,7 @@
 				4820220BEC6753B10F12F487 /* RecipeDetail */,
 				A900D48004113AEE903DB5B4 /* RecipeEditor */,
 				8312D06CFAADA36F492E7CCC /* Shared */,
+				3267BEAA897196C69E588523 /* Shopping */,
 				3F026ADE9891895B2AEBA165 /* Social */,
 				D6871A5DC1877FEAE666F922 /* YourRecipes */,
 			);
@@ -363,6 +379,7 @@
 				DF35E34E80B3152AF1EC5E6E /* RecipeModel.swift */,
 				41C71065B68DE958DC65F19C /* RecipeNoteModel.swift */,
 				925B8424F95DC3A52E367D19 /* RecipeSectionModel.swift */,
+				1C798BBD7F6B0EEAE1309950 /* ShoppingCheckModel.swift */,
 				A4C371D703F994341BEC6409 /* StepIngredientRefModel.swift */,
 				F8EA712966F37787B422B017 /* StepModel.swift */,
 			);
@@ -538,6 +555,9 @@
 				AC8F47D3F820BC3856D517BD /* SharedRecipe.swift in Sources */,
 				016559535A3E4F36A9490EAA /* SharedRecipeDetailView.swift in Sources */,
 				737674563A17DA09D1DA78C7 /* SharedRecipeService.swift in Sources */,
+				00032AFB9A48CA62784BF33E /* ShoppingAggregator.swift in Sources */,
+				46202045A9EC218DA2EFE9B8 /* ShoppingCheckModel.swift in Sources */,
+				DF08E7024E54D96A17F3F8ED /* ShoppingListView.swift in Sources */,
 				26B5255FFB303961DF6767D7 /* SocialModels.swift in Sources */,
 				950611A76B8B0C61464BA379 /* SocialRepository.swift in Sources */,
 				6BBF96E171D78DEBC663E38C /* StepIngredientRefModel.swift in Sources */,
@@ -565,7 +585,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Amrosa/Amrosa.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7S2FY6WF5V;
 				INFOPLIST_FILE = Amrosa/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -661,7 +681,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Amrosa/Amrosa.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7S2FY6WF5V;
 				INFOPLIST_FILE = Amrosa/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;

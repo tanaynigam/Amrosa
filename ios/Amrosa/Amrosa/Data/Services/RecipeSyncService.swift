@@ -181,6 +181,7 @@ final class RecipeSyncService {
             if let v = ing.quantityValueImperial   { d["quantityValueImperial"] = v }
             if let v = ing.quantityUnitImperial    { d["quantityUnitImperial"] = v }
             if let v = ing.quantityDisplayImperial { d["quantityDisplayImperial"] = v }
+            if let v = ing.shoppingNote          { d["shoppingNote"] = v }
             return d
         }
 

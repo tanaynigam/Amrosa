@@ -22,6 +22,8 @@ struct RecipeDetailView: View {
     @State private var newVariantName = ""
     // Cooking mode start-at-section ("▶ Cook from here")
     @State private var cookFromSectionId: String? = nil
+    // Shopping list (F11)
+    @State private var showShoppingList = false
 
     var body: some View {
         navAndSheets
@@ -73,6 +75,14 @@ struct RecipeDetailView: View {
             }
             .navigationDestination(item: $openVariant) { model in
                 RecipeDetailView(recipe: model)
+            }
+            // F11: shopping list at the detail screen's current scale
+            .navigationDestination(isPresented: $showShoppingList) {
+                ShoppingListView(
+                    recipeId: recipe.id,
+                    initialServings: viewModel?.selectedServings,
+                    initialAnchorQty: (viewModel?.isAnchorBased == true) ? viewModel?.scaleAnchorQty : nil
+                )
             }
     }
 
@@ -150,6 +160,9 @@ struct RecipeDetailView: View {
                 Button(role: .destructive) { showRemoveConfirm = true } label: {
                     Image(systemName: "trash")
                 }
+                Button { showShoppingList = true } label: {
+                    Image(systemName: "cart")
+                }
                 Button { cookFromSectionId = nil; showCookingMode = true } label: {
                     Image(systemName: "book.closed")
                 }
@@ -161,6 +174,9 @@ struct RecipeDetailView: View {
                 }
                 Button { navigateToEditor = true } label: {
                     Image(systemName: "pencil")
+                }
+                Button { showShoppingList = true } label: {
+                    Image(systemName: "cart")
                 }
                 Button { cookFromSectionId = nil; showCookingMode = true } label: {
                     Image(systemName: "book.closed")
@@ -558,26 +574,17 @@ private struct IngredientRow: View {
     let ingredient: IngredientModel
     @Bindable var viewModel: RecipeDetailViewModel
 
-    var isChecked: Bool { viewModel.checkedIngredientIds.contains(ingredient.id) }
     var isOptionalEnabled: Bool { viewModel.enabledOptionals.contains(ingredient.id) }
     var isDimmed: Bool { ingredient.isOptional && !isOptionalEnabled }
 
+    // Display-only row (F11): the checkable list lives on the Shopping List screen now;
+    // optional ingredients keep their enable/disable tap (it affects scaling).
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            // Checkmark circle
-            Button {
-                if ingredient.isOptional && !isOptionalEnabled {
-                    viewModel.toggleOptional(ingredient.id)
-                } else {
-                    if isChecked { viewModel.checkedIngredientIds.remove(ingredient.id) }
-                    else { viewModel.checkedIngredientIds.insert(ingredient.id) }
-                }
-            } label: {
-                Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isChecked ? Color.accentColor : (isDimmed ? Color.secondary.opacity(0.4) : Color.secondary))
-                    .font(.title3)
-            }
-            .buttonStyle(.plain)
+            Image(systemName: "circle.fill")
+                .foregroundStyle(isDimmed ? Color.secondary.opacity(0.3) : Color.accentColor.opacity(0.5))
+                .font(.system(size: 8))
+                .padding(.top, 7)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
@@ -586,8 +593,7 @@ private struct IngredientRow: View {
                     Text(ingredient.name)
                 }
                 .font(.body)
-                .strikethrough(isChecked)
-                .foregroundStyle(isDimmed ? Color.secondary : (isChecked ? Color.secondary : Color.primary))
+                .foregroundStyle(isDimmed ? Color.secondary : Color.primary)
 
                 if ingredient.isOptional {
                     Button(isOptionalEnabled ? "Optional (tap to disable)" : "Optional — tap to add") {

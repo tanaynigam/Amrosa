@@ -1197,6 +1197,15 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 - **"Update unit conversions" button** in the editor → `convertIngredients` CF → merges metric/imperial into `EditorIngredient` (now carries the 6 conversion fields); Save persists. `updateFullRecipe` writes the conversion fields (no more wiping).
 - **fcmToken privacy:** stored in `users/{uid}/private/push` (owner-only), not the world-readable profile doc.
 
+**F11 Shopping List + step checklist — ported:**
+- `IngredientModel.shoppingNote` + `ShoppingCheckModel` (`@Attribute(.unique) key = "recipeId|itemKey"`; SwiftData auto-migrates). Registered in the AppContainer schema; wiped on sign-out; checks cascade-deleted with the recipe. Local only — never synced.
+- `ShoppingAggregator.swift` mirrors Android: `normalizeKey` + `build(ingredients:scaleFactor:unitMode:)` → `[ShoppingLine]` (per-unit summing, " + " joins, non-numeric pass-through, one member per substitute group, de-duplicated notes).
+- `ShoppingListView` (cart icon in detail top bar → push, carries the detail's servings/anchor): own yield ± / unit toggle, persisted checks with strike-through, Reset confirm, 💡 note under merged lines.
+- `shoppingNote` carried through every mapper: push/pull sync, `shared_recipes` mirror + `shared_to` docs (both directions), `cacheReceivedRecipe`, `duplicateAsVariant`, `copyToMyRecipes`, editor save. `ParsedIngredient`/`SharedIngredient` gained a defaulted `shoppingNote` field — import/freeform never set it (matches Android: editor-only authoring via the "＋ Shopping note" field in `IngredientEditorRow`).
+- **Detail ingredient list is display-only** (bullet rows; optional toggle kept) — the checklist lives on the Shopping List.
+- **Cooking-mode step checklist:** step ingredient rows are checkbox rows backed by the detail VM's `checkedIngredientIds` — persists across steps/re-entry, clears when leaving the recipe (session-only).
+- **Auto-refresh note:** Android needed a Room-Flow observer; iOS gets this for free — SwiftData `@Model`s are reference types observed by SwiftUI, so editor saves mutate the same instance the detail renders. The `reload()`-on-appear covers variant-family and deletion changes.
+
 ### iOS ✅ Implemented & Matching Android
 
 | Feature | Notes |
@@ -1245,7 +1254,6 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 | Gap | Detail |
 |---|---|
-| **Android-ahead features** | These ship on Android only so far: **F10 Variations** (`parentRecipeId`/`variantName`), **F11 Shopping List** (combined checklist + persisted checks + `shoppingNote`), **cooking-mode** unit toggle / scroll / section jump / step checklist, **section-then-group** ingredient ordering, and **Room-Flow auto-refresh** of the detail screen. iOS needs the schema fields + UI to match. |
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
 

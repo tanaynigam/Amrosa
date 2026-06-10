@@ -49,6 +49,8 @@ struct SharedIngredient: Identifiable {
     let quantityValueImperial: Double?
     let quantityUnitImperial: String?
     let quantityDisplayImperial: String?
+    /// F11 shopping note — travels with the recipe through sharing.
+    var shoppingNote: String? = nil
 
     var hasConversionData: Bool { quantityValueMetric != nil || quantityValueImperial != nil }
 }

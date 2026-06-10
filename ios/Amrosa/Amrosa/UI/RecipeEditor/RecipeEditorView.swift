@@ -301,6 +301,7 @@ private struct SectionEditorBlock: View {
 
 private struct IngredientEditorRow: View {
     @Binding var ingredient: EditorIngredient
+    @State private var showNote = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -334,6 +335,23 @@ private struct IngredientEditorRow: View {
                 Text("Optional")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            // F11: optional shopping note — unobtrusive, hidden until requested
+            if showNote || !ingredient.shoppingNote.isEmpty {
+                TextField("Shopping note (brand / comment)", text: $ingredient.shoppingNote, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+                    .lineLimit(1...2)
+            } else {
+                Button {
+                    showNote = true
+                } label: {
+                    Label("Shopping note", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
             }
         }
         .padding(.vertical, 2)

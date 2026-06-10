@@ -182,7 +182,8 @@ final class RecipeRepository {
                 quantityDisplayMetric: pi.quantityDisplayMetric,
                 quantityValueImperial: pi.quantityValueImperial,
                 quantityUnitImperial: pi.quantityUnitImperial,
-                quantityDisplayImperial: pi.quantityDisplayImperial
+                quantityDisplayImperial: pi.quantityDisplayImperial,
+                shoppingNote: pi.shoppingNote
             )
             context.insert(ing)
             ing.recipe = recipe
@@ -263,7 +264,8 @@ final class RecipeRepository {
                 quantityValueMetric: i.quantityValueMetric, quantityUnitMetric: i.quantityUnitMetric,
                 quantityDisplayMetric: i.quantityDisplayMetric,
                 quantityValueImperial: i.quantityValueImperial, quantityUnitImperial: i.quantityUnitImperial,
-                quantityDisplayImperial: i.quantityDisplayImperial
+                quantityDisplayImperial: i.quantityDisplayImperial,
+                shoppingNote: i.shoppingNote
             )
             context.insert(m); m.recipe = recipe
             if let sid = i.sectionId { m.section = sectionMap[sid] }
@@ -360,7 +362,8 @@ final class RecipeRepository {
                 quantityValueMetric: i.quantityValueMetric, quantityUnitMetric: i.quantityUnitMetric,
                 quantityDisplayMetric: i.quantityDisplayMetric,
                 quantityValueImperial: i.quantityValueImperial, quantityUnitImperial: i.quantityUnitImperial,
-                quantityDisplayImperial: i.quantityDisplayImperial
+                quantityDisplayImperial: i.quantityDisplayImperial,
+                shoppingNote: i.shoppingNote
             )
             context.insert(m); m.recipe = variant
             if let sid = i.section?.id { m.section = sectionMap[sectionIdMap[sid]!] }
@@ -489,6 +492,7 @@ final class RecipeRepository {
                     existing.quantityValueImperial = edIng.quantityValueImperial
                     existing.quantityUnitImperial = edIng.quantityUnitImperial
                     existing.quantityDisplayImperial = edIng.quantityDisplayImperial
+                    existing.shoppingNote = edIng.shoppingNote.trimmed.isEmpty ? nil : edIng.shoppingNote.trimmed
                 } else {
                     let ing = IngredientModel(
                         id: edIng.id,
@@ -504,7 +508,8 @@ final class RecipeRepository {
                         quantityDisplayMetric: edIng.quantityDisplayMetric,
                         quantityValueImperial: edIng.quantityValueImperial,
                         quantityUnitImperial: edIng.quantityUnitImperial,
-                        quantityDisplayImperial: edIng.quantityDisplayImperial
+                        quantityDisplayImperial: edIng.quantityDisplayImperial,
+                        shoppingNote: edIng.shoppingNote.trimmed.isEmpty ? nil : edIng.shoppingNote.trimmed
                     )
                     context.insert(ing)
                     ing.recipe = recipe
@@ -613,12 +618,44 @@ final class RecipeRepository {
     func deleteRecipe(id: String) throws {
         guard let recipe = try fetchRecipe(id: id) else { return }
         context.delete(recipe)
+        try clearShoppingChecks(recipeId: id)   // F11: cascade — checks are per-recipe
         try context.save()
     }
 
     func deleteAllRecipes() throws {
         let all = try fetchAllRecipes()
         for recipe in all { context.delete(recipe) }
+        try context.delete(model: ShoppingCheckModel.self)
+        try context.save()
+    }
+
+    // MARK: - Shopping list checked items (F11 — local only, never synced)
+
+    func checkedShoppingItems(recipeId: String) throws -> Set<String> {
+        let descriptor = FetchDescriptor<ShoppingCheckModel>(
+            predicate: #Predicate { $0.recipeId == recipeId }
+        )
+        return Set(try context.fetch(descriptor).map { $0.itemKey })
+    }
+
+    func setShoppingChecked(recipeId: String, itemKey: String, checked: Bool) throws {
+        let descriptor = FetchDescriptor<ShoppingCheckModel>(
+            predicate: #Predicate { $0.recipeId == recipeId && $0.itemKey == itemKey }
+        )
+        let existing = try context.fetch(descriptor)
+        if checked {
+            if existing.isEmpty { context.insert(ShoppingCheckModel(recipeId: recipeId, itemKey: itemKey)) }
+        } else {
+            for row in existing { context.delete(row) }
+        }
+        try context.save()
+    }
+
+    func clearShoppingChecks(recipeId: String) throws {
+        let descriptor = FetchDescriptor<ShoppingCheckModel>(
+            predicate: #Predicate { $0.recipeId == recipeId }
+        )
+        for row in try context.fetch(descriptor) { context.delete(row) }
         try context.save()
     }
 
@@ -678,7 +715,8 @@ final class RecipeRepository {
                 quantityDisplayMetric: i["quantityDisplayMetric"] as? String,
                 quantityValueImperial: (i["quantityValueImperial"] as? NSNumber)?.doubleValue,
                 quantityUnitImperial: i["quantityUnitImperial"] as? String,
-                quantityDisplayImperial: i["quantityDisplayImperial"] as? String
+                quantityDisplayImperial: i["quantityDisplayImperial"] as? String,
+                shoppingNote: i["shoppingNote"] as? String
             )
         }
         let stepsRaw = data["steps"] as? [[String: Any]] ?? []

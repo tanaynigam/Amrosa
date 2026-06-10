@@ -106,13 +106,28 @@ struct CookingModeView: View {
                                         .foregroundStyle(.secondary)
                                     ForEach(refs) { ref in
                                         if let ing = ref.ingredient {
-                                            HStack {
-                                                // Unit-aware + scaled (honours the toggle), not the static ref display
-                                                Text(viewModel.scaledQuantity(for: ing))
-                                                    .fontWeight(.medium)
-                                                Text(ing.name)
+                                            // Tick off ingredients as they're added (session-only;
+                                            // clears when you leave the recipe screen).
+                                            let checked = viewModel.checkedIngredientIds.contains(ing.id)
+                                            Button {
+                                                if checked { viewModel.checkedIngredientIds.remove(ing.id) }
+                                                else { viewModel.checkedIngredientIds.insert(ing.id) }
+                                            } label: {
+                                                HStack {
+                                                    Image(systemName: checked ? "checkmark.square.fill" : "square")
+                                                        .foregroundStyle(checked ? Color.accentColor : Color.secondary)
+                                                    // Unit-aware + scaled (honours the toggle)
+                                                    Text(viewModel.scaledQuantity(for: ing))
+                                                        .fontWeight(.medium)
+                                                    Text(ing.name)
+                                                    Spacer()
+                                                }
+                                                .font(.subheadline)
+                                                .strikethrough(checked)
+                                                .foregroundStyle(checked ? Color.secondary : Color.primary)
+                                                .contentShape(Rectangle())
                                             }
-                                            .font(.subheadline)
+                                            .buttonStyle(.plain)
                                         }
                                     }
                                 }

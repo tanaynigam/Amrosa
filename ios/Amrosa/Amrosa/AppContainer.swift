@@ -22,7 +22,8 @@ final class AppContainer {
             IngredientModel.self,
             StepModel.self,
             StepIngredientRefModel.self,
-            RecipeNoteModel.self
+            RecipeNoteModel.self,
+            ShoppingCheckModel.self
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         let container = try! ModelContainer(for: schema, configurations: [config])
