@@ -36,9 +36,19 @@ import java.util.UUID
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
+/**
+ * How the review screen was entered:
+ *  - [Pointer]: from the Shared inbox — a pending `shared_to` pointer (consumed on save).
+ *  - [Direct]: from a co-chef's profile — the recipe id + author are already known (no pointer).
+ */
+sealed class ReviewSource {
+    data class Pointer(val shareId: String) : ReviewSource()
+    data class Direct(val recipeId: String, val authorUid: String, val authorName: String) : ReviewSource()
+}
+
 data class ReceivedRecipeUiState(
     val recipe: Recipe? = null,
-    val fromDisplayName: String? = null,  // who shared this recipe with you
+    val bannerLabel: String? = null,      // "Shared by X" (inbox) or "By X" (profile)
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
     val savedRecipeId: String? = null,   // non-null once saved to Room
@@ -53,7 +63,7 @@ data class ReceivedRecipeUiState(
 }
 
 class ReceivedRecipeViewModel(
-    private val shareId: String,
+    private val source: ReviewSource,
     private val socialRepository: SocialRepository,
     private val sharedRecipeService: SharedRecipeService,
     private val repository: RecipeRepository,
@@ -64,28 +74,49 @@ class ReceivedRecipeViewModel(
     private val _uiState = MutableStateFlow(ReceivedRecipeUiState())
     val uiState: StateFlow<ReceivedRecipeUiState> = _uiState.asStateFlow()
 
-    // Pointer details — kept for the save step
-    private var pointer: com.aerion.amrosa.domain.model.ReceivedPointer? = null
+    // Resolved details kept for the save step
+    private var resolvedRecipeId: String? = null
+    private var authorUid: String = ""
+    private var authorName: String = "Someone"
+    private var pointerShareId: String? = null   // pointer mode only — consumed on save
 
     init {
         viewModelScope.launch {
-            // 1. Read the pending pointer to find the canonical recipe id + author
-            val p = socialRepository.getReceivedPointer(shareId)
-            pointer = p
-            // 2. Read the live recipe from the public mirror (shared_recipes/{recipeId})
-            val recipe = p?.let { sharedRecipeService.getSharedRecipeDetail(it.recipeId) }
-            _uiState.update {
-                it.copy(
-                    recipe = recipe,
-                    fromDisplayName = p?.fromDisplayName,
-                    selectedServings = recipe?.baseServings ?: 1,
-                    isLoading = false,
-                    error = when {
-                        p == null -> "This share is no longer available."
-                        recipe == null -> "This recipe is no longer shared by its author."
-                        else -> null
+            when (source) {
+                is ReviewSource.Pointer -> {
+                    pointerShareId = source.shareId
+                    val p = socialRepository.getReceivedPointer(source.shareId)
+                    p?.let { resolvedRecipeId = it.recipeId; authorUid = it.authorUid; authorName = it.authorName }
+                    val recipe = resolvedRecipeId?.let { sharedRecipeService.getSharedRecipeDetail(it) }
+                    _uiState.update {
+                        it.copy(
+                            recipe = recipe,
+                            bannerLabel = p?.let { pp -> "Shared by ${pp.fromDisplayName}" },
+                            selectedServings = recipe?.baseServings ?: 1,
+                            isLoading = false,
+                            error = when {
+                                p == null -> "This share is no longer available."
+                                recipe == null -> "This recipe is no longer shared by its author."
+                                else -> null
+                            }
+                        )
                     }
-                )
+                }
+                is ReviewSource.Direct -> {
+                    resolvedRecipeId = source.recipeId
+                    authorUid = source.authorUid
+                    authorName = source.authorName
+                    val recipe = sharedRecipeService.getSharedRecipeDetail(source.recipeId)
+                    _uiState.update {
+                        it.copy(
+                            recipe = recipe,
+                            bannerLabel = "By ${source.authorName}",
+                            selectedServings = recipe?.baseServings ?: 1,
+                            isLoading = false,
+                            error = if (recipe == null) "This recipe is no longer available." else null
+                        )
+                    }
+                }
             }
         }
     }
@@ -95,30 +126,29 @@ class ReceivedRecipeViewModel(
     }
 
     /**
-     * Save this received recipe to Tab 2 (Recipe Ownership Model v2):
+     * Save this recipe to the Shared tab (Tab 2, Recipe Ownership Model v2):
      *   1. write a reference at received_recipes/{uid}/items/{recipeId}
      *   2. cache the recipe locally with isReceived = true (original author preserved)
-     *   3. consume the pending share pointer
+     *   3. consume the pending share pointer (pointer mode only)
      * The local copy keeps the canonical recipeId so future refreshes overwrite it in place.
      */
     fun saveToMyRecipes() {
         val recipe = _uiState.value.recipe ?: return
-        val p = pointer ?: return
         _uiState.update { it.copy(isSaving = true) }
         viewModelScope.launch {
             try {
-                // Real author name: the mirror's name unless it's blank/"Imported"
-                // (legacy/iOS), in which case the sender IS the author → use fromDisplayName.
+                // Real author name: the mirror's name unless it's blank/"Imported" (legacy/iOS),
+                // in which case fall back to the name resolved from the pointer/profile.
                 val mirrorName = recipe.authorDisplayName
                 val realAuthorName = if (mirrorName.isNullOrBlank() || mirrorName.equals("Imported", true))
-                    p.fromDisplayName else mirrorName
+                    authorName else mirrorName
                 socialRepository.saveReceivedReference(
                     recipeId = recipe.id,
-                    authorUid = p.authorUid,
+                    authorUid = authorUid,
                     authorName = realAuthorName
                 )
                 repository.cacheReceivedRecipe(recipe.copy(authorDisplayName = realAuthorName))
-                socialRepository.deleteReceivedPointer(shareId)
+                pointerShareId?.let { socialRepository.deleteReceivedPointer(it) }
                 _uiState.update { it.copy(isSaving = false, savedRecipeId = recipe.id) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isSaving = false, error = "Couldn't save recipe: ${e.message}") }
@@ -128,7 +158,7 @@ class ReceivedRecipeViewModel(
 
     companion object {
         fun factory(
-            shareId: String,
+            source: ReviewSource,
             socialRepository: SocialRepository,
             sharedRecipeService: SharedRecipeService,
             repository: RecipeRepository,
@@ -138,7 +168,7 @@ class ReceivedRecipeViewModel(
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    ReceivedRecipeViewModel(shareId, socialRepository, sharedRecipeService, repository, authRepository, gson) as T
+                    ReceivedRecipeViewModel(source, socialRepository, sharedRecipeService, repository, authRepository, gson) as T
             }
     }
 }
@@ -155,16 +185,20 @@ class ReceivedRecipeViewModel(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReceivedRecipeScreen(
-    shareId: String,
+    source: ReviewSource,
     onBack: () -> Unit,
     onSaved: (newRecipeId: String) -> Unit
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
+    val vmKey = when (source) {
+        is ReviewSource.Pointer -> "ptr-${source.shareId}"
+        is ReviewSource.Direct -> "dir-${source.recipeId}"
+    }
     val viewModel: ReceivedRecipeViewModel = viewModel(
-        key = shareId,
+        key = vmKey,
         factory = ReceivedRecipeViewModel.factory(
-            shareId = shareId,
+            source = source,
             socialRepository = app.container.socialRepository,
             sharedRecipeService = app.container.sharedRecipeService,
             repository = app.container.repository,
@@ -219,7 +253,7 @@ fun ReceivedRecipeScreen(
                             Icon(Icons.Default.BookmarkAdd, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
                         }
-                        Text("Save Recipe", fontWeight = FontWeight.SemiBold)
+                        Text("Add to Shared tab", fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -252,9 +286,9 @@ fun ReceivedRecipeScreen(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentPadding = PaddingValues(bottom = 32.dp)
                 ) {
-                    // ── From banner ─────────────────────────────────────────────
+                    // ── Byline banner ───────────────────────────────────────────
                     item(key = "from_banner") {
-                        state.fromDisplayName?.let { sender ->
+                        state.bannerLabel?.let { banner ->
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -273,7 +307,7 @@ fun ReceivedRecipeScreen(
                                         tint = MaterialTheme.colorScheme.onTertiaryContainer
                                     )
                                     Text(
-                                        "Shared by $sender",
+                                        banner,
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onTertiaryContainer,
                                         fontWeight = FontWeight.Medium

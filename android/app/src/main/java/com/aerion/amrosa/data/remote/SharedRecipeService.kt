@@ -230,7 +230,9 @@ class SharedRecipeService(
             // vs "X" label is computed at display time — never overwrite the name here.
             "authorId" to recipe.authorId,
             "authorDisplayName" to (recipe.authorDisplayName ?: "User"),
-            "visibility" to "public",
+            // Mirror records the actual tier ("friends" or "public") — drives the read rule.
+            // Default to "public" for safety if a private recipe somehow reaches publish().
+            "visibility" to (recipe.visibility.takeIf { it == "friends" || it == "public" } ?: "public"),
             "sharedAt" to System.currentTimeMillis(),
             "sections" to sections, "ingredients" to ingredients,
             "steps" to steps, "stepIngredientRefs" to stepRefs

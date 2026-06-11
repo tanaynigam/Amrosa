@@ -1,5 +1,6 @@
 package com.aerion.amrosa.ui.social
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -74,7 +75,10 @@ class FriendsViewModel(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FriendsScreen(onBack: () -> Unit) {
+fun FriendsScreen(
+    onBack: () -> Unit,
+    onProfileClick: (uid: String, name: String) -> Unit = { _, _ -> }
+) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
     val viewModel: FriendsViewModel = viewModel(
@@ -166,7 +170,8 @@ fun FriendsScreen(onBack: () -> Unit) {
                 FriendRow(
                     friend = friend,
                     isRemoving = state.removingUid == friend.uid,
-                    onRemove = { confirmRemoveUid = friend.uid }
+                    onRemove = { confirmRemoveUid = friend.uid },
+                    onClick = { onProfileClick(friend.uid, friend.displayName) }
                 )
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
@@ -178,11 +183,13 @@ fun FriendsScreen(onBack: () -> Unit) {
 private fun FriendRow(
     friend: UserProfile,
     isRemoving: Boolean,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

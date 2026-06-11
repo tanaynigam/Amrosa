@@ -3,6 +3,8 @@
 
 > **Amrosa** is the app name. Upon launch, the user is greeted with the heading **"Amrita & Ambrosia"** — a fusion of the Sanskrit and Greek words for divine, immortal sustenance. This is the guiding identity of the app: recipes that are exquisite, elaborate, and deeply personal.
 
+> ⚙️ **Split-platform workflow (since 2026-06):** New features are implemented on **Android first, in this session**. The **iOS port is handled by a separate Claude session** on a Mac. This CLAUDE.md is the **hand-off contract** between the two: every Android feature must be documented here (schema, data flow, UI, Firestore shape) so the iOS session can port it, and Android-ahead features are tracked under the iOS "Remaining Gaps" tables. Shared infrastructure (Firestore rules, Cloud Functions, indexes) is owned by the Android session and benefits both.
+
 ---
 
 ## Project Overview
@@ -220,7 +222,7 @@ data class RecipeEntity(
     val syncedAt: Long? = null,
     val authorId: String? = null,        // Firebase UID of the ORIGINAL author (always preserved)
     val authorDisplayName: String? = null, // ORIGINAL author display name (never overwritten with "Imported")
-    val visibility: String = "private",  // "private" | "public" (public = mirrored to shared_recipes)
+    val visibility: String = "private",  // F12: "private" | "friends" (Co-Chefs only) | "public" — friends/public mirrored to shared_recipes
     val parentRecipeId: String? = null,  // F10: null = base recipe; else id of the base this varies (variations)
     val variantName: String? = null      // F10: e.g. "Spicy", "Vegan" — only set on variations
 )
@@ -317,7 +319,7 @@ Comments are stored in Firestore only (`shared_recipes/{recipeId}/comments/{comm
 |---|---|
 | `recipes/` | Was seeded recipes (pull-only). Now **empty** — seeded docs deleted, seeder disabled. |
 | `personal_recipes/{uid}/recipes/{recipeId}` | User's personal recipes — push on save, pull on sign-in |
-| `shared_recipes/{recipeId}` | Community-shared recipes (visibility = "public") |
+| `shared_recipes/{recipeId}` | Mirror for shared recipes. `visibility` field = `"friends"` (Co-Chefs only) or `"public"`. Read gated by Firestore rules: public → anyone; friends → author + accepted co-chefs (F12). |
 | `shared_recipes/{recipeId}/comments/{commentId}` | Comments on shared recipes |
 | `users/{uid}` | Public user profile — displayName, photoUrl, email, updatedAt, **fcmToken**. Created/merged on each sign-in via `SocialRepository.upsertProfile()`. Used for user search and FCM push delivery. |
 | `follows/{followerId}_{followeeId}` | Co-Chef relationship. Fields: followerId, followerName, followeeId, followeeName, status ("pending"\|"accepted"), createdAt. Composite indexes required: (followeeId, status) and (followerId, status). |
@@ -577,16 +579,22 @@ Project: `amrosa-2ec82`. Web client ID in `res/values/strings.xml` as `google_we
 
 ### F8 — Visibility & Link Sharing ✅ (partially reworked)
 
-#### Recipe visibility model
+#### Recipe visibility model (3 tiers — see F12)
 
-Every recipe has `visibility: String = "private"` in Room.
-- **`"private"`** (default) — visible only to the owner; no Firestore mirror
-- **`"public"`** — mirrored to `shared_recipes/{recipeId}` in Firestore, making it accessible via a shareable link and (future) the owner's public profile. **Does NOT make it visible in any in-app browse tab.**
+Every recipe has `visibility: String = "private"` in Room. **Three tiers** (no DB migration — the
+field was already a free-form String):
+- **`"private"`** (default) — visible only to the owner; no Firestore mirror.
+- **`"friends"`** (Co-Chefs only) — mirrored to `shared_recipes/{recipeId}` with `visibility:"friends"`;
+  readable only by the author + accepted co-chefs (enforced by Firestore rules). Appears on the
+  author's profile for their co-chefs.
+- **`"public"`** — mirrored with `visibility:"public"`; accessible via share link and (future)
+  public profile. Both friends + public are "published"; `RecipeDetailUiState.isPublished` gates
+  comments + sharing.
 
-**Public ≠ community-visible.** Public recipes do not appear in the Shared tab or any feed. The Shared tab (Tab 2) shows only recipes *directly sent* to the current user via `shared_to/`. The only ways for someone else to see a public recipe are:
-1. They have the direct HTTPS share link
-2. The owner directly sends it to them (via "Send to follower")
-3. They visit the owner's profile page (future feature — not yet implemented)
+**Published ≠ in a browse feed.** Shared/public recipes do not appear in the Shared tab or any feed.
+The Shared tab (Tab 2) shows only recipes the user saved as references. Someone else sees your
+recipe by: (1) the direct HTTPS link (public only), (2) you directly sending it, or
+(3) **visiting your Co-Chef profile** (F12) for your friends + public recipes.
 
 #### Merged share button (detail screen top bar)
 
@@ -902,6 +910,42 @@ Separately, each ingredient in a **cooking-mode step card** is a checkbox row �
 
 ---
 
+### F12 — Visibility Tiers + Co-Chef Profiles ✅ (Android; iOS pending)
+
+**Three visibility tiers** (`private` / `friends` / `public`) — see the F8 visibility model above.
+No DB migration (the `visibility` String already existed). `SharedRecipeService.buildDocument`
+writes the real tier (was hardcoded `"public"`); `RecipeDetailViewModel.setVisibility` publishes
+the mirror for `friends`/`public` and unpublishes for `private`. The owner's visibility **chip**
+opens a 3-option chooser dialog (Private 🔒 / Co-Chefs 👥 / Public 🌐, `VisibilityOption` rows).
+
+**Direct share of a private recipe → Co-Chefs tier** (not Public). `makeSharableAndShareToFollower`
+calls `ensureSharableVisibility()` which publishes at `"friends"` (an already-Public recipe is left
+Public). The Share-link flow is separate and still requires Public (`showMakePublicForLink` prompt).
+
+**Firestore rule** (`shared_recipes` read): `public` → anyone; author → always; `friends` → only if
+an **accepted** mutual-follow doc `{viewer}_{author}` exists (`exists()` + `get()`). Public recipes
++ web viewer unaffected. ⚠️ **Required composite index**: `shared_recipes (authorId ASC, visibility ASC)`
+for the profile query — create via the console or the link Firestore emits on first profile open
+(not in a managed `firestore.indexes.json`; the existing `follows` indexes were created the same way).
+
+**Co-Chef profile** (`ui/social/ProfileScreen.kt` + `ProfileViewModel`): reached by tapping a row in
+`FriendsScreen`. Loads `SocialRepository.getAuthorRecipes(authorUid, includeFriendsOnly = true)` —
+queries `shared_recipes` `whereEqualTo(authorId)` + `whereIn(visibility, ["friends","public"])` →
+`ProfileRecipeSummary` cards (title, times, tags, tier badge). (Future public-profile reuse:
+`includeFriendsOnly = false`.)
+
+**Review mode + "Add to Shared tab".** Tapping a profile recipe opens the **review screen**
+(`ReceivedRecipeScreen`, generalized): a `sealed class ReviewSource { Pointer(shareId) | Direct(recipeId,authorUid,authorName) }`
+drives entry — inbox uses `Pointer`, profile uses `Direct`. The bottom button (**"Add to Shared tab"**)
+saves a received reference (`saveReceivedReference` + `cacheReceivedRecipe`) to Tab 2; `deleteReceivedPointer`
+runs in pointer mode only. Losing co-chef status later drops the saved reference on the next
+`syncReceivedRecipes` (mirror read denied → treated as gone).
+
+**Routes**: `profile/{uid}?name=` → `ProfileScreen`; `profileRecipe/{recipeId}?authorUid=&authorName=`
+→ `ReceivedRecipeScreen(ReviewSource.Direct)`.
+
+---
+
 ## Screen Map
 
 ```
@@ -1130,7 +1174,8 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F7 — Sign-out clears data** | `clearAllLocalData()` in `AppContainer` wipes Room + sync prefs; called before `signOut()` |
 | **F7 — Auth** | Google + email/password + phone OTP; `linkWithCredential` upgrade; sync on sign-in; `AccountScreen`; `AuthScreen` |
 | **F7 — Author attribution** | `authorId` + `authorDisplayName` stamped at creation; editor author dropdown; personal = real name; imported = "Imported" override at publish time |
-| **F8 — Visibility** | `visibility` field on RecipeEntity; private/public; share button in detail top bar |
+| **F8 — Visibility** | `visibility` field on RecipeEntity; share button in detail top bar |
+| **F12 — Visibility tiers + Co-Chef profiles** | 3 tiers (private/friends/public, no migration); friends-gated `shared_recipes` read rule; `ProfileScreen` from FriendsScreen shows a co-chef's friends+public recipes; `getAuthorRecipes`; review via generalized `ReceivedRecipeScreen` (`ReviewSource.Pointer|Direct`) → "Add to Shared tab"; private direct-share → Co-Chefs tier. **Android only** (iOS pending). Needs composite index `shared_recipes (authorId, visibility)`. |
 | **F8 — Share button** | Top bar icon (owners only); if public → Android share sheet with `amrosa://shared/{id}`; if private → dialog → publish → share sheet |
 | **F8 — Deep links + App Links** | HTTPS App Links (`https://amrosa-2ec82.web.app/shared/{id}`) + `amrosa://` fallback; `assetlinks.json` in Firebase Hosting; `navDeepLink` for both patterns in NavGraph |
 | **F8 — Firebase Hosting** | `shared.html` recipe viewer (browser fallback); `index.html` landing page; deployed at `amrosa-2ec82.web.app` |
@@ -1165,11 +1210,17 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 | # | Feature | Description |
 |---|---|---|
-| — | Discover / Recommendations tab | Public/discoverable recipes + time-of-day recommendations; replaces placeholder; eventually becomes default tab |
-| — | Public profile view | View another user's public recipes at `"profile/{uid}"` |
-| — | Recipe Images | Firebase Storage integration; image picker on editor; Coil display |
-| — | Shopping List | Dedicated screen; add ingredients from recipe detail |
-| — | iOS: Universal Links | `apple-app-site-association` file + `Associated Domains` entitlement |
+| — | Recipe Images | Firebase Storage integration; image picker on editor; Coil (Android) / AsyncImage (iOS) display. **Both platforms.** Largest remaining feature. |
+| — | Discover / Recommendations tab | Public/discoverable recipes + time-of-day recommendations; replaces the placeholder; eventually becomes default tab. **Both platforms.** |
+| — | Public profile view (non-friends) | Co-Chef profile is DONE on Android (F12). Remaining: a *public* profile for users NOT in your co-chefs, showing only their public recipes (reuse `getAuthorRecipes(includeFriendsOnly = false)` + an entry from user search). |
+| — | Gemini brand/substitute suggestions | The deferred half of F11 — AI-suggested top brands + substitutes per ingredient (author notes already ship). |
+| — | iOS: Universal Links | `apple-app-site-association` file + `Associated Domains` entitlement (Android App Links already done). |
+| — | Shopping list — cross-recipe / standalone | Optional: combine multiple recipes into one shopping trip (current F11 is per-recipe). |
+
+**Tech debt / smaller follow-ups:**
+- Verify the iOS sync clean-replace (`replaceSyncedContent`) compiles + behaves in Xcode (written but not built on the Android dev box).
+- iOS fresh-pull doesn't set `scaleIngredientId`/`scaleStep` on `insertFullRecipeFromParsed` → anchor-scaling config lost on first multi-device pull. Small, isolated.
+- Editor's post-save cloud push runs in `viewModelScope` and can be cancelled mid-pop; launch-time `pushAllPersonalRecipes()` self-heals. Could move to an app-scope coroutine.
 
 ---
 
@@ -1258,6 +1309,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 | Gap | Detail |
 |---|---|
+| **F12 — Visibility tiers + Co-Chef profiles** | Android-only. iOS needs: the `"friends"` tier in `setVisibility`/publish (`buildDocument` must write the real `visibility`, not `"public"`); a 3-option visibility chooser; private direct-share → friends; a `ProfileView` from the friends list backed by `getAuthorRecipes(authorUid, includeFriendsOnly)`; and review/"Add to Shared tab" reuse for `Direct(recipeId, authorUid, authorName)` entry. The Firestore rule + composite index are already deployed (shared infra). |
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
 
@@ -1321,14 +1373,18 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 - The editor **author dropdown** changes both `isImported` and `authorDisplayName` on save. `authorId` is never changed.
 - `isOwner` in `RecipeDetailViewModel`: `true` when `authorId == currentUid` OR when `authorId == null` (pre-attribution recipes).
 
-### Visibility & Sharing
-- Share button in detail top bar (owners only):
-  - Already public → opens Android share sheet immediately with `https://amrosa-2ec82.web.app/shared/{recipeId}`
-  - Private → dialog → confirm → `setVisibility("public")` + set `pendingShareAfterPublish = true` → `LaunchedEffect` fires share sheet once `state.isPublic` becomes true
-- `setVisibility("public")` → updates Room + publishes to `shared_recipes` + starts comment observer.
-- `setVisibility("private")` → updates Room + unpublishes + stops comment observer.
+### Visibility & Sharing (3 tiers — F12)
+- `visibility` ∈ `private` / `friends` (Co-Chefs only) / `public`. `isPublished = visibility != "private"`.
+- `setVisibility(tier)` → Room update + (`friends`/`public` → publish mirror with that tier + start comments) / (`private` → unpublish + stop comments). `SharedRecipeService.buildDocument` writes the real `visibility` (NOT hardcoded "public").
+- Visibility chip → 3-option chooser dialog. **Share-link** flow is separate from the chip and still requires Public (`showMakePublicForLink`).
+- **Direct co-chef share** of a private recipe publishes at `"friends"` via `ensureSharableVisibility()` (don't downgrade an already-Public recipe).
+- Firestore `shared_recipes` read rule gates `friends` recipes on an accepted mutual-follow doc. **Composite index `shared_recipes (authorId, visibility)`** required for the profile query.
 - `SharedRecipeService.buildDocument()` applies `authorDisplayName = "Imported"` when `recipe.isImported == true`.
-- Comments are Firestore-only; never stored in Room.
+- Comments are Firestore-only; never stored in Room. Shown when `isPublished` (friends or public).
+
+### Co-Chef Profiles (F12)
+- `ProfileScreen`/`ProfileViewModel` ← `SocialRepository.getAuthorRecipes(authorUid, includeFriendsOnly)`. Entry: tap a row in `FriendsScreen`.
+- Profile recipe → review via `ReceivedRecipeScreen(ReviewSource.Direct(recipeId, authorUid, authorName))`; **"Add to Shared tab"** saves a received reference (Tab 2). The inbox uses `ReviewSource.Pointer(shareId)`. Both share one screen/VM.
 
 ### Import / Review Flow
 - Recipes are saved to Room **immediately** with `needsReview = true` before the review sheet opens — data is never lost.

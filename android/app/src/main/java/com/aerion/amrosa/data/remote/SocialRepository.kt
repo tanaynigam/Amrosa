@@ -462,6 +462,42 @@ class SocialRepository(
         }
     }
 
+    // ── Profile: another chef's shared recipes ──────────────────────────────────
+
+    /**
+     * Load [authorUid]'s recipes from the `shared_recipes` mirror for their profile page.
+     * Co-chefs see both `friends` and `public` tiers; non-friends (future public profile)
+     * see only `public`. Reads are gated by Firestore rules — a non-co-chef querying with
+     * `includeFriendsOnly = true` would be rejected, so callers must pass the right flag.
+     *
+     * Requires composite index: shared_recipes (authorId ASC, visibility ASC).
+     */
+    suspend fun getAuthorRecipes(authorUid: String, includeFriendsOnly: Boolean): List<ProfileRecipeSummary> {
+        if (authorUid.isBlank()) return emptyList()
+        val tiers = if (includeFriendsOnly) listOf("friends", "public") else listOf("public")
+        return try {
+            val snapshot = firestore.collection("shared_recipes")
+                .whereEqualTo("authorId", authorUid)
+                .whereIn("visibility", tiers)
+                .get().await()
+            snapshot.documents.mapNotNull { doc ->
+                val data = doc.data ?: return@mapNotNull null
+                val rawTags = data["tags"]
+                ProfileRecipeSummary(
+                    recipeId = doc.id,
+                    title = data["title"] as? String ?: "Untitled",
+                    prepTimeMinutes = (data["prepTimeMinutes"] as? Number)?.toInt(),
+                    cookTimeMinutes = (data["cookTimeMinutes"] as? Number)?.toInt(),
+                    tags = (rawTags as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                    visibility = data["visibility"] as? String ?: "public",
+                )
+            }.sortedBy { it.title.lowercase() }
+        } catch (e: Exception) {
+            Log.e(TAG, "getAuthorRecipes $authorUid failed", e)
+            emptyList()
+        }
+    }
+
     // ── Private helpers ────────────────────────────────────────────────────────
 
     private suspend fun deliverNotification(

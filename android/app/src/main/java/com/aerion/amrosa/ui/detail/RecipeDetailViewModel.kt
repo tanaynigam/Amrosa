@@ -52,6 +52,12 @@ data class RecipeDetailUiState(
 ) {
     val isPublic: Boolean get() = recipe?.visibility == "public"
 
+    /** True when the recipe is mirrored to the cloud (Co-Chefs or Public) — gates comments + sharing. */
+    val isPublished: Boolean get() = recipe?.visibility == "friends" || recipe?.visibility == "public"
+
+    /** Current visibility tier; defaults to "private". */
+    val visibility: String get() = recipe?.visibility ?: "private"
+
     /** True when this is a received recipe (Tab 2) — read-only, "Remove" instead of edit/delete. */
     val isReceived: Boolean get() = recipe?.isReceived == true
 
@@ -209,8 +215,8 @@ class RecipeDetailViewModel(
                 )
             }
 
-            // Start listening to comments if the recipe is already public
-            if (recipe?.visibility == "public") startObservingComments()
+            // Start listening to comments if the recipe is already shared (Co-Chefs or Public)
+            if (recipe?.visibility == "friends" || recipe?.visibility == "public") startObservingComments()
         }
     }
 
@@ -250,9 +256,11 @@ class RecipeDetailViewModel(
             val updatedRecipe = _uiState.value.recipe?.copy(visibility = visibility)
             _uiState.update { it.copy(recipe = updatedRecipe, isVisibilityUpdating = false) }
 
-            // 3. Mirror to / remove from shared_recipes
+            // 3. Mirror to / remove from shared_recipes.
+            //    "friends" + "public" are both published (the mirror records the tier, which
+            //    the Firestore read rule enforces); "private" removes the mirror.
             val recipe = updatedRecipe ?: return@launch
-            if (visibility == "public") {
+            if (visibility == "friends" || visibility == "public") {
                 sharedRecipeService.publish(recipe)
                 startObservingComments()
             } else {
@@ -365,20 +373,23 @@ class RecipeDetailViewModel(
     }
 
     /**
-     * Make the recipe Public (publishes the canonical mirror) and then share it.
-     * Used when the user confirms the "make public to share" prompt for a private recipe.
+     * Make the recipe at least Co-Chefs-visible (publishes the mirror) and then share it directly.
+     * Used when the user confirms the "make visible to your co-chefs to share" prompt for a
+     * private recipe. An already-Public recipe is left Public (not downgraded).
      */
-    fun makePublicAndShareToFollower(recipientUid: String, recipientName: String) {
+    fun makeSharableAndShareToFollower(recipientUid: String, recipientName: String) {
         viewModelScope.launch {
-            publishCurrentRecipe()
+            ensureSharableVisibility()
             shareToFollowerInternal(recipientUid, recipientName)
         }
     }
 
-    /** Persist + publish the current recipe as Public so co-chefs can read its mirror. */
-    private suspend fun publishCurrentRecipe() {
-        repository.setVisibility(recipeId, "public")
-        val updated = _uiState.value.recipe?.copy(visibility = "public") ?: return
+    /** Ensure the recipe is mirrored at Co-Chefs tier so a co-chef can read it. Keeps Public as-is. */
+    private suspend fun ensureSharableVisibility() {
+        val current = _uiState.value.recipe?.visibility ?: "private"
+        if (current == "public") return  // already world-visible — don't downgrade
+        repository.setVisibility(recipeId, "friends")
+        val updated = _uiState.value.recipe?.copy(visibility = "friends") ?: return
         _uiState.update { it.copy(recipe = updated) }
         sharedRecipeService.publish(updated)
         startObservingComments()

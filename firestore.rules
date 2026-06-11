@@ -18,10 +18,19 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 
-    // ── Shared (public) recipes ─────────────────────────────────────────────
-    // Publicly readable. Only the recipe's author can create, update, or delete.
+    // ── Shared recipes (visibility tiers) ───────────────────────────────────
+    // The recipe's `visibility` field gates reads:
+    //   "public"  → readable by anyone (web + app), even unauthenticated.
+    //   "friends" → readable only by the author and accepted co-chefs
+    //               (a mutual-follow doc {viewer}_{author} with status "accepted").
+    //   (private recipes are never mirrored here.)
+    // Only the recipe's author can create, update, or delete.
     match /shared_recipes/{recipeId} {
-      allow read: if true;  // public — readable by anyone (web + app)
+      allow read: if resource.data.visibility == 'public'
+        || (request.auth != null && request.auth.uid == resource.data.authorId)
+        || (request.auth != null && resource.data.visibility == 'friends'
+            && exists(/databases/$(database)/documents/follows/$(request.auth.uid + '_' + resource.data.authorId))
+            && get(/databases/$(database)/documents/follows/$(request.auth.uid + '_' + resource.data.authorId)).data.status == 'accepted');
 
       allow create: if request.auth != null
         && request.auth.uid == request.resource.data.authorId;

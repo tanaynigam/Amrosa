@@ -68,6 +68,8 @@ fun RecipeDetailScreen(
     var showVariantDialog by remember { mutableStateOf(false) }
     var variantNameInput by remember { mutableStateOf("") }
     var showVisibilityDialog by remember { mutableStateOf(false) }
+    // Dedicated prompt for the Share-link flow when the recipe isn't Public yet
+    var showMakePublicForLink by remember { mutableStateOf(false) }
     var commentText by remember { mutableStateOf("") }
     // Set to true after "make public" is confirmed — opens share sheet once publish completes
     var pendingShareAfterPublish by remember { mutableStateOf(false) }
@@ -333,26 +335,23 @@ fun RecipeDetailScreen(
                         Text(it, style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    // Visibility chip — only shown to the recipe owner
+                    // Visibility chip — only shown to the recipe owner (Private / Co-Chefs / Public)
                     if (state.isOwner) {
                         Spacer(Modifier.height(10.dp))
-                        val isPublic = state.isPublic
+                        val (visIcon, visLabel) = when (state.visibility) {
+                            "public"  -> Icons.Default.Public to "Public"
+                            "friends" -> Icons.Default.People to "Co-Chefs"
+                            else       -> Icons.Default.Lock to "Private"
+                        }
                         FilterChip(
-                            selected = isPublic,
+                            selected = state.isPublished,
                             onClick = { showVisibilityDialog = true },
                             enabled = !state.isVisibilityUpdating,
                             leadingIcon = {
-                                Icon(
-                                    if (isPublic) Icons.Default.Public else Icons.Default.Lock,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                Icon(visIcon, contentDescription = null, modifier = Modifier.size(16.dp))
                             },
                             label = {
-                                Text(
-                                    if (isPublic) "Public" else "Private",
-                                    style = MaterialTheme.typography.labelMedium
-                                )
+                                Text(visLabel, style = MaterialTheme.typography.labelMedium)
                             }
                         )
                     }
@@ -692,8 +691,8 @@ fun RecipeDetailScreen(
                 }
             }
 
-            // ── Comments (shown when recipe is public) ──────────────
-            if (state.isPublic) {
+            // ── Comments (shown when recipe is shared — Co-Chefs or Public) ──────────────
+            if (state.isPublished) {
                 item {
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     Row(
@@ -774,42 +773,55 @@ fun RecipeDetailScreen(
         }
     }
 
-    // ── Visibility / Share dialog ─────────────────────────────────────────────
+    // ── Visibility chooser dialog (Private / Co-Chefs / Public) ───────────────
     if (showVisibilityDialog) {
-        val isPublic = state.isPublic
         AlertDialog(
             onDismissRequest = { showVisibilityDialog = false },
-            icon = {
-                Icon(
-                    if (isPublic) Icons.Default.Lock else Icons.Default.Share,
-                    contentDescription = null
-                )
-            },
-            title = { Text(if (isPublic) "Make Private?" else "Share Recipe?") },
+            icon = { Icon(Icons.Default.Visibility, contentDescription = null) },
+            title = { Text("Who can see this recipe?") },
             text = {
-                Text(
-                    if (isPublic)
-                        "This recipe will no longer be accessible via share link. Existing comments will be preserved if you make it public again."
-                    else
-                        "This recipe will be accessible to anyone with the share link. You can make it private again at any time."
-                )
-            },
-            confirmButton = {
-                Button(onClick = {
-                    if (isPublic) {
-                        viewModel.setVisibility("private")
-                    } else {
-                        // Publish first, then open share sheet once it's live
-                        viewModel.setVisibility("public")
-                        pendingShareAfterPublish = true
-                    }
-                    showVisibilityDialog = false
-                }) {
-                    Text(if (isPublic) "Make Private" else "Share")
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    VisibilityOption(
+                        selected = state.visibility == "private",
+                        icon = Icons.Default.Lock, title = "Private", subtitle = "Only you",
+                        onClick = { viewModel.setVisibility("private"); showVisibilityDialog = false }
+                    )
+                    VisibilityOption(
+                        selected = state.visibility == "friends",
+                        icon = Icons.Default.People, title = "Co-Chefs only",
+                        subtitle = "Your co-chefs can find it on your profile",
+                        onClick = { viewModel.setVisibility("friends"); showVisibilityDialog = false }
+                    )
+                    VisibilityOption(
+                        selected = state.visibility == "public",
+                        icon = Icons.Default.Public, title = "Public",
+                        subtitle = "Anyone with the link can view",
+                        onClick = { viewModel.setVisibility("public"); showVisibilityDialog = false }
+                    )
                 }
             },
+            confirmButton = {
+                TextButton(onClick = { showVisibilityDialog = false }) { Text("Done") }
+            }
+        )
+    }
+
+    // ── "Make Public to share a link" prompt (Share-link flow only) ───────────
+    if (showMakePublicForLink) {
+        AlertDialog(
+            onDismissRequest = { showMakePublicForLink = false },
+            icon = { Icon(Icons.Default.Public, contentDescription = null) },
+            title = { Text("Make Public?") },
+            text = { Text("A share link is accessible to anyone. This makes the recipe Public; you can change it back anytime.") },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.setVisibility("public")
+                    pendingShareAfterPublish = true
+                    showMakePublicForLink = false
+                }) { Text("Make Public & Share") }
+            },
             dismissButton = {
-                TextButton(onClick = { showVisibilityDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showMakePublicForLink = false }) { Text("Cancel") }
             }
         )
     }
@@ -827,7 +839,7 @@ fun RecipeDetailScreen(
                 if (state.isPublic) {
                     openShareSheet()
                 } else {
-                    showVisibilityDialog = true
+                    showMakePublicForLink = true
                 }
             }
         )
@@ -841,32 +853,32 @@ fun RecipeDetailScreen(
             onDismiss = { showFollowerPicker = false },
             onSend = { uid, name ->
                 showFollowerPicker = false
-                if (state.isPublic) {
-                    // Already public — share immediately
+                if (state.isPublished) {
+                    // Already shared (Co-Chefs or Public) — share immediately
                     viewModel.shareToFollower(uid, name)
                 } else {
-                    // Private — confirm making it public before sharing
+                    // Private — confirm making it Co-Chefs-visible before sharing
                     pendingShareRecipient = uid to name
                 }
             }
         )
     }
 
-    // ── "Make public to share" confirm prompt ─────────────────────────────────
+    // ── "Make visible to co-chefs to share" confirm prompt ────────────────────
     pendingShareRecipient?.let { (uid, name) ->
         AlertDialog(
             onDismissRequest = { pendingShareRecipient = null },
-            icon = { Icon(Icons.Default.Public, contentDescription = null) },
+            icon = { Icon(Icons.Default.People, contentDescription = null) },
             title = { Text("Share with $name?") },
             text = {
                 Text(
-                    "Sharing makes this recipe public so $name can view it. " +
+                    "Sharing makes this recipe visible to your co-chefs so $name can view it. " +
                     "You can make it private again anytime — that removes it from everyone you shared with."
                 )
             },
             confirmButton = {
                 Button(onClick = {
-                    viewModel.makePublicAndShareToFollower(uid, name)
+                    viewModel.makeSharableAndShareToFollower(uid, name)
                     pendingShareRecipient = null
                 }) { Text("Share") }
             },
@@ -1286,6 +1298,35 @@ private fun SectionHeader(title: String) {
         style = MaterialTheme.typography.headlineMedium,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
     )
+}
+
+/** A selectable row in the visibility chooser dialog (Private / Co-Chefs / Public). */
+@Composable
+private fun VisibilityOption(
+    selected: Boolean,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
 @Composable

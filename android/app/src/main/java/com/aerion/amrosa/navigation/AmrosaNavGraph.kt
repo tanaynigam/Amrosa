@@ -1,5 +1,6 @@
 package com.aerion.amrosa.navigation
 
+import android.net.Uri
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -34,7 +35,9 @@ import com.aerion.amrosa.ui.import_recipe.ImportScreen
 import com.aerion.amrosa.ui.shared.SharedRecipeDetailScreen
 import com.aerion.amrosa.ui.shopping.ShoppingListScreen
 import com.aerion.amrosa.ui.social.FriendsScreen
+import com.aerion.amrosa.ui.social.ProfileScreen
 import com.aerion.amrosa.ui.social.ReceivedRecipeScreen
+import com.aerion.amrosa.ui.social.ReviewSource
 import com.aerion.amrosa.ui.social.SharedInboxScreen
 import com.aerion.amrosa.ui.social.UserSearchScreen
 
@@ -153,12 +156,60 @@ private fun MainAppScaffold() {
 
             // ── Friends list ──────────────────────────────────────────────────
             composable("friends") {
-                FriendsScreen(onBack = { navController.popBackStack() })
+                FriendsScreen(
+                    onBack = { navController.popBackStack() },
+                    onProfileClick = { uid, name ->
+                        navController.navigate("profile/$uid?name=${Uri.encode(name)}")
+                    }
+                )
             }
 
             // ── User search / follow people ───────────────────────────────────
             composable("user_search") {
                 UserSearchScreen(onBack = { navController.popBackStack() })
+            }
+
+            // ── Co-Chef profile (their friends + public recipes) ──────────────
+            composable(
+                route = "profile/{uid}?name={name}",
+                arguments = listOf(
+                    navArgument("uid") { type = NavType.StringType },
+                    navArgument("name") { type = NavType.StringType; defaultValue = "" }
+                )
+            ) { backStackEntry ->
+                val uid = backStackEntry.arguments?.getString("uid") ?: return@composable
+                val name = backStackEntry.arguments?.getString("name").orEmpty()
+                ProfileScreen(
+                    uid = uid,
+                    displayName = name,
+                    onBack = { navController.popBackStack() },
+                    onRecipeClick = { recipeId ->
+                        navController.navigate("profileRecipe/$recipeId?authorUid=$uid&authorName=${Uri.encode(name)}")
+                    }
+                )
+            }
+
+            // ── Profile recipe review (direct entry — recipeId known) ─────────
+            composable(
+                route = "profileRecipe/{recipeId}?authorUid={authorUid}&authorName={authorName}",
+                arguments = listOf(
+                    navArgument("recipeId") { type = NavType.StringType },
+                    navArgument("authorUid") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("authorName") { type = NavType.StringType; defaultValue = "" }
+                )
+            ) { backStackEntry ->
+                val recipeId = backStackEntry.arguments?.getString("recipeId") ?: return@composable
+                val authorUid = backStackEntry.arguments?.getString("authorUid").orEmpty()
+                val authorName = backStackEntry.arguments?.getString("authorName").orEmpty()
+                ReceivedRecipeScreen(
+                    source = ReviewSource.Direct(recipeId, authorUid, authorName),
+                    onBack = { navController.popBackStack() },
+                    // After "Add to Shared tab", drop the review screen and open the saved copy.
+                    onSaved = { newRecipeId ->
+                        navController.popBackStack()
+                        navController.navigate("recipe/$newRecipeId")
+                    }
+                )
             }
 
             // ── Received recipe (shared directly to me) ───────────────────────
@@ -168,7 +219,7 @@ private fun MainAppScaffold() {
             ) { backStackEntry ->
                 val shareId = backStackEntry.arguments?.getString("shareId") ?: return@composable
                 ReceivedRecipeScreen(
-                    shareId = shareId,
+                    source = ReviewSource.Pointer(shareId),
                     onBack = { navController.popBackStack() },
                     // After saving, drop the review screen and open the saved copy's
                     // normal recipe detail. The shared card remains in the Shared feed.
