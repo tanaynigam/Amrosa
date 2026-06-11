@@ -53,7 +53,10 @@ data class ReceivedRecipeUiState(
     val isSaving: Boolean = false,
     val savedRecipeId: String? = null,   // non-null once saved to Room
     val error: String? = null,
-    val selectedServings: Int = 1
+    val selectedServings: Int = 1,
+    // F13 Phase 2 — likes
+    val likeState: SharedRecipeService.LikeState = SharedRecipeService.LikeState(),
+    val canLike: Boolean = false,
 ) {
     val scaleFactor: Double get() {
         val recipe = recipe ?: return 1.0
@@ -81,6 +84,8 @@ class ReceivedRecipeViewModel(
     private var pointerShareId: String? = null   // pointer mode only — consumed on save
 
     init {
+        val user = authRepository.currentUser
+        _uiState.update { it.copy(canLike = user != null && !user.isAnonymous) }
         viewModelScope.launch {
             when (source) {
                 is ReviewSource.Pointer -> {
@@ -118,11 +123,27 @@ class ReceivedRecipeViewModel(
                     }
                 }
             }
+            // Observe like state once the recipe id is resolved.
+            resolvedRecipeId?.let { rid ->
+                launch {
+                    sharedRecipeService.likeStateFlow(rid).collect { ls ->
+                        _uiState.update { it.copy(likeState = ls) }
+                    }
+                }
+            }
         }
     }
 
     fun adjustServings(delta: Int) {
         _uiState.update { it.copy(selectedServings = (it.selectedServings + delta).coerceAtLeast(1)) }
+    }
+
+    /** Toggle the current user's like on this recipe (counter maintained server-side). */
+    fun toggleLike() {
+        val rid = resolvedRecipeId ?: return
+        if (!_uiState.value.canLike) return
+        val nowLiked = !_uiState.value.likeState.isLiked
+        viewModelScope.launch { sharedRecipeService.setLiked(rid, nowLiked) }
     }
 
     /** Record a cook (Cooking Mode "Done") on this recipe — feeds Discover recency. */
@@ -254,6 +275,18 @@ fun ReceivedRecipeScreen(
                 },
                 actions = {
                     if (state.recipe != null) {
+                        if (state.likeState.likeCount > 0) {
+                            Text("${state.likeState.likeCount}", style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        IconButton(onClick = viewModel::toggleLike, enabled = state.canLike) {
+                            Icon(
+                                if (state.likeState.isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = "Like",
+                                tint = if (state.likeState.isLiked) MaterialTheme.colorScheme.error
+                                       else LocalContentColor.current
+                            )
+                        }
                         IconButton(onClick = { showCookingMode = true }) {
                             Icon(Icons.Default.MenuBook, contentDescription = "Cooking Mode")
                         }

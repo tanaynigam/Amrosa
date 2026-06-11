@@ -18,4 +18,7 @@ data class DiscoverRecipe(
     val authorUid: String?,
     val authorName: String?,
     val isLocal: Boolean,
+    // F13 Phase 2 — popularity (public recipes only; 0 otherwise).
+    val saveCount: Int = 0,
+    val likeCount: Int = 0,
 )

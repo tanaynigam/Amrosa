@@ -281,6 +281,43 @@ exports.convertIngredients = onCall(
 );
 
 
+// ─── Popularity counters (Discover Phase 2) ──────────────────────────────────
+// saveCount / likeCount live on the shared_recipes/{recipeId} mirror and are maintained
+// ONLY by these Admin-SDK triggers (clients never write them). Updates are wrapped in
+// try/catch so a counter change on a missing/unpublished mirror is silently ignored.
+
+const { onDocumentDeleted } = require("firebase-functions/v2/firestore");
+
+async function bumpCounter(recipeId, field, delta) {
+  try {
+    await admin.firestore().collection("shared_recipes").doc(recipeId)
+      .update({ [field]: admin.firestore.FieldValue.increment(delta) });
+  } catch (err) {
+    // Mirror missing (recipe unpublished/deleted) → nothing to count.
+    console.log(`bumpCounter skip ${field} ${recipeId}: ${err.message}`);
+  }
+}
+
+// Save count — a received reference's doc-id IS the canonical recipeId.
+exports.onReceivedSaved = onDocumentCreated(
+  "received_recipes/{uid}/items/{recipeId}",
+  (event) => bumpCounter(event.params.recipeId, "saveCount", 1)
+);
+exports.onReceivedRemoved = onDocumentDeleted(
+  "received_recipes/{uid}/items/{recipeId}",
+  (event) => bumpCounter(event.params.recipeId, "saveCount", -1)
+);
+
+// Like count — presence of shared_recipes/{recipeId}/likes/{uid} = liked.
+exports.onRecipeLiked = onDocumentCreated(
+  "shared_recipes/{recipeId}/likes/{uid}",
+  (event) => bumpCounter(event.params.recipeId, "likeCount", 1)
+);
+exports.onRecipeUnliked = onDocumentDeleted(
+  "shared_recipes/{recipeId}/likes/{uid}",
+  (event) => bumpCounter(event.params.recipeId, "likeCount", -1)
+);
+
 // Push notifications
 exports.sendPushNotification = onDocumentCreated(
   'notifications/{uid}/items/{notifId}',

@@ -344,17 +344,32 @@ fun RecipeDetailScreen(
                             "friends" -> Icons.Default.People to "Co-Chefs"
                             else       -> Icons.Default.Lock to "Private"
                         }
-                        FilterChip(
-                            selected = state.isPublished,
-                            onClick = { showVisibilityDialog = true },
-                            enabled = !state.isVisibilityUpdating,
-                            leadingIcon = {
-                                Icon(visIcon, contentDescription = null, modifier = Modifier.size(16.dp))
-                            },
-                            label = {
-                                Text(visLabel, style = MaterialTheme.typography.labelMedium)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            FilterChip(
+                                selected = state.isPublished,
+                                onClick = { showVisibilityDialog = true },
+                                enabled = !state.isVisibilityUpdating,
+                                leadingIcon = {
+                                    Icon(visIcon, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = {
+                                    Text(visLabel, style = MaterialTheme.typography.labelMedium)
+                                }
+                            )
+                            // Read-only popularity counts (published recipes)
+                            if (state.isPublished && (state.saveCount > 0 || state.likeCount > 0)) {
+                                Spacer(Modifier.width(12.dp))
+                                Icon(Icons.Default.BookmarkAdd, contentDescription = "Saves",
+                                    modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(" ${state.saveCount}", style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.width(8.dp))
+                                Icon(Icons.Default.Favorite, contentDescription = "Likes",
+                                    modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(" ${state.likeCount}", style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                        )
+                        }
                     }
 
                     // ── Variation selector ──────────────────────────────

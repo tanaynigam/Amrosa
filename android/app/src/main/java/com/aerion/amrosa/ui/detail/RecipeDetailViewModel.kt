@@ -34,6 +34,9 @@ data class RecipeDetailUiState(
     val isOwner: Boolean = false,
     // Comments (populated when recipe is public)
     val comments: List<Comment> = emptyList(),
+    // F13 Phase 2 — popularity (when published)
+    val saveCount: Int = 0,
+    val likeCount: Int = 0,
     val isVisibilityUpdating: Boolean = false,
     // Direct sharing to follower
     val following: List<UserProfile> = emptyList(),
@@ -128,6 +131,7 @@ class RecipeDetailViewModel(
     val uiState: StateFlow<RecipeDetailUiState> = _uiState.asStateFlow()
 
     private var commentsJob: Job? = null
+    private var countsJob: Job? = null
 
     init {
         loadRecipe()
@@ -215,9 +219,27 @@ class RecipeDetailViewModel(
                 )
             }
 
-            // Start listening to comments if the recipe is already shared (Co-Chefs or Public)
-            if (recipe?.visibility == "friends" || recipe?.visibility == "public") startObservingComments()
+            // Start listening to comments + popularity counts if already shared (Co-Chefs or Public)
+            if (recipe?.visibility == "friends" || recipe?.visibility == "public") {
+                startObservingComments()
+                startObservingCounts()
+            }
         }
+    }
+
+    private fun startObservingCounts() {
+        countsJob?.cancel()
+        countsJob = viewModelScope.launch {
+            sharedRecipeService.likeStateFlow(recipeId).collect { ls ->
+                _uiState.update { it.copy(saveCount = ls.saveCount, likeCount = ls.likeCount) }
+            }
+        }
+    }
+
+    private fun stopObservingCounts() {
+        countsJob?.cancel()
+        countsJob = null
+        _uiState.update { it.copy(saveCount = 0, likeCount = 0) }
     }
 
     private fun observeNotes() {
@@ -263,9 +285,11 @@ class RecipeDetailViewModel(
             if (visibility == "friends" || visibility == "public") {
                 sharedRecipeService.publish(recipe)
                 startObservingComments()
+                startObservingCounts()
             } else {
                 sharedRecipeService.unpublish(recipeId)
                 stopObservingComments()
+                stopObservingCounts()
             }
         }
     }

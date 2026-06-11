@@ -2,6 +2,7 @@ package com.aerion.amrosa.ui.discover
 
 import com.aerion.amrosa.domain.model.DiscoverRecipe
 import com.aerion.amrosa.domain.model.RecipeSource
+import kotlin.math.ln
 
 /**
  * Pure, client-side ranking for the Discover feed. Score combines a time-of-day meal match,
@@ -40,9 +41,15 @@ object DiscoverRanker {
             RecipeSource.FRIEND -> 0.4
             RecipeSource.PUBLIC -> 0.2
         }
+        // Popularity (public only): saves weigh more than likes; log-scaled so a few saves
+        // help but a viral recipe doesn't dominate every shelf.
+        val popularity = if (recipe.source == RecipeSource.PUBLIC) {
+            val raw = recipe.saveCount * 2 + recipe.likeCount
+            (ln(1.0 + raw) * 0.5).coerceAtMost(1.5)
+        } else 0.0
         val last = cookedAt[recipe.recipeId]
         val recencyPenalty = if (last != null && now - last < RECENT_WINDOW_MS) 1.5 else 0.0
-        return 2.0 * mealMatch + affinity + sourceBoost - recencyPenalty
+        return 2.0 * mealMatch + affinity + sourceBoost + popularity - recencyPenalty
     }
 
     fun rank(

@@ -96,35 +96,94 @@ class SharedRecipeService(
         awaitClose { registration?.remove() }
     }
 
+    private fun parsePublicSummary(doc: com.google.firebase.firestore.DocumentSnapshot): DiscoverRecipe? {
+        val data = doc.data ?: return null
+        return DiscoverRecipe(
+            recipeId = doc.id,
+            title = data["title"] as? String ?: "Untitled",
+            tags = (data["tags"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+            prepTimeMinutes = (data["prepTimeMinutes"] as? Number)?.toInt(),
+            cookTimeMinutes = (data["cookTimeMinutes"] as? Number)?.toInt(),
+            source = RecipeSource.PUBLIC,
+            authorUid = data["authorId"] as? String,
+            authorName = data["authorDisplayName"] as? String,
+            isLocal = false,
+            saveCount = (data["saveCount"] as? Number)?.toInt() ?: 0,
+            likeCount = (data["likeCount"] as? Number)?.toInt() ?: 0,
+        )
+    }
+
     /**
      * Lightweight list of public recipes for the Discover feed. Newest first, capped.
      * Returns [DiscoverRecipe] cards (no sections/ingredients) — full detail is fetched on tap.
      */
     suspend fun getPublicRecipeSummaries(limit: Long = 50): List<DiscoverRecipe> {
         return try {
-            val snapshot = firestore.collection(COLLECTION_SHARED)
+            firestore.collection(COLLECTION_SHARED)
                 .whereEqualTo("visibility", "public")
                 .orderBy("sharedAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
                 .limit(limit)
                 .get().await()
-            snapshot.documents.mapNotNull { doc ->
-                val data = doc.data ?: return@mapNotNull null
-                DiscoverRecipe(
-                    recipeId = doc.id,
-                    title = data["title"] as? String ?: "Untitled",
-                    tags = (data["tags"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
-                    prepTimeMinutes = (data["prepTimeMinutes"] as? Number)?.toInt(),
-                    cookTimeMinutes = (data["cookTimeMinutes"] as? Number)?.toInt(),
-                    source = RecipeSource.PUBLIC,
-                    authorUid = data["authorId"] as? String,
-                    authorName = data["authorDisplayName"] as? String,
-                    isLocal = false,
-                )
-            }
+                .documents.mapNotNull { parsePublicSummary(it) }
         } catch (e: Exception) {
             Log.e(TAG, "getPublicRecipeSummaries failed", e)
             emptyList()
         }
+    }
+
+    /** Most-saved public recipes (the "Popular" shelf + popularity ranking). Requires index (visibility, saveCount desc). */
+    suspend fun getPopularPublicRecipes(limit: Long = 20): List<DiscoverRecipe> {
+        return try {
+            firestore.collection(COLLECTION_SHARED)
+                .whereEqualTo("visibility", "public")
+                .orderBy("saveCount", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .limit(limit)
+                .get().await()
+                .documents.mapNotNull { parsePublicSummary(it) }
+        } catch (e: Exception) {
+            Log.e(TAG, "getPopularPublicRecipes failed", e)
+            emptyList()
+        }
+    }
+
+    // ─── Likes (Discover Phase 2) ─────────────────────────────────────────────
+
+    data class LikeState(val isLiked: Boolean = false, val likeCount: Int = 0, val saveCount: Int = 0)
+
+    /** Like / unlike a shared recipe as the current user (counter maintained by a Cloud Function). */
+    suspend fun setLiked(recipeId: String, liked: Boolean) {
+        val uid = authRepository.uid ?: return
+        try {
+            val ref = firestore.collection(COLLECTION_SHARED).document(recipeId)
+                .collection("likes").document(uid)
+            if (liked) ref.set(mapOf("likedAt" to System.currentTimeMillis())).await()
+            else ref.delete().await()
+        } catch (e: Exception) {
+            Log.e(TAG, "setLiked $recipeId=$liked failed", e)
+        }
+    }
+
+    /** Live like state for a recipe: whether the current user liked it + the like/save counts. */
+    fun likeStateFlow(recipeId: String): Flow<LikeState> = callbackFlow {
+        val uid = authRepository.uid
+        var isLiked = false
+        var likeCount = 0
+        var saveCount = 0
+        fun emit() { trySend(LikeState(isLiked, likeCount, saveCount)) }
+
+        val recipeReg = firestore.collection(COLLECTION_SHARED).document(recipeId)
+            .addSnapshotListener { snap, _ ->
+                likeCount = (snap?.get("likeCount") as? Number)?.toInt() ?: 0
+                saveCount = (snap?.get("saveCount") as? Number)?.toInt() ?: 0
+                emit()
+            }
+        val likeReg = if (uid != null) {
+            firestore.collection(COLLECTION_SHARED).document(recipeId)
+                .collection("likes").document(uid)
+                .addSnapshotListener { snap, _ -> isLiked = snap?.exists() == true; emit() }
+        } else null
+
+        awaitClose { recipeReg.remove(); likeReg?.remove() }
     }
 
     /** Load one shared recipe with full detail (sections, ingredients, steps). */

@@ -121,7 +121,22 @@ private fun DiscoverCard(recipe: DiscoverRecipe, onClick: () -> Unit) {
                     tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(4.dp))
                 Text(label, style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                    color = MaterialTheme.colorScheme.primary, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                // Popularity badges (public recipes)
+                if (recipe.saveCount > 0) {
+                    Spacer(Modifier.width(8.dp))
+                    Icon(Icons.Default.BookmarkAdd, contentDescription = null, modifier = Modifier.size(13.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(" ${recipe.saveCount}", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (recipe.likeCount > 0) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(Icons.Default.Favorite, contentDescription = null, modifier = Modifier.size(13.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(" ${recipe.likeCount}", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }

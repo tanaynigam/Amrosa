@@ -77,10 +77,12 @@ class DiscoverViewModel(
                     }
             }.distinctBy { it.recipeId }
 
-            // ── Public recipes (exclude mine + anything already local/friend) ──
+            // ── Public recipes: recent ∪ popular (cold-start safe), exclude mine + dupes ──
             val friendIds = friendCandidates.map { it.recipeId }.toSet()
-            val publicCandidates = runCatching { sharedRecipeService.getPublicRecipeSummaries() }
-                .getOrDefault(emptyList())
+            val recentPublic = runCatching { sharedRecipeService.getPublicRecipeSummaries() }.getOrDefault(emptyList())
+            val popularPublic = runCatching { sharedRecipeService.getPopularPublicRecipes() }.getOrDefault(emptyList())
+            val publicCandidates = (popularPublic + recentPublic)
+                .distinctBy { it.recipeId }
                 .filter { it.authorUid != myUid && it.recipeId !in localIds && it.recipeId !in friendIds }
 
             // ── Rank + build shelves ──
@@ -101,10 +103,15 @@ class DiscoverViewModel(
                         RecipeSource.OWN, r.authorId, r.authorDisplayName, isLocal = true)
                 }
 
+            val popularShelf = publicCandidates
+                .filter { it.saveCount > 0 || it.likeCount > 0 }
+                .sortedByDescending { it.saveCount * 2 + it.likeCount }
+
             val shelves = buildList {
                 add(DiscoverShelf("${meal.label} ideas", leadPool.take(SHELF_LIMIT)))
                 add(DiscoverShelf("From your kitchen", ranked(ownCandidates).take(SHELF_LIMIT)))
                 add(DiscoverShelf("From your co-chefs", ranked(friendCandidates).take(SHELF_LIMIT)))
+                add(DiscoverShelf("Popular", popularShelf.take(SHELF_LIMIT)))
                 add(DiscoverShelf("Fresh from the community", publicCandidates.take(SHELF_LIMIT)))
                 add(DiscoverShelf("Recently cooked", recentlyCooked.take(SHELF_LIMIT)))
             }.filter { it.recipes.isNotEmpty() }
