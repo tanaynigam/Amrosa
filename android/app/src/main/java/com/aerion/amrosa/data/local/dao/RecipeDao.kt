@@ -43,6 +43,10 @@ abstract class RecipeDao {
     @Query("SELECT * FROM recipes WHERE id = :id")
     abstract fun observeRecipe(id: String): Flow<RecipeEntity?>
 
+    /** Local last-edit timestamp for a recipe (null if not present) — used for pull conflict checks. */
+    @Query("SELECT updatedAt FROM recipes WHERE id = :id")
+    abstract suspend fun getUpdatedAt(id: String): Long?
+
     @Query("SELECT * FROM recipe_sections WHERE recipeId = :recipeId ORDER BY orderIndex ASC")
     abstract suspend fun getSectionsForRecipe(recipeId: String): List<RecipeSectionEntity>
 
@@ -174,6 +178,31 @@ abstract class RecipeDao {
         insertSections(sections)
         insertIngredients(ingredients)
         insertSteps(steps)
+    }
+
+    /**
+     * Replace a recipe's SYNCED content from a cloud pull. Unlike [insertFullRecipe] (which only
+     * REPLACE-inserts by id and so leaves orphan child rows for items the cloud no longer has),
+     * this first clears the recipe's sections/ingredients/steps/refs, then re-inserts the fresh set.
+     * Local-only data (recipe_notes, shopping_checks) is intentionally NOT touched.
+     */
+    @Transaction
+    open suspend fun replacePulledRecipe(
+        recipe: RecipeEntity,
+        sections: List<RecipeSectionEntity>,
+        ingredients: List<IngredientEntity>,
+        steps: List<StepEntity>,
+        refs: List<StepIngredientRefEntity>
+    ) {
+        deleteStepRefsForRecipe(recipe.id)
+        deleteStepsForRecipe(recipe.id)
+        deleteIngredientsForRecipe(recipe.id)
+        deleteSectionsForRecipe(recipe.id)
+        insertRecipe(recipe)
+        insertSections(sections)
+        insertIngredients(ingredients)
+        insertSteps(steps)
+        insertStepRefs(refs)
     }
 
     /**

@@ -325,13 +325,12 @@ Comments are stored in Firestore only (`shared_recipes/{recipeId}/comments/{comm
 | `shared_to/{recipientUid}/recipes/{shareId}` | Recipes shared directly to a specific user. Full recipe data + fromUid + fromDisplayName + sharedAt. Only the sender can write; only the recipient can read. |
 
 **Sync behaviour:**
-- **Pull sync** on app launch / sign-in: `pullPersonalRecipes()` fetches **ALL** docs in `personal_recipes/{uid}/recipes/` and REPLACE-inserts them into Room — there is **no delta filter and no updatedAt conflict check** (cloud wins). Then `pushAllPersonalRecipes()` pushes every local personal recipe back up.
+- **Pull sync** on app launch / sign-in: `pullPersonalRecipes()` fetches all docs in `personal_recipes/{uid}/recipes/`. For each, **last-write-wins by `updatedAt`**: if the local copy is newer (an offline edit not yet pushed) it is kept; otherwise the cloud copy replaces it. Then `pushAllPersonalRecipes()` pushes every local personal recipe back up.
+- **Conflict resolution + clean replace**: when the cloud copy wins, content is written via `RecipeDao.replacePulledRecipe` (Android) / `replaceSyncedContent` (iOS), which **clears the recipe's synced children (sections/ingredients/steps/refs) before re-inserting** — so a child removed on another device doesn't linger as an orphan. Local-only `recipe_notes` + `shopping_checks` are preserved. (iOS additionally guards with `firestoreUpdatedAt > existing.updatedAt`; previously it updated only metadata on an existing recipe, so cross-device content edits never propagated — now fixed.)
 - **Push sync** on personal recipe save: `RecipeSyncService.pushPersonalRecipe(recipeId)` → `personal_recipes/{uid}/recipes/{recipeId}`. Fire-and-forget — push failure does not block local save.
 - **Sync on sign-in**: `AmrosaApplication.authStateFlow` observer calls `syncPersonalRecipes()` + `syncReceivedRecipes()` whenever a real user is detected.
-- ⚠️ **Known sync limitations** (acceptable single-user, revisit before multi-device gets heavy use):
-  1. *Cloud-wins on launch*: local edits made offline (not yet pushed) are overwritten by the cloud copy on next launch.
-  2. *Orphan child rows on pull*: `insertFullRecipe` REPLACEs by id but never deletes local sections/ingredients/steps that the cloud doc no longer contains — an ingredient deleted on device B can linger as a ghost row on device A. (Editor saves via `replaceFullRecipe` handle deletions correctly; only the pull path has this gap.)
-  3. *Editor push lifetime*: the post-save cloud push runs in the editor's `viewModelScope` right before the screen pops — it can be cancelled mid-flight. The launch-time `pushAllPersonalRecipes()` self-heals this.
+- **Received recipes** (Tab 2) are read-only references — always take the mirror, via `replacePulledRecipe` (no timestamp guard, but still orphan-safe).
+- ⚠️ *Remaining minor gap*: the editor's post-save push runs in the editor `viewModelScope` and can be cancelled mid-pop; the launch-time `pushAllPersonalRecipes()` self-heals it.
 
 **Seeder:** `DatabaseSeeder.seedIfNeeded()` is a **complete no-op**. Fresh installs start blank. Bump seed key together with DB version if schema changes, but no seeding logic runs.
 

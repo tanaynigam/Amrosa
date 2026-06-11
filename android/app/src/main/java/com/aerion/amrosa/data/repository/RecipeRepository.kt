@@ -75,6 +75,18 @@ class RecipeRepository(
         refs: List<StepIngredientRefEntity>
     ) = recipeDao.insertFullRecipe(recipe, sections, ingredients, steps, refs)
 
+    /** Clean-replace a recipe's synced content from a cloud pull (preserves local notes + shopping checks). */
+    suspend fun replacePulledRecipe(
+        recipe: RecipeEntity,
+        sections: List<RecipeSectionEntity>,
+        ingredients: List<IngredientEntity>,
+        steps: List<StepEntity>,
+        refs: List<StepIngredientRefEntity>
+    ) = recipeDao.replacePulledRecipe(recipe, sections, ingredients, steps, refs)
+
+    /** Local last-edit timestamp for a recipe (null if absent) — for pull conflict resolution. */
+    suspend fun getLocalUpdatedAt(id: String): Long? = recipeDao.getUpdatedAt(id)
+
     suspend fun deleteFullRecipe(recipeId: String) =
         recipeDao.deleteFullRecipe(recipeId)
 

@@ -149,7 +149,15 @@ class RecipeSyncService(
             for (doc in snapshot.documents) {
                 try {
                     val recipe = parseRecipe(doc.id, doc.data ?: continue)
-                    repository.insertFullRecipe(
+                    // Conflict resolution: if the local copy was edited more recently than the
+                    // cloud copy (an offline edit not yet pushed), keep local — don't clobber it.
+                    val localUpdatedAt = repository.getLocalUpdatedAt(doc.id)
+                    if (localUpdatedAt != null && localUpdatedAt > recipe.first.updatedAt) {
+                        Log.d(TAG, "pull: keeping newer local copy of ${doc.id}")
+                        continue
+                    }
+                    // Clean-replace synced content so removed ingredients/steps don't linger as orphans.
+                    repository.replacePulledRecipe(
                         recipe.first, recipe.second, recipe.third, recipe.fourth, recipe.fifth
                     )
                     count++
@@ -250,7 +258,9 @@ class RecipeSyncService(
                         // "Imported by Imported" (legacy/iOS) resolves to the real name.
                         val realName = resolveAuthorName(authorUid, refDoc.getString("authorName"), parsed.first.authorDisplayName)
                         val fixed = parsed.first.copy(authorDisplayName = realName)
-                        repository.insertFullRecipe(
+                        // Received recipes are read-only references — always take the mirror, and
+                        // clean-replace so edits the author removed don't linger locally.
+                        repository.replacePulledRecipe(
                             fixed, parsed.second, parsed.third, parsed.fourth, parsed.fifth
                         )
                         liveIds.add(recipeId)

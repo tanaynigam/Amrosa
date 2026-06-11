@@ -213,6 +213,60 @@ final class RecipeRepository {
         return recipe
     }
 
+    /// Clean-replace the SYNCED content (sections/ingredients/steps/refs) of an existing recipe
+    /// from a Firestore doc, reattaching the fresh children to `existing`. Local-only data
+    /// (notes + shopping checks) is preserved because we never touch the recipe's `notes`
+    /// relationship or the separate `ShoppingCheckModel` rows.
+    ///
+    /// Delete order matters for SwiftData cascade: removing steps (which cascade their refs) and
+    /// ingredients BEFORE sections means the section cascade has nothing left to double-delete.
+    private func replaceSyncedContent(of existing: RecipeModel, from data: [String: Any]) throws {
+        let oldSteps = existing.steps          // snapshot before mutating the context
+        let oldIngredients = existing.ingredients
+        let oldSections = existing.sections
+        for step in oldSteps { context.delete(step) }        // cascades each step's stepRefs
+        for ing in oldIngredients { context.delete(ing) }
+        for section in oldSections { context.delete(section) } // children already gone → no cascade
+
+        let parsed = try firestoreToParsedRecipeData(id: existing.id, data: data)
+
+        let sections = parsed.sections.sorted { $0.orderIndex < $1.orderIndex }.map { ps -> RecipeSectionModel in
+            let s = RecipeSectionModel(id: ps.id, name: ps.name, orderIndex: ps.orderIndex)
+            context.insert(s); s.recipe = existing; return s
+        }
+        let sectionMap = Dictionary(uniqueKeysWithValues: sections.map { ($0.id, $0) })
+
+        let ingredients = parsed.ingredients.sorted { $0.orderIndex < $1.orderIndex }.map { pi -> IngredientModel in
+            let ing = IngredientModel(
+                id: pi.id, name: pi.name,
+                quantityValue: pi.quantityValue, quantityUnit: pi.quantityUnit, quantityDisplay: pi.quantityDisplay,
+                groupLabel: pi.groupLabel, isOptional: pi.isOptional, orderIndex: pi.orderIndex,
+                quantityValueMetric: pi.quantityValueMetric, quantityUnitMetric: pi.quantityUnitMetric,
+                quantityDisplayMetric: pi.quantityDisplayMetric, quantityValueImperial: pi.quantityValueImperial,
+                quantityUnitImperial: pi.quantityUnitImperial, quantityDisplayImperial: pi.quantityDisplayImperial,
+                shoppingNote: pi.shoppingNote
+            )
+            context.insert(ing); ing.recipe = existing
+            if let sid = pi.sectionId { ing.section = sectionMap[sid] }
+            return ing
+        }
+        let ingredientMap = Dictionary(uniqueKeysWithValues: ingredients.map { ($0.id, $0) })
+
+        let steps = parsed.steps.sorted { $0.orderIndex < $1.orderIndex }.map { ps -> StepModel in
+            let step = StepModel(id: ps.id, instruction: ps.instruction, orderIndex: ps.orderIndex)
+            context.insert(step); step.recipe = existing
+            if let sid = ps.sectionId { step.section = sectionMap[sid] }
+            return step
+        }
+        let stepMap = Dictionary(uniqueKeysWithValues: steps.map { ($0.id, $0) })
+
+        for ref in parsed.stepIngredientRefs {
+            guard let step = stepMap[ref.stepId], let ing = ingredientMap[ref.ingredientId] else { continue }
+            let refModel = StepIngredientRefModel(quantityDisplay: ref.quantityDisplay)
+            context.insert(refModel); refModel.step = step; refModel.ingredient = ing
+        }
+    }
+
     // MARK: - Received recipes (Tab 2, Recipe Ownership Model v2)
 
     /// Cache a received recipe (from a shared_recipes mirror) into Room with isReceived = true.
@@ -566,8 +620,17 @@ final class RecipeRepository {
             if let v = data["visibility"] as? String { existing.visibility = v }
             existing.parentRecipeId = data["parentRecipeId"] as? String   // F10: preserve grouping
             existing.variantName = data["variantName"] as? String
+            // Refresh tags / source URLs (the metadata block above doesn't cover them).
+            if let v = data["tags"] as? [String], let j = try? JSONEncoder().encode(v),
+               let s = String(data: j, encoding: .utf8) { existing.tagsJson = s }
+            if let v = data["sourceUrls"] as? [String], let j = try? JSONEncoder().encode(v),
+               let s = String(data: j, encoding: .utf8) { existing.sourceUrlsJson = s }
             existing.updatedAt = firestoreUpdatedAt
             existing.syncedAt = now
+            // Clean-replace the synced content so cross-device ingredient/step edits actually
+            // propagate to an EXISTING local recipe (previously only metadata was updated) and
+            // removed children don't linger as orphans. Preserves local notes + shopping checks.
+            try replaceSyncedContent(of: existing, from: data)
         } else {
             // Full insert from Firestore
             let parsed = try firestoreToParsedRecipeData(id: id, data: data)
