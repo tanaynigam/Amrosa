@@ -141,9 +141,20 @@ private fun MainAppScaffold() {
                 )
             }
 
-            // ── Tab: Discover (placeholder) ───────────────────────────────────
+            // ── Tab: Discover (recommendations) ───────────────────────────────
             composable(BottomTab.Discover.route) {
-                DiscoverScreen()
+                DiscoverScreen(
+                    onRecipeClick = { r ->
+                        if (r.isLocal) {
+                            navController.navigate("recipe/${r.recipeId}")
+                        } else {
+                            // Remote (friend/public) → read-only review (view free, save deliberately)
+                            val a = r.authorUid.orEmpty()
+                            val n = Uri.encode(r.authorName.orEmpty())
+                            navController.navigate("profileRecipe/${r.recipeId}?authorUid=$a&authorName=$n")
+                        }
+                    }
+                )
             }
 
             // ── Tab: Account ──────────────────────────────────────────────────

@@ -40,3 +40,16 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
         )
     }
 }
+
+/**
+ * v12 → v13: Discover tab — `cooked_log` records when a recipe was last cooked
+ * (recency penalty + "Recently cooked" shelf). Local only. Existing data preserved.
+ */
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS cooked_log (" +
+                "recipeId TEXT NOT NULL PRIMARY KEY, cookedAt INTEGER NOT NULL)"
+        )
+    }
+}

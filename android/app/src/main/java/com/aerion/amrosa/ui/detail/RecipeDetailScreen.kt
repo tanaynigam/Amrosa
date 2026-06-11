@@ -179,7 +179,8 @@ fun RecipeDetailScreen(
             onToggleIngredient = { id ->
                 if (id in cookingChecked) cookingChecked.remove(id) else cookingChecked.add(id)
             },
-            onExit = { showCookingMode = false }
+            onExit = { showCookingMode = false },
+            onDone = { viewModel.markCooked(); showCookingMode = false }
         )
         return
     }
@@ -1086,7 +1087,7 @@ private fun FollowerPickerSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CookingModeScreen(
+internal fun CookingModeScreen(
     recipe: Recipe,
     state: RecipeDetailUiState,
     selectedUnit: UnitMode,
@@ -1094,7 +1095,8 @@ private fun CookingModeScreen(
     startSectionId: String?,
     checkedIngredients: List<String>,
     onToggleIngredient: (String) -> Unit,
-    onExit: () -> Unit
+    onExit: () -> Unit,
+    onDone: () -> Unit = onExit
 ) {
     val steps = recipe.sections
         .flatMap { section -> recipe.steps.filter { it.sectionId == section.id }.sortedBy { it.orderIndex } }
@@ -1282,7 +1284,7 @@ private fun CookingModeScreen(
                 if (currentIndex < steps.size - 1) {
                     Button(onClick = { currentIndex++ }) { Text("Next →") }
                 } else {
-                    Button(onClick = onExit) { Text("Done ✓") }
+                    Button(onClick = onDone) { Text("Done ✓") }
                 }
             }
         }

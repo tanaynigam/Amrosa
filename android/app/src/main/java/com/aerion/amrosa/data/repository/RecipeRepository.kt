@@ -194,6 +194,16 @@ class RecipeRepository(
     suspend fun clearShoppingChecks(recipeId: String) =
         recipeDao.deleteShoppingChecksForRecipe(recipeId)
 
+    // ─── Cooked log (Discover recency) ──────────────────────────────────────────
+
+    /** Record that a recipe was just cooked (latest cook wins). */
+    suspend fun markCooked(recipeId: String) =
+        recipeDao.upsertCooked(CookedLogEntity(recipeId, System.currentTimeMillis()))
+
+    /** recipeId → last cookedAt, for the recency penalty + "Recently cooked" shelf. */
+    fun cookedLogFlow(): Flow<Map<String, Long>> =
+        recipeDao.getCookedLog().map { list -> list.associate { it.recipeId to it.cookedAt } }
+
     // ─── Recipe variations ──────────────────────────────────────────────────────
 
     /** All variations of a base recipe (basic domain — no children loaded). */

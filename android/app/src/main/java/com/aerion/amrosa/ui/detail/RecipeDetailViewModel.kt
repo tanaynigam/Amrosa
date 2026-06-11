@@ -423,6 +423,11 @@ class RecipeDetailViewModel(
 
     fun clearCreatedVariant() = _uiState.update { it.copy(createdVariantId = null) }
 
+    /** Record that this recipe was just cooked (Cooking Mode "Done") — feeds Discover recency. */
+    fun markCooked() {
+        viewModelScope.launch { repository.markCooked(recipeId) }
+    }
+
     companion object {
         const val MAX_VARIANTS = 4
         const val MAX_VARIANT_NAME_LEN = 20

@@ -19,7 +19,7 @@
 | **Min SDK (Android)** | API 26 (Android 8.0+) |
 | **Min OS (iOS)** | iOS 17+ (SwiftData) |
 | **Architecture** | MVVM + Repository Pattern (both platforms) |
-| **Database (local — Android)** | Room (SQLite) — **current: DB v12** (real migrations preserve data; seeder is a no-op) |
+| **Database (local — Android)** | Room (SQLite) — **current: DB v13** (real migrations preserve data; seeder is a no-op) |
 | **Database (local — iOS)** | SwiftData (ModelContainer, no manual migrations) |
 | **Database (cloud)** | Firebase Firestore (`amrosa-2ec82`) |
 | **Cloud Storage** | Firebase Storage (planned — images) |
@@ -91,7 +91,7 @@ Amrosa/
 Auth Gate       (🔐)  Full-screen login wall — shown when not signed in; no back button
 Tab 1 — My Recipes     (🔖)  Your recipes (personal + imported) + Shared filter; Add Recipe FAB
 Tab 2 — Shared         (📩)  Recipes directly shared with you by co-chefs (recipe cards)
-Tab 3 — Discover       (✨)  Recommendations — planned; placeholder screen for now
+Tab 3 — Discover       (✨)  Recommendation feed (F13) — time-of-day meal shelves, own/co-chef/public
 Tab 4 — Account        (👤)  Profile, co-chef system, sync, sign-out
 ```
 
@@ -108,7 +108,7 @@ Tab 4 — Account        (👤)  Profile, co-chef system, sync, sign-out
 - **Import** is a push route (`"import?reviewId=..."`) accessible from the Add Recipe FAB, not a tab.
 - Pending-review recipes float to the top of My Recipes with a "Needs review — tap to confirm" badge; tapping opens the import screen with the review sheet pre-loaded.
 - **"Shared" tab (Tab 2) = "Shared Recipes"** — recipes other users shared with you, **saved as references** to the author's canonical instance (see Recipe Ownership Model below). Same card/detail/cooking-mode UI as Tab 1, but **read-only**: no edit/delete/share, only "Remove from my recipes". No Add Recipe FAB. Pending un-saved shares appear at the top as "In review".
-- **"Discover" tab (Tab 3) = Recommendations placeholder** — renders a simple "Coming soon" screen. Implementation deferred. (Future: public/discoverable recipes + time-of-day recommendations; will eventually become the default tab.)
+- **"Discover" tab (Tab 3) = Recommendation feed (F13)** — time-of-day meal shelves blending own/co-chef/public recipes, ranked by meal match + cuisine affinity + source + recency. (Later: popularity, cross-scope search, default-tab promotion.)
 - **Tab 4 is "Account"** (route `"account_tab"`, composable `AccountScreen`) — contains both account management and social/co-chef features.
 - **No "official" recipes.** The seeded `recipes` collection concept is retired — every recipe has a real author. (The original 4 seeded recipes are re-imported under the owner's account as normal personal recipes.)
 
@@ -193,7 +193,7 @@ label = if (isImported) "Imported by $name" else name
 
 ### F1 — Recipe Storage
 
-**Room DB v12** — all entities below are current.
+**Room DB v13** — all entities below are current.
 
 ```kotlin
 @Entity(tableName = "recipes")
@@ -290,6 +290,10 @@ data class RecipeNoteEntity(
 // F11 — persisted shopping-list checks. Presence of a row = checked. Local only (never synced).
 @Entity(tableName = "shopping_checks", primaryKeys = ["recipeId", "itemKey"])
 data class ShoppingCheckEntity(val recipeId: String, val itemKey: String)  // itemKey = normalized ingredient name
+
+// F13 — last-cooked timestamp per recipe (Cooking Mode "Done"). Drives Discover recency. Local only.
+@Entity(tableName = "cooked_log")
+data class CookedLogEntity(@PrimaryKey val recipeId: String, val cookedAt: Long)
 ```
 
 **Domain model** (mapped from entities, used by ViewModels and UI):
@@ -336,7 +340,7 @@ Comments are stored in Firestore only (`shared_recipes/{recipeId}/comments/{comm
 
 **Seeder:** `DatabaseSeeder.seedIfNeeded()` is a **complete no-op**. Fresh installs start blank. Bump seed key together with DB version if schema changes, but no seeding logic runs.
 
-**DB versioning:** Current **DB v12**. Real Room migrations are registered in `AppContainer` (`MIGRATION_9_10` adds `isReceived`; `MIGRATION_10_11` adds `parentRecipeId` + `variantName`; `MIGRATION_11_12` adds `ingredients.shoppingNote` + the `shopping_checks` table) so user data survives schema bumps. `fallbackToDestructiveMigration()` remains only as a safety net for unhandled jumps. Because real users now have data, **prefer adding a `MIGRATION_(n)_(n+1)` (ALTER TABLE / CREATE TABLE) over relying on destructive fallback** when changing the schema.
+**DB versioning:** Current **DB v13**. Real Room migrations are registered in `AppContainer` (`MIGRATION_9_10` adds `isReceived`; `MIGRATION_10_11` adds `parentRecipeId` + `variantName`; `MIGRATION_11_12` adds `ingredients.shoppingNote` + the `shopping_checks` table; `MIGRATION_12_13` adds the `cooked_log` table) so user data survives schema bumps. `fallbackToDestructiveMigration()` remains only as a safety net for unhandled jumps. Because real users now have data, **prefer adding a `MIGRATION_(n)_(n+1)` (ALTER TABLE / CREATE TABLE) over relying on destructive fallback** when changing the schema.
 
 **Version control:** Every editor save increments `version` and appends `RecipeChange(version, timestamp, summary)` to `changeLog`. Summary is auto-generated from what fields changed.
 
@@ -946,6 +950,44 @@ runs in pointer mode only. Losing co-chef status later drops the saved reference
 
 ---
 
+### F13 — Discover Tab (Phase 1: Lean MVP) ✅ (Android; iOS pending)
+
+A recommendation feed (`ui/discover/`) replacing the placeholder. **All client-side**, no new cloud
+infra beyond one public-recipes fetch.
+
+**Ranking** (`DiscoverRanker`, pure): `score = 2·mealMatch + affinity + sourceBoost − recencyPenalty`.
+- **Meal match** — `MealClassifier.mealsFor(tags)` maps tags → meal types (keyword heuristic, no schema
+  change); `currentMeal(hour)` picks the slot (breakfast 5–10 · lunch 11–14 · snack 15–16 · dinner
+  17–21 · dessert otherwise). Unclassified recipes are mildly eligible any time.
+- **Affinity** — `topCuisines(ownTags)`: the user's most-frequent cuisine tags (minus meal words),
+  learned implicitly from their own collection.
+- **Source boost** — OWN > FRIEND > PUBLIC.
+- **Recency penalty** — recipes in `cooked_log` within 48h are pushed down (so the same dish isn't
+  re-suggested next meal).
+
+**Feed** (`DiscoverViewModel` assembles, `DiscoverScreen` renders LazyColumn of LazyRow shelves):
+`"{Meal} ideas"` (blended, meal-appropriate) · `"From your kitchen"` (local) · `"From your co-chefs"`
+(`getAuthorRecipes` per co-chef, cap 10) · `"Fresh from the community"` (`SharedRecipeService.getPublicRecipeSummaries`,
+newest 50, excludes self/dupes) · `"Recently cooked"` (from `cooked_log`). Empty shelves hidden.
+Top bar: **Surprise me** (random pick from the meal-appropriate pool) + Refresh. Candidates are
+`DiscoverRecipe(recipeId, tags, source, authorUid, authorName, isLocal)`.
+
+**Open behaviour (view free, save deliberately):**
+- `isLocal` recipe → normal `recipe/{id}` detail (editable).
+- remote (friend/public) → `profileRecipe/...` = the F12 read-only `ReceivedRecipeScreen` (Direct mode):
+  full detail, **Cook** (Cooking Mode without saving), **Add to Shared tab** (explicit save). Nothing is
+  persisted unless the user saves.
+
+**Cooked log + reusable Cooking Mode:** `CookingModeScreen` is now `internal` (shared between detail
++ review). Its "Done ✓" calls `markCooked(recipeId)` → upserts `cooked_log`. The review screen
+constructs a transient `RecipeDetailUiState` to host Cooking Mode for unsaved recipes.
+
+**Deferred (later phases):** save/like popularity counts (Cloud Function) → "Popular" ranking;
+cross-scope search (own>friends>public); chef search + public profile (`getAuthorRecipes(includeFriendsOnly=false)`);
+explicit cuisine prefs in Account; promoting Discover to the default tab.
+
+---
+
 ## Screen Map
 
 ```
@@ -999,8 +1041,12 @@ SharedInboxScreen  (route "shared_tab" — "Shared Recipes")
   └── Tap → ReceivedRecipeScreen (review → "Save Recipe")
 
 ── Bottom Tab 3: Discover ────────────────────────────────────────────
-DiscoverScreen  (route "discover_tab" — placeholder)
-  └── "Coming soon" centered text + icon (implementation deferred)
+DiscoverScreen  (route "discover_tab" — F13 recommendation feed)
+  ├── Top bar: "Surprise me" (random meal-appropriate pick) + Refresh
+  ├── Vertical shelves (LazyColumn of LazyRow cards): "{Meal} ideas", "From your kitchen",
+  │     "From your co-chefs", "Fresh from the community", "Recently cooked" (empties hidden)
+  └── Card tap → local recipe = recipe/{id} detail; remote = profileRecipe/... read-only review
+        (full detail · Cook without saving · Add to Shared tab)
 
 ── Bottom Tab 4: Account ──────────────────────────────────────────────
 AccountScreen  (route "account_tab")
@@ -1153,7 +1199,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 | Area | Detail |
 |---|---|
-| **Room DB v12** | Entities: recipes, sections, ingredients, steps, step_ingredient_refs, recipe_notes, shopping_checks. Real migrations (`MIGRATION_9_10` → `11_12`) preserve user data |
+| **Room DB v13** | Entities: recipes, sections, ingredients, steps, step_ingredient_refs, recipe_notes, shopping_checks, cooked_log. Real migrations (`MIGRATION_9_10` → `12_13`) preserve user data |
 | **Recipe detail** | Yield scaling (servings + anchor-based), ingredient checklist, step-ingredient refs, substitute selectors, optional toggles, section jump chips |
 | **Cooking mode** | Fullscreen step-by-step, screen-on lock |
 | **Notes system** | Per-recipe, timestamped, add/edit/delete |
@@ -1166,7 +1212,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **RecipeReviewSheet** | Shared composable; parse notes banner (tertiaryContainer, dismissible); onEdit pencil icon; author toggle for imports |
 | **F5 — Freeform** | FreeformEntryScreen, FAB bottom sheet, `formatRecipeText` CF, save/saveAndEdit flow |
 | **F6 — Unit conversions** | 6 IngredientEntity fields, `QuantityScaler`, `UnitMode`, unit toggle on detail screen |
-| **4-tab navigation** | My Recipes · Shared · Discover (placeholder) · Account (All tab removed) |
+| **4-tab navigation** | My Recipes · Shared · Discover (F13 feed) · Account (All tab removed) |
 | **My Recipes filter chips** | `[All] [Personal] [Imported] [Shared]` chips; scroll inside LazyColumn (first item) so they free up vertical space; author + category chips share one scrollable row; compact search bar with clear button |
 | **My Recipes "Shared" chip** | Shows live `shared_to/` feed in-tab (same cards); search filters shared feed; FAB + category chips hidden in Shared mode; tap → `received/{shareId}` |
 | **Recipe cards** | Author row (person icon + name) + Shared pill on all cards |
@@ -1176,6 +1222,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F7 — Author attribution** | `authorId` + `authorDisplayName` stamped at creation; editor author dropdown; personal = real name; imported = "Imported" override at publish time |
 | **F8 — Visibility** | `visibility` field on RecipeEntity; share button in detail top bar |
 | **F12 — Visibility tiers + Co-Chef profiles** | 3 tiers (private/friends/public, no migration); friends-gated `shared_recipes` read rule; `ProfileScreen` from FriendsScreen shows a co-chef's friends+public recipes; `getAuthorRecipes`; review via generalized `ReceivedRecipeScreen` (`ReviewSource.Pointer|Direct`) → "Add to Shared tab"; private direct-share → Co-Chefs tier. **Android only** (iOS pending). Needs composite index `shared_recipes (authorId, visibility)`. |
+| **F13 — Discover tab (Phase 1)** | Recommendation feed: time-of-day meal shelves, implicit cuisine affinity, source boost (own>friend>public), recency penalty via new `cooked_log` (DB v13). Reuses F12 review screen for view-free/cook/save; `CookingModeScreen` now `internal` + "Done"→`markCooked`. **Android only** (iOS pending). |
 | **F8 — Share button** | Top bar icon (owners only); if public → Android share sheet with `amrosa://shared/{id}`; if private → dialog → publish → share sheet |
 | **F8 — Deep links + App Links** | HTTPS App Links (`https://amrosa-2ec82.web.app/shared/{id}`) + `amrosa://` fallback; `assetlinks.json` in Firebase Hosting; `navDeepLink` for both patterns in NavGraph |
 | **F8 — Firebase Hosting** | `shared.html` recipe viewer (browser fallback); `index.html` landing page; deployed at `amrosa-2ec82.web.app` |
@@ -1211,7 +1258,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | # | Feature | Description |
 |---|---|---|
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil (Android) / AsyncImage (iOS) display. **Both platforms.** Largest remaining feature. |
-| — | Discover / Recommendations tab | Public/discoverable recipes + time-of-day recommendations; replaces the placeholder; eventually becomes default tab. **Both platforms.** |
+| — | Discover tab — later phases | Phase 1 (recommendation feed) is DONE on Android (F13). Remaining: save/like **popularity** counts (Cloud Function) + "Popular" ranking; **cross-scope search** (own>friends>public); **chef search + public profile**; explicit **cuisine prefs**; promote Discover to **default tab**. |
 | — | Public profile view (non-friends) | Co-Chef profile is DONE on Android (F12). Remaining: a *public* profile for users NOT in your co-chefs, showing only their public recipes (reuse `getAuthorRecipes(includeFriendsOnly = false)` + an entry from user search). |
 | — | Gemini brand/substitute suggestions | The deferred half of F11 — AI-suggested top brands + substitutes per ingredient (author notes already ship). |
 | — | iOS: Universal Links | `apple-app-site-association` file + `Associated Domains` entitlement (Android App Links already done). |
@@ -1285,7 +1332,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 | **F8 — Comments** | Post/delete in owner view + visitor view; commenter or recipe owner can delete |
 | **F8 — SharedRecipeService** | `publish/unpublish`, `sharedRecipesStream()`, `getSharedRecipeDetail`, `commentsStream`, `addComment`, `deleteComment`, `copyToMyRecipes` |
 | **Deep links** | `amrosa://shared/{id}` custom scheme + `https://amrosa-2ec82.web.app/shared/{id}` via `onOpenURL`; routes to `SharedRecipeDetailView` |
-| **Tab restructure** | All tab removed; 4 tabs: **My Recipes** · Shared Recipes · Discover (placeholder) · Account |
+| **Tab restructure** | All tab removed; 4 tabs: **My Recipes** · Shared Recipes · Discover (F13 feed) · Account |
 | **My Recipes Shared chip** | `YourRecipesViewModel` has `.shared` filter; loads `receivedRecipesSummaryStream()`; chip switches list to shared `SharedRecipeCard`s, hides FAB, tap → `ReceivedRecipeView`; compact capsule search bar w/ clear button + adaptive placeholder; chips scroll inside the list |
 | **Shared Recipes tab** | `SharedInboxView` + `SharedInboxViewModel`; live `shared_to/{uid}/recipes/` stream; full recipe cards (title, times, tags, author + "from sender"); taps → `ReceivedRecipeView` |
 | **Discover tab** | Placeholder screen |
@@ -1310,6 +1357,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 | Gap | Detail |
 |---|---|
 | **F12 — Visibility tiers + Co-Chef profiles** | Android-only. iOS needs: the `"friends"` tier in `setVisibility`/publish (`buildDocument` must write the real `visibility`, not `"public"`); a 3-option visibility chooser; private direct-share → friends; a `ProfileView` from the friends list backed by `getAuthorRecipes(authorUid, includeFriendsOnly)`; and review/"Add to Shared tab" reuse for `Direct(recipeId, authorUid, authorName)` entry. The Firestore rule + composite index are already deployed (shared infra). |
+| **F13 — Discover tab (Phase 1)** | Android-only. iOS needs: a `cooked_log` SwiftData model + `markCooked` on Cooking Mode "Done"; a `MealClassifier`/ranker port; `getPublicRecipeSummaries`; a `DiscoverView` of meal/source shelves; and reuse of the read-only review screen for view-free/cook/save. Recommendation logic is pure + portable. |
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
 
@@ -1349,7 +1397,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 
 ### Database
-- **DB versioning**: **Current DB v12.** Real migrations are registered in `AppContainer.addMigrations(...)` and **must be preferred** now that users have data — add a `MIGRATION_(n)_(n+1)` (ALTER TABLE / CREATE TABLE) for every schema change. `fallbackToDestructiveMigration()` stays only as a last-resort safety net (it WIPES local data — avoid relying on it).
+- **DB versioning**: **Current DB v13.** Real migrations are registered in `AppContainer.addMigrations(...)` and **must be preferred** now that users have data — add a `MIGRATION_(n)_(n+1)` (ALTER TABLE / CREATE TABLE) for every schema change. `fallbackToDestructiveMigration()` stays only as a last-resort safety net (it WIPES local data — avoid relying on it).
 - **Detail auto-refresh**: the detail VM observes `RecipeDao.observeRecipe(id)` (a Room `Flow`) and reloads on `updatedAt`/`version` change. Do NOT rely on Compose lifecycle/`ON_RESUME` for cross-screen refresh — `LocalLifecycleOwner` may resolve to the Activity and miss intra-NavHost navigation. Room Flow is the source of truth.
 - **Seeder**: `seedIfNeeded()` is a no-op. Do not add seeding logic.
 - **IngredientEntity field order**: F6 conversion fields are **last** (after `orderIndex`). Do not insert new fields before them — it breaks positional `DatabaseSeeder` calls.

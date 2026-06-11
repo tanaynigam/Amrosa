@@ -115,6 +115,17 @@ abstract class RecipeDao {
     @Query("DELETE FROM shopping_checks WHERE recipeId = :recipeId")
     abstract suspend fun deleteShoppingChecksForRecipe(recipeId: String)
 
+    // ─── Cooked log (Discover recency) ────────────────────────────────────────
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    abstract suspend fun upsertCooked(entry: CookedLogEntity)
+
+    @Query("SELECT * FROM cooked_log")
+    abstract fun getCookedLog(): Flow<List<CookedLogEntity>>
+
+    @Query("DELETE FROM cooked_log WHERE recipeId = :recipeId")
+    abstract suspend fun deleteCookedLogForRecipe(recipeId: String)
+
     @Query("SELECT COUNT(*) FROM recipes")
     abstract suspend fun count(): Int
 
@@ -233,6 +244,7 @@ abstract class RecipeDao {
         deleteStepRefsForRecipe(recipeId)
         deleteNotesForRecipe(recipeId)
         deleteShoppingChecksForRecipe(recipeId)
+        deleteCookedLogForRecipe(recipeId)
         deleteStepsForRecipe(recipeId)
         deleteIngredientsForRecipe(recipeId)
         deleteSectionsForRecipe(recipeId)

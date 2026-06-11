@@ -125,6 +125,12 @@ class ReceivedRecipeViewModel(
         _uiState.update { it.copy(selectedServings = (it.selectedServings + delta).coerceAtLeast(1)) }
     }
 
+    /** Record a cook (Cooking Mode "Done") on this recipe — feeds Discover recency. */
+    fun markCooked() {
+        val rid = resolvedRecipeId ?: _uiState.value.recipe?.id ?: return
+        viewModelScope.launch { repository.markCooked(rid) }
+    }
+
     /**
      * Save this recipe to the Shared tab (Tab 2, Recipe Ownership Model v2):
      *   1. write a reference at received_recipes/{uid}/items/{recipeId}
@@ -208,10 +214,33 @@ fun ReceivedRecipeScreen(
     )
     val state by viewModel.uiState.collectAsState()
     var selectedUnit by remember { mutableStateOf(UnitMode.ORIGINAL) }
+    var showCookingMode by remember { mutableStateOf(false) }
+    val cookingChecked = remember { mutableStateListOf<String>() }
 
     // Open the saved recipe's detail once the copy is written to Room
     LaunchedEffect(state.savedRecipeId) {
         state.savedRecipeId?.let { onSaved(it) }
+    }
+
+    // Cook without saving — reuses the shared CookingModeScreen with a transient detail state.
+    if (showCookingMode && state.recipe != null) {
+        val recipe = state.recipe!!
+        com.aerion.amrosa.ui.detail.CookingModeScreen(
+            recipe = recipe,
+            state = com.aerion.amrosa.ui.detail.RecipeDetailUiState(
+                recipe = recipe, selectedServings = state.selectedServings
+            ),
+            selectedUnit = selectedUnit,
+            onUnitChange = { selectedUnit = it },
+            startSectionId = null,
+            checkedIngredients = cookingChecked,
+            onToggleIngredient = { id ->
+                if (id in cookingChecked) cookingChecked.remove(id) else cookingChecked.add(id)
+            },
+            onExit = { showCookingMode = false },
+            onDone = { viewModel.markCooked(); showCookingMode = false }
+        )
+        return
     }
 
     Scaffold(
@@ -221,6 +250,13 @@ fun ReceivedRecipeScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    }
+                },
+                actions = {
+                    if (state.recipe != null) {
+                        IconButton(onClick = { showCookingMode = true }) {
+                            Icon(Icons.Default.MenuBook, contentDescription = "Cooking Mode")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

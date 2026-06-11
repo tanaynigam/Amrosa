@@ -96,6 +96,37 @@ class SharedRecipeService(
         awaitClose { registration?.remove() }
     }
 
+    /**
+     * Lightweight list of public recipes for the Discover feed. Newest first, capped.
+     * Returns [DiscoverRecipe] cards (no sections/ingredients) — full detail is fetched on tap.
+     */
+    suspend fun getPublicRecipeSummaries(limit: Long = 50): List<DiscoverRecipe> {
+        return try {
+            val snapshot = firestore.collection(COLLECTION_SHARED)
+                .whereEqualTo("visibility", "public")
+                .orderBy("sharedAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .limit(limit)
+                .get().await()
+            snapshot.documents.mapNotNull { doc ->
+                val data = doc.data ?: return@mapNotNull null
+                DiscoverRecipe(
+                    recipeId = doc.id,
+                    title = data["title"] as? String ?: "Untitled",
+                    tags = (data["tags"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                    prepTimeMinutes = (data["prepTimeMinutes"] as? Number)?.toInt(),
+                    cookTimeMinutes = (data["cookTimeMinutes"] as? Number)?.toInt(),
+                    source = RecipeSource.PUBLIC,
+                    authorUid = data["authorId"] as? String,
+                    authorName = data["authorDisplayName"] as? String,
+                    isLocal = false,
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "getPublicRecipeSummaries failed", e)
+            emptyList()
+        }
+    }
+
     /** Load one shared recipe with full detail (sections, ingredients, steps). */
     suspend fun getSharedRecipeDetail(recipeId: String): Recipe? {
         return try {
