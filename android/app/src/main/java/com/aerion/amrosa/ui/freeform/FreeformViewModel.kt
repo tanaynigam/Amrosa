@@ -155,6 +155,9 @@ class FreeformViewModel(
                 quantityValueImperial = ing.quantityValueImperial,
                 quantityUnitImperial = ing.quantityUnitImperial,
                 quantityDisplayImperial = ing.quantityDisplayImperial,
+                quantityValueMax = ing.quantityValueMax,
+                quantityValueMaxMetric = ing.quantityValueMaxMetric,
+                quantityValueMaxImperial = ing.quantityValueMaxImperial,
                 groupLabel = ing.groupLabel,
                 isOptional = ing.isOptional,
                 substituteGroupId = null,
@@ -210,6 +213,9 @@ class FreeformViewModel(
                 quantityValueImperial = (ing["quantityValueImperial"] as? Number)?.toDouble(),
                 quantityUnitImperial = ing["quantityUnitImperial"] as? String,
                 quantityDisplayImperial = ing["quantityDisplayImperial"] as? String,
+                quantityValueMax = (ing["quantityValueMax"] as? Number)?.toDouble(),
+                quantityValueMaxMetric = (ing["quantityValueMaxMetric"] as? Number)?.toDouble(),
+                quantityValueMaxImperial = (ing["quantityValueMaxImperial"] as? Number)?.toDouble(),
             )
         } ?: emptyList()
 

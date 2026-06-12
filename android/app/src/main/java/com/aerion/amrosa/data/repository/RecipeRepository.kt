@@ -163,6 +163,8 @@ class RecipeRepository(
                 quantityDisplayMetric = it.quantityDisplayMetric,
                 quantityValueImperial = it.quantityValueImperial, quantityUnitImperial = it.quantityUnitImperial,
                 quantityDisplayImperial = it.quantityDisplayImperial,
+                quantityValueMax = it.quantityValueMax, quantityValueMaxMetric = it.quantityValueMaxMetric,
+                quantityValueMaxImperial = it.quantityValueMaxImperial,
                 shoppingNote = it.shoppingNote
             )
         }
@@ -286,6 +288,8 @@ class RecipeRepository(
                 quantityDisplayMetric = i.quantityDisplayMetric,
                 quantityValueImperial = i.quantityValueImperial, quantityUnitImperial = i.quantityUnitImperial,
                 quantityDisplayImperial = i.quantityDisplayImperial,
+                quantityValueMax = i.quantityValueMax, quantityValueMaxMetric = i.quantityValueMaxMetric,
+                quantityValueMaxImperial = i.quantityValueMaxImperial,
                 groupLabel = i.groupLabel, isOptional = i.isOptional,
                 substituteGroupId = i.substituteGroupId?.let { subGroupMap[it] },
                 substituteRatio = i.substituteRatio,
@@ -375,6 +379,8 @@ class RecipeRepository(
         quantityDisplayMetric = quantityDisplayMetric,
         quantityValueImperial = quantityValueImperial, quantityUnitImperial = quantityUnitImperial,
         quantityDisplayImperial = quantityDisplayImperial,
+        quantityValueMax = quantityValueMax, quantityValueMaxMetric = quantityValueMaxMetric,
+        quantityValueMaxImperial = quantityValueMaxImperial,
         groupLabel = groupLabel, isOptional = isOptional,
         substituteGroupId = substituteGroupId, substituteRatio = substituteRatio,
         orderIndex = orderIndex,

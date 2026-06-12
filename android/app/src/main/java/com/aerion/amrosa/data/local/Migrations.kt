@@ -53,3 +53,16 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
         )
     }
 }
+
+/**
+ * v13 → v14: ingredient quantity ranges (e.g. "4–6 cloves").
+ * Adds upper-bound columns for the original + metric + imperial values. null = single
+ * quantity, so existing ingredients are unaffected. Existing data preserved.
+ */
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE ingredients ADD COLUMN quantityValueMax REAL")
+        db.execSQL("ALTER TABLE ingredients ADD COLUMN quantityValueMaxMetric REAL")
+        db.execSQL("ALTER TABLE ingredients ADD COLUMN quantityValueMaxImperial REAL")
+    }
+}

@@ -339,6 +339,17 @@ private fun EditIngredientRow(
                     modifier = Modifier.widthIn(min = 32.dp, max = 72.dp),
                 )
             }
+            // Range upper bound — "to N" renders the quantity as a scaled range (e.g. 4–6).
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("to ", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                InlineField(
+                    value = ingredient.quantityValueMax?.let { plainNumber(it) } ?: "",
+                    onValueChange = { onUpdate(ingredient.copy(quantityValueMax = it.toDoubleOrNull())) },
+                    textStyle = MaterialTheme.typography.labelMedium, placeholder = "max",
+                    modifier = Modifier.widthIn(min = 28.dp, max = 56.dp), keyboardType = KeyboardType.Number,
+                )
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(ingredient.isOptional, { onUpdate(ingredient.copy(isOptional = it)) },
                     modifier = Modifier.size(28.dp))
@@ -464,6 +475,10 @@ private fun InlineNumber(value: String, onChange: (String) -> Unit, placeholder:
     InlineField(value, onChange, MaterialTheme.typography.titleMedium, placeholder = placeholder,
         modifier = Modifier.widthIn(min = 28.dp, max = 56.dp), keyboardType = KeyboardType.Number)
 }
+
+/** Drop a trailing ".0" so 6.0 shows as "6" but 1.5 stays "1.5" in the max field. */
+private fun plainNumber(v: Double): String =
+    if (v % 1.0 == 0.0) v.toLong().toString() else v.toString()
 
 @Composable
 private fun AddInline(label: String, onClick: () -> Unit) {

@@ -456,6 +456,29 @@ function computeImperialFromMetric(recipe) {
   }
 }
 
+/**
+ * Fill the range upper-bound conversions (quantityValueMaxMetric / *Imperial) by scaling
+ * the min-value conversions by the range ratio (max/min). The unit is shared between the
+ * two ends, so this is exact. Requires the min conversions to already be computed. A no-op
+ * for ingredients without a range (quantityValueMax == null).
+ */
+function computeMaxConversions(list) {
+  for (const ing of list) {
+    const min = ing.quantityValue;
+    const max = ing.quantityValueMax;
+    if (min == null || max == null || min === 0 || max <= min) {
+      ing.quantityValueMaxMetric = null;
+      ing.quantityValueMaxImperial = null;
+      continue;
+    }
+    const ratio = max / min;
+    ing.quantityValueMaxMetric =
+      ing.quantityValueMetric != null ? Math.round(ing.quantityValueMetric * ratio * 100) / 100 : null;
+    ing.quantityValueMaxImperial =
+      ing.quantityValueImperial != null ? impRound(ing.quantityValueImperial * ratio) : null;
+  }
+}
+
 // ─── Standalone ingredient conversion (Update conversions button) ──────────────
 
 // Plausible food density range (g per ml). Outside this, a volume→weight value is
@@ -631,6 +654,9 @@ async function convertIngredientsFromList(ingredients, apiKey, learnedMap = {}) 
 
     return {
       id: ing.id,
+      // Carried through so range upper bounds can be scaled from the min conversions.
+      quantityValue: ing.quantityValue ?? null,
+      quantityValueMax: ing.quantityValueMax ?? null,
       quantityValueMetric: metric.v,
       quantityUnitMetric: metric.u,
       quantityDisplayMetric: metric.d,
@@ -642,6 +668,7 @@ async function convertIngredientsFromList(ingredients, apiKey, learnedMap = {}) 
 
   // Imperial is always derived from the chosen metric with exact math.
   computeImperialFromMetric({ ingredients: out });
+  computeMaxConversions(out);
   return { ingredients: out, candidates };
 }
 
@@ -727,10 +754,16 @@ function validateRecipe(recipe) {
     ing.quantityValueImperial   = null;
     ing.quantityUnitImperial    = null;
     ing.quantityDisplayImperial = null;
+    // Range upper bound — keep the original max from Gemini; conversions computed below.
+    ing.quantityValueMax         = ing.quantityValueMax ?? null;
+    ing.quantityValueMaxMetric   = null;
+    ing.quantityValueMaxImperial = null;
   }
 
   // Compute imperial from metric with exact math — never trust Gemini for this
   computeImperialFromMetric(recipe);
+  // Scale range upper bounds from the min conversions (exact — shared unit)
+  computeMaxConversions(recipe.ingredients);
 }
 
 module.exports = { parseRecipeFromUrl, parseRecipeFromContent, formatRecipeFromText, convertIngredientsFromList };

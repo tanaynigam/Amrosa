@@ -16,6 +16,12 @@ data class Ingredient(
     val quantityUnitImperial: String? = null,
     val quantityDisplayImperial: String? = null,
 
+    // Range upper bounds (e.g. "4–6 cloves"). null = single quantity. Unit/display shared
+    // with the min value; the range is rendered by scaling both ends.
+    val quantityValueMax: Double? = null,
+    val quantityValueMaxMetric: Double? = null,
+    val quantityValueMaxImperial: Double? = null,
+
     val groupLabel: String?,
     val isOptional: Boolean,
     val substituteGroupId: String?,

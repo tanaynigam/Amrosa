@@ -702,6 +702,9 @@ class RecipeDetailViewModel(
                             quantityDisplayMetric = ing.quantityDisplayMetric,
                             quantityValueImperial = ing.quantityValueImperial, quantityUnitImperial = ing.quantityUnitImperial,
                             quantityDisplayImperial = ing.quantityDisplayImperial,
+                            quantityValueMax = ing.quantityValueMax,
+                            quantityValueMaxMetric = ing.quantityValueMaxMetric,
+                            quantityValueMaxImperial = ing.quantityValueMaxImperial,
                             shoppingNote = ing.shoppingNote.trim().ifBlank { null },
                         )
                     }
@@ -774,6 +777,8 @@ class RecipeDetailViewModel(
                                 quantityValueImperial = (r["quantityValueImperial"] as? Number)?.toDouble(),
                                 quantityUnitImperial = r["quantityUnitImperial"] as? String,
                                 quantityDisplayImperial = r["quantityDisplayImperial"] as? String,
+                                quantityValueMaxMetric = (r["quantityValueMaxMetric"] as? Number)?.toDouble(),
+                                quantityValueMaxImperial = (r["quantityValueMaxImperial"] as? Number)?.toDouble(),
                             )
                         })
                     })
@@ -813,6 +818,7 @@ class RecipeDetailViewModel(
         quantityValue = quantityValue, substituteGroupId = substituteGroupId, substituteRatio = substituteRatio,
         quantityValueMetric = quantityValueMetric, quantityUnitMetric = quantityUnitMetric, quantityDisplayMetric = quantityDisplayMetric,
         quantityValueImperial = quantityValueImperial, quantityUnitImperial = quantityUnitImperial, quantityDisplayImperial = quantityDisplayImperial,
+        quantityValueMax = quantityValueMax, quantityValueMaxMetric = quantityValueMaxMetric, quantityValueMaxImperial = quantityValueMaxImperial,
         shoppingNote = shoppingNote ?: "",
     )
 

@@ -71,6 +71,10 @@ data class ParsedIngredient(
     val quantityValueImperial: Double? = null,
     val quantityUnitImperial: String? = null,
     val quantityDisplayImperial: String? = null,
+    // Range upper bounds (e.g. "4–6 cloves"); null = single quantity.
+    val quantityValueMax: Double? = null,
+    val quantityValueMaxMetric: Double? = null,
+    val quantityValueMaxImperial: Double? = null,
 )
 data class ParsedStep(
     val id: String, val sectionId: String?,
@@ -346,6 +350,9 @@ class ImportViewModel(
                 quantityValueImperial = ing.quantityValueImperial,
                 quantityUnitImperial = ing.quantityUnitImperial,
                 quantityDisplayImperial = ing.quantityDisplayImperial,
+                quantityValueMax = ing.quantityValueMax,
+                quantityValueMaxMetric = ing.quantityValueMaxMetric,
+                quantityValueMaxImperial = ing.quantityValueMaxImperial,
                 groupLabel = ing.groupLabel,
                 isOptional = ing.isOptional,
                 substituteGroupId = null,
@@ -450,6 +457,9 @@ class ImportViewModel(
                 quantityValueImperial = (ing["quantityValueImperial"] as? Number)?.toDouble(),
                 quantityUnitImperial = ing["quantityUnitImperial"] as? String,
                 quantityDisplayImperial = ing["quantityDisplayImperial"] as? String,
+                quantityValueMax = (ing["quantityValueMax"] as? Number)?.toDouble(),
+                quantityValueMaxMetric = (ing["quantityValueMaxMetric"] as? Number)?.toDouble(),
+                quantityValueMaxImperial = (ing["quantityValueMaxImperial"] as? Number)?.toDouble(),
             )
         } ?: emptyList()
 
@@ -540,7 +550,10 @@ internal fun Recipe.toParsedRecipeData() = ParsedRecipeData(
             id = ing.id, sectionId = ing.sectionId, name = ing.name,
             quantityValue = ing.quantityValue, quantityUnit = ing.quantityUnit,
             quantityDisplay = ing.quantityDisplay, groupLabel = ing.groupLabel,
-            isOptional = ing.isOptional, orderIndex = ing.orderIndex
+            isOptional = ing.isOptional, orderIndex = ing.orderIndex,
+            quantityValueMax = ing.quantityValueMax,
+            quantityValueMaxMetric = ing.quantityValueMaxMetric,
+            quantityValueMaxImperial = ing.quantityValueMaxImperial
         )
     },
     steps = steps.map { step ->

@@ -264,7 +264,12 @@ data class IngredientEntity(
     val quantityValueImperial: Double? = null,
     val quantityUnitImperial: String? = null,
     val quantityDisplayImperial: String? = null,
-    val shoppingNote: String? = null    // F11: author-entered brand/comment, shown on the Shopping List
+    val shoppingNote: String? = null,   // F11: author-entered brand/comment, shown on the Shopping List
+    // F15 — quantity ranges (e.g. "4–6 cloves"). null = single value. Unit/display shared
+    // with the min; the range is rendered by scaling both ends. Room v14.
+    val quantityValueMax: Double? = null,
+    val quantityValueMaxMetric: Double? = null,
+    val quantityValueMaxImperial: Double? = null
 )
 ```
 
@@ -489,6 +494,14 @@ Unit toggle (`SingleChoiceSegmentedButtonRow`: Original | Metric | Imperial) sho
 - This guarantees imperial is never in cups/tbsp/tsp — only oz, lb, or fl oz
 
 Gemini's imperial fields are **zeroed in `validateRecipe()`** before `computeImperialFromMetric()` runs, so Gemini output is completely ignored for imperial.
+
+#### Quantity ranges (F15) ✅
+Ingredients can carry a range like **"4–6 cloves"**. Storage (Room **v14**, `MIGRATION_13_14`): three nullable upper-bound columns on `IngredientEntity` — `quantityValueMax`, `quantityValueMaxMetric`, `quantityValueMaxImperial`. `null` = single value (the common case). The **unit and display strings are shared** between the two ends; the range is rendered at display time, not stored as a string.
+
+- **Rendering:** `QuantityScaler.scale(value, valueMax, unit, display, scale)` (5-arg overload; the 4-arg one delegates with `max = null`). When `valueMax > value`, it scales **both ends** → e.g. at 2× "4–6 cloves" becomes "8–12 cloves". `scale(ingredient, …, unitMode)` picks the right min/max pair per unit system. Every detail/cooking display already routes through this, so ranges appear automatically.
+- **Gemini import:** Gemini sets `quantityValue` = low end, `quantityValueMax` = high end, writes `quantityDisplay` as the range. It does **not** compute metric/imperial maxes. `computeMaxConversions()` in `parseRecipe.js` scales the max conversions from the min ones by the `max/min` ratio (exact — shared unit), run after `computeImperialFromMetric()` in both the import and "Update conversions" paths.
+- **Editing:** the inline editor's ingredient row has a small **"to [max]"** numeric field (`quantityValueMax`); metric/imperial maxes refresh via "Update unit conversions".
+- **Limitation:** the Shopping List aggregates on the min value (`quantityValue`); ranges aren't summed as ranges there.
 
 #### "Update unit conversions" button (existing recipes) ✅
 

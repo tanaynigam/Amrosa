@@ -30,4 +30,11 @@ data class IngredientEntity(
     // Author-entered shopping note (brand/substitute/comment, e.g. "Amul butter").
     // Optional; travels with the recipe. Shown on the Shopping List, edited in the editor.
     val shoppingNote: String? = null,
+
+    // Range upper bounds (e.g. "4–6 cloves"). null = single quantity (the common case).
+    // The unit + display strings are shared with the min value; the range is rendered at
+    // display time by scaling both ends. Placed last to keep positional construction valid.
+    val quantityValueMax: Double? = null,
+    val quantityValueMaxMetric: Double? = null,
+    val quantityValueMaxImperial: Double? = null,
 )

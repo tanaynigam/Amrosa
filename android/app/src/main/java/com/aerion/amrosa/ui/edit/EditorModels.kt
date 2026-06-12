@@ -22,6 +22,11 @@ data class EditorIngredient(
     val quantityValueImperial: Double? = null,
     val quantityUnitImperial: String? = null,
     val quantityDisplayImperial: String? = null,
+    // Range upper bounds (e.g. "4–6 cloves"); preserved across edits. quantityValueMax is
+    // user-editable inline; the metric/imperial maxes are (re)populated by "Update conversions".
+    val quantityValueMax: Double? = null,
+    val quantityValueMaxMetric: Double? = null,
+    val quantityValueMaxImperial: Double? = null,
     // Author-entered shopping note (brand/comment); shown on the Shopping List.
     val shoppingNote: String = "",
 )

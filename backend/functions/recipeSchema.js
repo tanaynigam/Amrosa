@@ -34,9 +34,10 @@ Return a single JSON object with EXACTLY these fields (no markdown, no explanati
       "id": "ing-import-001",
       "sectionId": "section-import-001 — must match a section id above",
       "name": "string — ingredient name, e.g. 'All Purpose Flour'",
-      "quantityValue": number or null — numeric quantity at base yield (e.g. 2.25 for '2¼ cups'). null for 'to taste', 'a pinch', etc.,
-      "quantityUnit": "string or null — unit like 'cup', 'tablespoon', 'teaspoon', 'oz', 'kg', 'g', 'whole', 'clove', etc. null if no unit",
-      "quantityDisplay": "string — human-readable display like '2¼ cup', '1 can / 28oz', 'to taste', 'a pinch'",
+      "quantityValue": number or null — numeric quantity at base yield (e.g. 2.25 for '2¼ cups'). null for 'to taste', 'a pinch', etc. For a RANGE (e.g. "4-6 cloves"), this is the LOW end (4),
+      "quantityValueMax": number or null — the HIGH end of a quantity range (e.g. 6 for "4-6 cloves", 3 for "2 to 3 tbsp"). null when the quantity is a single value (the common case),
+      "quantityUnit": "string or null — unit like 'cup', 'tablespoon', 'teaspoon', 'oz', 'kg', 'g', 'whole', 'clove', etc. null if no unit. Shared by both ends of a range",
+      "quantityDisplay": "string — human-readable display like '2¼ cup', '1 can / 28oz', 'to taste', 'a pinch'. For a range, write it out, e.g. '4-6 cloves'",
 
       "quantityValueMetric": number or null — metric equivalent of quantityValue. Populate for volume (cups→ml, tbsp→ml, tsp→ml) and weight (oz→g, lb→kg). null if already metric, non-convertible count, or 'to taste',
       "quantityUnitMetric": "string or null — metric unit: 'ml', 'L', 'g', 'kg'. null if not convertible",
@@ -82,7 +83,8 @@ IMPORTANT RULES:
 5. If the recipe has distinct sub-recipes or phases (e.g. dough + sauce + assembly), create separate sections. If it's a simple single-phase recipe, use one section.
 6. Group ingredients logically by their role (e.g. "Marinade", "Sauce", "Dry Ingredients", "Garnish").
 7. Mark ingredients as optional (isOptional: true) only if the recipe explicitly says "optional".
-8. For "to taste", "as needed", "for garnish" type quantities, set quantityValue, quantityUnit, and ALL conversion fields to null.
+8. For "to taste", "as needed", "for garnish" type quantities, set quantityValue, quantityValueMax, quantityUnit, and ALL conversion fields to null.
+8b. QUANTITY RANGES: when the source gives a range ("4-6 cloves", "2 to 3 tbsp", "1–2 onions"), set quantityValue to the LOW end and quantityValueMax to the HIGH end, and write quantityDisplay as the range (e.g. "4-6 cloves"). When the quantity is a single value, set quantityValueMax to null. Do NOT output quantityValueMaxMetric/quantityValueMaxImperial — the server computes range conversions from quantityValueMax automatically.
 9. Return ONLY the JSON object. No markdown code fences, no explanation, no preamble.
 
 METRIC CONVERSION RULES (quantityValueMetric / quantityUnitMetric / quantityDisplayMetric only):
