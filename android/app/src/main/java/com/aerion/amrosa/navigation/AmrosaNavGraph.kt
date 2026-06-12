@@ -48,9 +48,9 @@ private sealed class BottomTab(val route: String, val label: String, val icon: I
 }
 
 private val bottomTabs = listOf(
+    BottomTab.Discover,
     BottomTab.Yours,
     BottomTab.Shared,
-    BottomTab.Discover,
     BottomTab.Account
 )
 

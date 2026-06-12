@@ -428,8 +428,12 @@ the pinned top bar; Cancel is the nav X.
   **Details** (title, description, author, variation, prep/cook, yield range, tags, sources). Existing
   items update **live** (the row behind the sheet reflects edits); "new" items (id == null) commit on Add.
 - **Adding** — both **ghost "＋ Add ingredient/step/section" rows** appended in edit mode (existing rows
-  untouched) and the **top-bar ＋ menu**. In edit mode the scaler, unit toggle, substitute "Options",
-  optional switches, and Notes/Comments are hidden so taps map cleanly to editing.
+  untouched) and the **top-bar ＋ menu** (targets the last section). In edit mode the scaler, unit toggle,
+  substitute "Options", optional switches, and Notes/Comments are hidden so taps map cleanly to editing.
+- **Empty sections** — in edit mode every section renders its header + a "＋ Add ingredient" row and a
+  "＋ Add step" row (even when empty), so a freshly added section can be filled in place. In **view mode**
+  a section with no ingredients shows no ingredient sub-header, and a section with no steps shows no step
+  header (empty sections are hidden from each list).
 - **All editing logic lives in `RecipeDetailViewModel`**: `isEditMode` + `EditDraft` (metadata +
   `List<EditorSection>` from `ui/edit/EditorModels.kt`) + `enterEdit()`/`cancelEdit()`/`saveEdit()` +
   per-field/section/ingredient/step **update/add/delete/move** ops (the sheets just drive these). `saveEdit`

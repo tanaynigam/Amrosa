@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -673,49 +674,59 @@ fun RecipeDetailScreen(
                 }
             }
 
-            ingredientBlocks.forEach { (sectionName, groups) ->
-                val blockSectionId = groups.flatMap { it.second }.firstOrNull()?.sectionId
-                if (sectionName != null) {
-                    item {
-                        Text(
-                            sectionName,
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            // Reusable editable ingredient row.
+            fun LazyListScope.ingredientRowItems(ings: List<Ingredient>, fallbackSectionId: String?) {
+                itemsIndexed(ings, key = { _, it -> it.id }) { idx, ing ->
+                    Box(
+                        Modifier.editable(editing, idx) {
+                            editTarget = EditTarget.Ingredient(ing.sectionId ?: fallbackSectionId ?: "", ing.id)
+                        }
+                    ) {
+                        IngredientRow(
+                            ingredient = ing,
+                            scaledQty = QuantityScaler.scale(ing, effScale, effUnit),
+                            isOptional = ing.isOptional,
+                            isOptionalEnabled = ing.id in state.enabledOptionals,
+                            onToggleOptional = { viewModel.toggleOptional(ing.id) },
+                            editing = editing,
                         )
                     }
                 }
-                groups.forEach { (label, ings) ->
-                    if (label.isNotBlank()) {
-                        item {
-                            Text(
-                                label,
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                            )
-                        }
+            }
+            fun LazyListScope.ingredientSubHeader(name: String) = item {
+                Text(name, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+            }
+            fun LazyListScope.groupLabel(label: String) = item {
+                Text(label, style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+            }
+
+            if (editing) {
+                // Edit mode: render EVERY draft section (incl. empty) so each gets a header +
+                // a "＋ Add ingredient" affordance right below it.
+                val multiSection = recipe.sections.size > 1
+                recipe.sections.forEach { section ->
+                    if (multiSection) ingredientSubHeader(section.name)
+                    val ings = recipe.ingredients.filter { it.sectionId == section.id }.sortedBy { it.orderIndex }
+                    ings.groupBy { it.groupLabel ?: "" }.forEach { (label, gings) ->
+                        if (label.isNotBlank()) groupLabel(label)
+                        ingredientRowItems(gings, section.id)
                     }
-                    itemsIndexed(ings, key = { _, it -> it.id }) { idx, ing ->
-                        Box(
-                            Modifier.editable(editing, idx) {
-                                editTarget = EditTarget.Ingredient(ing.sectionId ?: blockSectionId ?: "", ing.id)
-                            }
-                        ) {
-                            IngredientRow(
-                                ingredient = ing,
-                                scaledQty = QuantityScaler.scale(ing, effScale, effUnit),
-                                isOptional = ing.isOptional,
-                                isOptionalEnabled = ing.id in state.enabledOptionals,
-                                onToggleOptional = { viewModel.toggleOptional(ing.id) },
-                                editing = editing,
-                            )
-                        }
+                    item(key = "add-ing-${section.id}") {
+                        GhostAddRow("Add ingredient") { editTarget = EditTarget.Ingredient(section.id, null) }
                     }
                 }
-                if (editing && blockSectionId != null) {
-                    item(key = "add-ing-$blockSectionId") {
-                        GhostAddRow("Add ingredient") { editTarget = EditTarget.Ingredient(blockSectionId, null) }
+            } else {
+                // View mode: blocks already exclude empty sections (no header shown for them).
+                ingredientBlocks.forEach { (sectionName, groups) ->
+                    val blockSectionId = groups.flatMap { it.second }.firstOrNull()?.sectionId
+                    if (sectionName != null) ingredientSubHeader(sectionName)
+                    groups.forEach { (label, ings) ->
+                        if (label.isNotBlank()) groupLabel(label)
+                        ingredientRowItems(ings, blockSectionId)
                     }
                 }
             }
@@ -728,35 +739,40 @@ fun RecipeDetailScreen(
             item { SectionHeader("Instructions") }
 
             recipe.sections.forEach { section ->
-                item(key = "section-${section.id}") {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp)
-                            .editable(editing, 0) { editTarget = EditTarget.Section(section.id) },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            section.name,
-                            style = MaterialTheme.typography.headlineMedium,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        if (!editing) {
-                            TextButton(onClick = {
-                                cookingStartSectionId = section.id
-                                showCookingMode = true
-                            }) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Cook", style = MaterialTheme.typography.labelMedium)
+                val sectionSteps = recipe.steps
+                    .filter { it.sectionId == section.id }
+                    .sortedBy { it.orderIndex }
+
+                // View mode: hide the header for a section with no steps. Edit mode: always show
+                // it (so empty sections still get a "＋ Add step" affordance below).
+                if (editing || sectionSteps.isNotEmpty()) {
+                    item(key = "section-${section.id}") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                                .editable(editing, 0) { editTarget = EditTarget.Section(section.id) },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                section.name,
+                                style = MaterialTheme.typography.headlineMedium,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            if (!editing) {
+                                TextButton(onClick = {
+                                    cookingStartSectionId = section.id
+                                    showCookingMode = true
+                                }) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Cook", style = MaterialTheme.typography.labelMedium)
+                                }
                             }
                         }
                     }
                 }
-                val sectionSteps = recipe.steps
-                    .filter { it.sectionId == section.id }
-                    .sortedBy { it.orderIndex }
 
                 itemsIndexed(sectionSteps, key = { _, it -> it.id }) { idx, step ->
                     Box(
