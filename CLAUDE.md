@@ -360,6 +360,8 @@ All paths: Cloud Functions → Gemini 2.5 Flash → JSON → review sheet → Ro
 
 All functions: `gemini-2.5-flash`, `thinkingBudget: 0`, `application/json` response MIME, `parseNotes` field for Gemini uncertainty notes.
 
+**Collective step references (`stepIngredientRefs`):** the schema prompt instructs Gemini that when a step refers to ingredients as a group ("add all the paste ingredients", "combine the marinade ingredients") it must emit a `stepIngredientRef` for **every** ingredient in that group — never leave one unreferenced. As a deterministic safety net, `validateRecipe` → `linkOrphanIngredients()` (parseRecipe.js) attaches any ingredient that no step references to the **first step of its section**, so every ingredient surfaces in cooking mode. The Android side mirrors this at render time: `augmentedStepRefs()` in `RecipeDetailScreen.kt` does the same fallback for already-imported recipes (no re-import needed). Both are no-ops when refs are complete.
+
 #### Import screen (push route — not a tab)
 
 `ImportScreen` is a **push route** accessed from the Add Recipe FAB in My Recipes. Route: `"import?reviewId={reviewId}"`. Optional `reviewId` param auto-opens the review sheet for a specific recipe.

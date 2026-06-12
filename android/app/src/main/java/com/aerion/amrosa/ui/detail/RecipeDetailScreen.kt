@@ -1163,6 +1163,38 @@ private fun FollowerPickerSheet(
 
 // ── Cooking Mode ─────────────────────────────────────────────────────────────
 
+/**
+ * Per-step ingredient refs for cooking mode, augmented so that any ingredient not
+ * referenced by *any* step in its section is attached to that section's first step.
+ * Covers recipes (often Gemini-imported) where a step says "add all the X ingredients"
+ * collectively — those ingredients have no explicit refs and would otherwise be invisible
+ * in cooking mode. A no-op when every ingredient is already referenced.
+ */
+private fun augmentedStepRefs(recipe: Recipe): Map<String, List<StepIngredientRef>> {
+    val result = recipe.steps.associate { it.id to it.ingredientRefs.toMutableList() }.toMutableMap()
+    val referenced = recipe.steps.flatMap { it.ingredientRefs }.map { it.ingredientId }.toSet()
+
+    // Bucket steps by section (null section handled as its own bucket), ordered.
+    val sectionKeys = (recipe.sections.map { it.id } + recipe.ingredients.map { it.sectionId }).distinct()
+    for (key in sectionKeys) {
+        val firstStepId = recipe.steps
+            .filter { it.sectionId == key }
+            .minByOrNull { it.orderIndex }
+            ?.id
+            ?: recipe.steps.minByOrNull { it.orderIndex }?.id
+            ?: continue
+        val orphans = recipe.ingredients.filter { it.sectionId == key && it.id !in referenced }
+        if (orphans.isEmpty()) continue
+        val list = result.getValue(firstStepId)
+        orphans.forEach { ing ->
+            if (list.none { it.ingredientId == ing.id }) {
+                list.add(StepIngredientRef(ing.id, ing.quantityDisplay))
+            }
+        }
+    }
+    return result
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun CookingModeScreen(
@@ -1195,6 +1227,12 @@ internal fun CookingModeScreen(
     var currentIndex by remember { mutableIntStateOf(initialIndex) }
     val step = steps.getOrNull(currentIndex)
     var showSectionMenu by remember { mutableStateOf(false) }
+
+    // Fallback for recipes whose steps reference a section's ingredients collectively
+    // (e.g. "add all the paste ingredients") without explicit refs — those ingredients
+    // would otherwise never appear here. Attach any unreferenced ingredient to the first
+    // step of its section so every ingredient surfaces in cooking mode.
+    val refsByStep = remember(recipe) { augmentedStepRefs(recipe) }
 
     val hasConversions = recipe.ingredients.any {
         it.quantityValueMetric != null || it.quantityValueImperial != null
@@ -1297,8 +1335,8 @@ internal fun CookingModeScreen(
                     style = MaterialTheme.typography.bodyLarge
                 )
 
-                // Inline ingredient refs for this step
-                step?.ingredientRefs?.let { refs ->
+                // Inline ingredient refs for this step (augmented with collective-reference fallback)
+                (step?.let { refsByStep[it.id] })?.let { refs ->
                     val visible = refs.filter { ref ->
                         val ing = recipe.ingredients.find { it.id == ref.ingredientId }
                         ing != null && (

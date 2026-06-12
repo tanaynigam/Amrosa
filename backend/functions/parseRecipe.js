@@ -647,6 +647,44 @@ async function convertIngredientsFromList(ingredients, apiKey, learnedMap = {}) 
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
+/**
+ * Safety net for collective step references (e.g. "add all the paste ingredients").
+ * Any ingredient that no step references gets attached to the first step of its
+ * section so it still surfaces in cooking mode. Mirrors the on-device fallback.
+ */
+function linkOrphanIngredients(recipe) {
+  const ingredients = recipe.ingredients || [];
+  const steps = recipe.steps || [];
+  const refs = recipe.stepIngredientRefs;
+  if (ingredients.length === 0 || steps.length === 0) return;
+
+  const referenced = new Set(refs.map((r) => r.ingredientId));
+
+  // Group steps by section, ordered, to find each section's first step.
+  const firstStepBySection = new Map();
+  [...steps]
+    .sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0))
+    .forEach((s) => {
+      const key = s.sectionId ?? "__none__";
+      if (!firstStepBySection.has(key)) firstStepBySection.set(key, s.id);
+    });
+  const firstStepOverall = [...steps].sort(
+    (a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0)
+  )[0].id;
+
+  for (const ing of ingredients) {
+    if (referenced.has(ing.id)) continue;
+    const key = ing.sectionId ?? "__none__";
+    const stepId = firstStepBySection.get(key) || firstStepOverall;
+    refs.push({
+      stepId,
+      ingredientId: ing.id,
+      quantityDisplay: ing.quantityDisplay ?? null,
+    });
+    referenced.add(ing.id);
+  }
+}
+
 function validateRecipe(recipe) {
   if (!recipe.title || typeof recipe.title !== "string") {
     throw new Error("Parsed recipe is missing a title");
@@ -665,6 +703,7 @@ function validateRecipe(recipe) {
   }
 
   if (!Array.isArray(recipe.stepIngredientRefs)) recipe.stepIngredientRefs = [];
+  linkOrphanIngredients(recipe);
   if (!Array.isArray(recipe.sourceUrls)) recipe.sourceUrls = [];
   if (!Array.isArray(recipe.tags)) recipe.tags = [];
 

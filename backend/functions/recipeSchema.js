@@ -77,7 +77,7 @@ Return a single JSON object with EXACTLY these fields (no markdown, no explanati
 IMPORTANT RULES:
 1. IDs must be unique. Use the pattern: section-import-001, section-import-002, etc. for sections; ing-import-001, ing-import-002 for ingredients; step-import-001, step-import-002 for steps.
 2. Every ingredient and step MUST have a valid sectionId that matches one of the sections.
-3. stepIngredientRefs links which ingredients are used in which step. Include a ref whenever a step explicitly mentions using a specific ingredient. Not every ingredient needs a ref, and not every step needs refs.
+3. stepIngredientRefs links which ingredients are used in which step. Include a ref whenever a step uses an ingredient. This includes COLLECTIVE references: when a step refers to a group of ingredients without naming them individually — e.g. "add all the paste ingredients to the grinder", "combine the marinade ingredients", "blend the gravy ingredients", "mix all the dry ingredients" — you MUST create a stepIngredientRef for EVERY ingredient that belongs to that group or section. Never leave an ingredient unreferenced just because the step named it collectively. Every ingredient should be referenced by at least one step; if an ingredient is only ever used via a collective phrase, attach it to that step. Not every step needs refs.
 4. Parse numeric quantities carefully: "¼" = 0.25, "½" = 0.5, "¾" = 0.75, "⅓" = 0.33, "⅔" = 0.67, "1½" = 1.5, "2¼" = 2.25.
 5. If the recipe has distinct sub-recipes or phases (e.g. dough + sauce + assembly), create separate sections. If it's a simple single-phase recipe, use one section.
 6. Group ingredients logically by their role (e.g. "Marinade", "Sauce", "Dry Ingredients", "Garnish").
