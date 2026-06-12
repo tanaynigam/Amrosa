@@ -56,33 +56,108 @@ fun DiscoverScreen(
             )
         }
     ) { padding ->
-        when {
-            state.isLoading -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-            state.shelves.isEmpty() -> EmptyState(Modifier.padding(padding))
-            else -> LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
-            ) {
-                items(state.shelves, key = { it.title }) { shelf ->
-                    Column {
-                        Text(
-                            shelf.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                        )
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(shelf.recipes, key = { it.recipeId }) { r ->
-                                DiscoverCard(r, onClick = { onRecipeClick(r) })
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            // ── Pinned search field ─────────────────────────────────────────
+            OutlinedTextField(
+                value = state.searchQuery,
+                onValueChange = vm::onSearchChange,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                placeholder = { Text("Search recipes — yours, co-chefs, public") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (state.searchQuery.isNotEmpty()) {
+                        IconButton(onClick = vm::clearSearch) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear")
+                        }
+                    }
+                },
+                singleLine = true
+            )
+
+            if (state.searchQuery.isNotBlank()) {
+                // ── Search results ──────────────────────────────────────────
+                when {
+                    state.isSearching && state.searchResults.isEmpty() ->
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    state.searchResults.isEmpty() ->
+                        Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                            Text("No recipes match \"${state.searchQuery.trim()}\"",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                        }
+                    else -> LazyColumn(Modifier.fillMaxSize()) {
+                        items(state.searchResults, key = { it.recipeId }) { r ->
+                            SearchResultRow(r, onClick = { onRecipeClick(r) })
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                        }
+                    }
+                }
+            } else {
+                // ── Recommendation shelves ──────────────────────────────────
+                when {
+                    state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                    state.shelves.isEmpty() -> EmptyState()
+                    else -> LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(20.dp)
+                    ) {
+                        items(state.shelves, key = { it.title }) { shelf ->
+                            Column {
+                                Text(
+                                    shelf.title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                                )
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    items(shelf.recipes, key = { it.recipeId }) { r ->
+                                        DiscoverCard(r, onClick = { onRecipeClick(r) })
+                                    }
+                                }
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchResultRow(recipe: DiscoverRecipe, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(recipe.title, style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium, maxLines = 1)
+            val (icon, label) = when (recipe.source) {
+                RecipeSource.OWN -> Icons.Default.Bookmarks to "Yours"
+                RecipeSource.FRIEND -> Icons.Default.People to (recipe.authorName ?: "Co-chef")
+                RecipeSource.PUBLIC -> Icons.Default.Public to (recipe.authorName ?: "Community")
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(13.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(4.dp))
+                Text(label, style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                if (recipe.saveCount > 0) {
+                    Spacer(Modifier.width(10.dp))
+                    Icon(Icons.Default.BookmarkAdd, contentDescription = null, modifier = Modifier.size(13.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(" ${recipe.saveCount}", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

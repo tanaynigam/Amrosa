@@ -146,6 +146,32 @@ class SharedRecipeService(
         }
     }
 
+    /**
+     * Search public recipes by a query word (Discover Phase 3a). Firestore has no full-text, so we
+     * match against the precomputed `searchTokens` array (title + tag words). Queries the longest
+     * token via array-contains, then refines client-side to the full query so multi-word searches
+     * narrow correctly. Requires index (visibility ==, searchTokens array-contains).
+     */
+    suspend fun searchPublicRecipes(query: String, limit: Long = 25): List<DiscoverRecipe> {
+        val q = query.trim().lowercase()
+        if (q.length < 2) return emptyList()
+        val token = q.split(Regex("[^a-z0-9]+")).filter { it.length >= 2 }.maxByOrNull { it.length }
+            ?: return emptyList()
+        return try {
+            firestore.collection(COLLECTION_SHARED)
+                .whereEqualTo("visibility", "public")
+                .whereArrayContains("searchTokens", token)
+                .limit(limit)
+                .get().await()
+                .documents.mapNotNull { parsePublicSummary(it) }
+                // Refine to the full query (substring on title or any tag).
+                .filter { r -> r.title.contains(q, true) || r.tags.any { it.contains(q, true) } }
+        } catch (e: Exception) {
+            Log.e(TAG, "searchPublicRecipes failed", e)
+            emptyList()
+        }
+    }
+
     // ─── Likes (Discover Phase 2) ─────────────────────────────────────────────
 
     data class LikeState(val isLiked: Boolean = false, val likeCount: Int = 0, val saveCount: Int = 0)
@@ -324,10 +350,21 @@ class SharedRecipeService(
             // Default to "public" for safety if a private recipe somehow reaches publish().
             "visibility" to (recipe.visibility.takeIf { it == "friends" || it == "public" } ?: "public"),
             "sharedAt" to System.currentTimeMillis(),
+            // F13 Phase 3a — word tokens (title + tags, lowercased) for array-contains search.
+            "searchTokens" to searchTokens(recipe.title, recipe.tags),
             "sections" to sections, "ingredients" to ingredients,
             "steps" to steps, "stepIngredientRefs" to stepRefs
         )
     }
+
+    /** Lowercased distinct words (≥2 chars) from title + tags — the searchable token set. */
+    private fun searchTokens(title: String, tags: List<String>): List<String> =
+        (title + " " + tags.joinToString(" "))
+            .lowercase()
+            .split(Regex("[^a-z0-9]+"))
+            .filter { it.length >= 2 }
+            .distinct()
+            .take(30)
 
     @Suppress("UNCHECKED_CAST")
     private fun parseRecipe(docId: String, data: Map<String, Any>): Recipe {
