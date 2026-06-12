@@ -19,6 +19,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.domain.model.DiscoverRecipe
 import com.aerion.amrosa.domain.model.RecipeSource
+import com.aerion.amrosa.ui.components.CompactSearchField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,20 +59,11 @@ fun DiscoverScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             // ── Pinned search field ─────────────────────────────────────────
-            OutlinedTextField(
+            CompactSearchField(
                 value = state.searchQuery,
                 onValueChange = vm::onSearchChange,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                placeholder = { Text("Search recipes — yours, co-chefs, public") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (state.searchQuery.isNotEmpty()) {
-                        IconButton(onClick = vm::clearSearch) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear")
-                        }
-                    }
-                },
-                singleLine = true
+                placeholder = "Search recipes — yours, co-chefs, public",
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
             )
 
             if (state.searchQuery.isNotBlank()) {

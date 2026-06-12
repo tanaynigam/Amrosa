@@ -932,11 +932,12 @@ an **accepted** mutual-follow doc `{viewer}_{author}` exists (`exists()` + `get(
 for the profile query — create via the console or the link Firestore emits on first profile open
 (not in a managed `firestore.indexes.json`; the existing `follows` indexes were created the same way).
 
-**Co-Chef profile** (`ui/social/ProfileScreen.kt` + `ProfileViewModel`): reached by tapping a row in
-`FriendsScreen`. Loads `SocialRepository.getAuthorRecipes(authorUid, includeFriendsOnly = true)` —
-queries `shared_recipes` `whereEqualTo(authorId)` + `whereIn(visibility, ["friends","public"])` →
-`ProfileRecipeSummary` cards (title, times, tags, tier badge). (Future public-profile reuse:
-`includeFriendsOnly = false`.)
+**Chef profile** (`ui/social/ProfileScreen.kt` + `ProfileViewModel`): reached by tapping a row in
+`FriendsScreen` **or `UserSearchScreen`** (any chef). The VM resolves access at runtime —
+`getFollowStatus(uid) == "accepted"` → `getAuthorRecipes(uid, includeFriendsOnly = true)` (co-chef:
+friends + public); else `includeFriendsOnly = false` (**public profile**: public recipes only). The
+header badge ("Co-Chef" vs "Chef") + empty-state copy switch on `state.isCoChef`. `getAuthorRecipes`
+queries `shared_recipes` `whereEqualTo(authorId)` + `whereIn(visibility, …)` → `ProfileRecipeSummary` cards.
 
 **Review mode + "Add to Shared tab".** Tapping a profile recipe opens the **review screen**
 (`ReceivedRecipeScreen`, generalized): a `sealed class ReviewSource { Pointer(shareId) | Direct(recipeId,authorUid,authorName) }`
@@ -1290,8 +1291,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | # | Feature | Description |
 |---|---|---|
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil (Android) / AsyncImage (iOS) display. **Both platforms.** Largest remaining feature. |
-| — | Discover tab — later phases | Phases 1 (feed) + 2 (popularity) + 3a (cross-scope search) are DONE on Android (F13). Remaining: **chef search + public profile**; explicit **cuisine prefs**; promote Discover to **default tab**; pull-to-refresh. |
-| — | Public profile view (non-friends) | Co-Chef profile is DONE on Android (F12). Remaining: a *public* profile for users NOT in your co-chefs, showing only their public recipes (reuse `getAuthorRecipes(includeFriendsOnly = false)` + an entry from user search). |
+| — | Discover tab — later phases | Phases 1 (feed) + 2 (popularity) + 3a (search) + chef search/public profile are DONE on Android (F13). Remaining: explicit **cuisine prefs**; promote Discover to **default tab**; pull-to-refresh. |
 | — | Gemini brand/substitute suggestions | The deferred half of F11 — AI-suggested top brands + substitutes per ingredient (author notes already ship). |
 | — | iOS: Universal Links | `apple-app-site-association` file + `Associated Domains` entitlement (Android App Links already done). |
 | — | Shopping list — cross-recipe / standalone | Optional: combine multiple recipes into one shopping trip (current F11 is per-recipe). |
@@ -1388,7 +1388,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 | Gap | Detail |
 |---|---|
-| **F12 — Visibility tiers + Co-Chef profiles** | Android-only. iOS needs: the `"friends"` tier in `setVisibility`/publish (`buildDocument` must write the real `visibility`, not `"public"`); a 3-option visibility chooser; private direct-share → friends; a `ProfileView` from the friends list backed by `getAuthorRecipes(authorUid, includeFriendsOnly)`; and review/"Add to Shared tab" reuse for `Direct(recipeId, authorUid, authorName)` entry. The Firestore rule + composite index are already deployed (shared infra). |
+| **F12 — Visibility tiers + Co-Chef profiles** | Android-only. iOS needs: the `"friends"` tier in `setVisibility`/publish (`buildDocument` must write the real `visibility`, not `"public"`); a 3-option visibility chooser; private direct-share → friends; a `ProfileView` from the friends list **and user search** (co-chef vs public resolved via `getFollowStatus` → `getAuthorRecipes(includeFriendsOnly)`); and review/"Add to Shared tab" reuse for `Direct(recipeId, authorUid, authorName)` entry. The Firestore rule + composite index are already deployed (shared infra). |
 | **F13 — Discover tab (Phases 1+2+3a)** | Android-only. iOS needs: a `cooked_log` SwiftData model + `markCooked` on Cooking Mode "Done"; a `MealClassifier`/ranker port (incl. the popularity term); `getPublicRecipeSummaries`/`getPopularPublicRecipes`/`searchPublicRecipes` (reading `saveCount`/`likeCount`/`searchTokens`); `setLiked`/`likeStateFlow` + a ❤ on the review screen; a `DiscoverView` of meal/source/Popular shelves + a cross-scope search bar. The Cloud Functions, rules, indexes, and `searchTokens` in `buildDocument` are already deployed (shared infra). |
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |

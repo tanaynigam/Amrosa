@@ -1,5 +1,6 @@
 package com.aerion.amrosa.ui.social
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,6 +25,7 @@ import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.remote.SocialRepository
 import com.aerion.amrosa.domain.model.UserProfile
+import com.aerion.amrosa.ui.components.CompactSearchField
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -120,7 +122,10 @@ class UserSearchViewModel(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UserSearchScreen(onBack: () -> Unit) {
+fun UserSearchScreen(
+    onBack: () -> Unit,
+    onProfileClick: (uid: String, name: String) -> Unit = { _, _ -> }
+) {
     val context = LocalContext.current
     val app = context.applicationContext as AmrosaApplication
     val viewModel: UserSearchViewModel = viewModel(
@@ -152,23 +157,13 @@ fun UserSearchScreen(onBack: () -> Unit) {
                 .padding(padding)
         ) {
             // ── Search field ──────────────────────────────────────────────────
-            OutlinedTextField(
+            CompactSearchField(
                 value = state.query,
                 onValueChange = viewModel::onQueryChange,
+                placeholder = "Find chefs by name or email…",
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                placeholder = { Text("Find co-chefs by name or email…") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (state.query.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.onQueryChange("") }) {
-                            Icon(Icons.Default.Clear, contentDescription = "Clear")
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
             // ── Results ───────────────────────────────────────────────────────
@@ -192,7 +187,8 @@ fun UserSearchScreen(onBack: () -> Unit) {
                             followStatus = state.followStatus[user.uid] ?: "none",
                             isLoading = state.pendingAction == user.uid,
                             onFollow = { viewModel.sendFollowRequest(user) },
-                            onUnfollow = { viewModel.unfriend(user) }
+                            onUnfollow = { viewModel.unfriend(user) },
+                            onClick = { onProfileClick(user.uid, user.displayName) }
                         )
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     }
@@ -208,11 +204,13 @@ private fun UserSearchRow(
     followStatus: String,
     isLoading: Boolean,
     onFollow: () -> Unit,
-    onUnfollow: () -> Unit
+    onUnfollow: () -> Unit,
+    onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

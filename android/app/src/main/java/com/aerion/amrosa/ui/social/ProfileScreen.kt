@@ -34,12 +34,13 @@ import kotlinx.coroutines.launch
 data class ProfileUiState(
     val recipes: List<ProfileRecipeSummary> = emptyList(),
     val isLoading: Boolean = true,
+    /** True when the viewer is an accepted co-chef of this profile (sees friends + public). */
+    val isCoChef: Boolean = false,
 )
 
 class ProfileViewModel(
     private val socialRepository: SocialRepository,
     private val authorUid: String,
-    private val isCoChef: Boolean,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProfileUiState())
@@ -47,18 +48,20 @@ class ProfileViewModel(
 
     init {
         viewModelScope.launch {
-            // Co-chefs see friends + public tiers; (future) public profiles see public only.
-            val recipes = socialRepository.getAuthorRecipes(authorUid, includeFriendsOnly = isCoChef)
-            _uiState.update { it.copy(recipes = recipes, isLoading = false) }
+            // Co-chefs see the author's friends + public recipes; everyone else sees public only.
+            // (The Firestore read rule enforces this — query the matching tier set.)
+            val accepted = socialRepository.getFollowStatus(authorUid) == "accepted"
+            val recipes = socialRepository.getAuthorRecipes(authorUid, includeFriendsOnly = accepted)
+            _uiState.update { it.copy(recipes = recipes, isLoading = false, isCoChef = accepted) }
         }
     }
 
     companion object {
-        fun factory(socialRepository: SocialRepository, authorUid: String, isCoChef: Boolean): ViewModelProvider.Factory =
+        fun factory(socialRepository: SocialRepository, authorUid: String): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    ProfileViewModel(socialRepository, authorUid, isCoChef) as T
+                    ProfileViewModel(socialRepository, authorUid) as T
             }
     }
 }
@@ -80,7 +83,7 @@ fun ProfileScreen(
     val app = LocalContext.current.applicationContext as AmrosaApplication
     val viewModel: ProfileViewModel = viewModel(
         key = "profile-$uid",
-        factory = ProfileViewModel.factory(app.container.socialRepository, uid, isCoChef = true)
+        factory = ProfileViewModel.factory(app.container.socialRepository, uid)
     )
     val state by viewModel.uiState.collectAsState()
 
@@ -124,7 +127,8 @@ fun ProfileScreen(
                         }
                     }
                     Text(displayName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Co-Chef", style = MaterialTheme.typography.labelMedium,
+                    Text(if (state.isCoChef) "Co-Chef" else "Chef",
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -139,7 +143,9 @@ fun ProfileScreen(
             } else if (state.recipes.isEmpty()) {
                 item {
                     Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        Text("$displayName hasn't shared any recipes with co-chefs yet.",
+                        Text(
+                            if (state.isCoChef) "$displayName hasn't shared any recipes with co-chefs yet."
+                            else "$displayName has no public recipes yet.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

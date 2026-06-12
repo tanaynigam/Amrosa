@@ -177,7 +177,12 @@ private fun MainAppScaffold() {
 
             // ── User search / follow people ───────────────────────────────────
             composable("user_search") {
-                UserSearchScreen(onBack = { navController.popBackStack() })
+                UserSearchScreen(
+                    onBack = { navController.popBackStack() },
+                    onProfileClick = { uid, name ->
+                        navController.navigate("profile/$uid?name=${Uri.encode(name)}")
+                    }
+                )
             }
 
             // ── Co-Chef profile (their friends + public recipes) ──────────────
