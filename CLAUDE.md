@@ -411,34 +411,36 @@ Freeform flow passes `null` for `onIsOwnRecipeChange` — author toggle is hidde
 
 ---
 
-### F4 — Inline Recipe Editing (F14 — replaced the separate editor)
+### F4 — Inline Recipe Editing (F14 → F16: jiggle + tap-to-edit popups)
 
-There is **no separate edit page**. The recipe **detail screen has a global Edit toggle**: the pencil
-(owners only) flips the *same* screen into edit mode **in place, preserving scroll** — the one
-`LazyColumn` + `rememberLazyListState` renders read-only or editable variants of each item, with
-**stable keys** (header, ingredient ids, step ids) so toggling at step 3 leaves you on step 3, now
-editable. Save ✓ + Cancel ✕ live in the pinned top bar (Cancel is the nav X). No navigation on toggle.
+There is **no separate edit page**. The recipe **detail screen has a global Edit toggle** (pencil,
+owners only). In edit mode the screen stays **visually identical to the read-only view** — the same
+`LazyColumn` renders the **live draft as a `Recipe`** (`EditDraft.toPreviewRecipe(base)` in
+`RecipeDetailViewModel.kt`, shown at 1× / original units). Every editable element **jiggles** with a
+faint outline (`Modifier.editable(active, phase, onClick)` in `ui/util/EditAffordance.kt`) and **a tap
+opens a bottom sheet** scoped to that item. Nothing is edited inline. Save ✓ + a ＋ add-menu live in
+the pinned top bar; Cancel is the nav X.
 
-- **All editing logic lives in `RecipeDetailViewModel`** (ported from the deleted `RecipeEditorViewModel`):
-  `isEditMode` + an `EditDraft` (metadata + `List<EditorSection>` from `ui/edit/EditorModels.kt`) +
-  `enterEdit()`/`cancelEdit()`/`saveEdit()` + per-field/section/ingredient/step **update/add/delete/move**
-  ops. The draft is built from the *currently loaded* recipe (fresh via the Room-Flow refresh); `saveEdit`
-  maps it to entities, `version++`, appends `RecipeChange`, `repository.updateFullRecipe(...)`, pushes to
-  `personal_recipes`, and re-publishes the mirror if the recipe is friends/public. Exiting edit lets the
-  Room-Flow observer reload the view.
-- The inline edit UI is `ui/detail/RecipeEditContent.kt` (`LazyListScope.recipeEditItems`): editable
-  metadata card (title, description, **author dropdown**, variation name, prep/cook, yield range,
-  tags, source URLs, "Update unit conversions"), per-section ingredient rows (name/qty/unit/group/optional/
-  shopping-note, add/delete/move), per-step rows (instruction, add/delete/move) + a **"Uses ingredients"
-  chip picker (F4 step-ingredient editing)**, add-section, and Delete-recipe (cascades variations).
-- **Step→ingredient refs** are now editable + persisted: `EditorStep.ingredientIds`; `replaceFullRecipe`/
-  `updateFullRecipe` rewrite `step_ingredient_refs` (delete-all + insert from the draft; ref display
-  defaults to the ingredient's). This is what cooking mode shows inline.
-- **Entry points → inline edit**: detail pencil (in-screen, no nav); import/freeform "Edit" + a newly
-  created variation navigate to `recipe/{id}?startEdit=true` (a one-shot `startEdit` nav arg that calls
-  `enterEdit()` on load). This retired the old `recipe/edit/{id}` route + `RecipeEditorScreen`.
-- **Author dropdown** unchanged in behavior: Imported (`isImported=true`, name "Imported") vs
-  Personal (`isImported=false`, real name); `personalAuthorName` getter on the VM.
+- **Bottom sheets** — `ui/detail/RecipeEditSheets.kt` (`EditBottomSheet` switches on a sealed
+  `EditTarget`): **Ingredient** (name, quantity, range max `quantityValueMax`, unit, group, optional,
+  shopping note, Delete — numeric quantity edits drive scaling, free-text only when blank),
+  **Step** (instruction + "Uses ingredients" `FilterChip`s, Delete), **Section** (name, reorder, Delete),
+  **Details** (title, description, author, variation, prep/cook, yield range, tags, sources). Existing
+  items update **live** (the row behind the sheet reflects edits); "new" items (id == null) commit on Add.
+- **Adding** — both **ghost "＋ Add ingredient/step/section" rows** appended in edit mode (existing rows
+  untouched) and the **top-bar ＋ menu**. In edit mode the scaler, unit toggle, substitute "Options",
+  optional switches, and Notes/Comments are hidden so taps map cleanly to editing.
+- **All editing logic lives in `RecipeDetailViewModel`**: `isEditMode` + `EditDraft` (metadata +
+  `List<EditorSection>` from `ui/edit/EditorModels.kt`) + `enterEdit()`/`cancelEdit()`/`saveEdit()` +
+  per-field/section/ingredient/step **update/add/delete/move** ops (the sheets just drive these). `saveEdit`
+  maps the draft to entities, `version++`, appends `RecipeChange`, `repository.updateFullRecipe(...)`, pushes
+  to `personal_recipes`, re-publishes the mirror if friends/public; the Room-Flow observer reloads the view.
+- **Step→ingredient refs** editable + persisted via `EditorStep.ingredientIds`; `updateFullRecipe`
+  rewrites `step_ingredient_refs`. This is what cooking mode shows inline.
+- **Entry points**: detail pencil (in-screen toggle, no nav); import/freeform "Edit" + a newly created
+  variation navigate to `recipe/{id}?startEdit=true` (one-shot `startEdit` nav arg → `enterEdit()` on load).
+- **Known gap**: a brand-new empty section has no ingredient block yet, so its first ingredient is added
+  via the top-bar ＋ menu (which targets the **last** section) rather than an in-context ghost row.
 
 ---
 

@@ -1,0 +1,305 @@
+package com.aerion.amrosa.ui.detail
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import com.aerion.amrosa.ui.edit.EditorIngredient
+import com.aerion.amrosa.ui.edit.EditorSection
+import com.aerion.amrosa.ui.edit.EditorStep
+
+/** What the open edit bottom sheet is editing. `id == null` means "add new". */
+sealed interface EditTarget {
+    data object Details : EditTarget
+    data class Section(val sectionId: String?) : EditTarget
+    data class Ingredient(val sectionId: String, val ingredientId: String?) : EditTarget
+    data class Step(val sectionId: String, val stepId: String?) : EditTarget
+}
+
+private fun plain(v: Double): String = if (v % 1.0 == 0.0) v.toLong().toString() else v.toString()
+
+/** Build the human-readable quantity display from the numeric amount + unit (+ optional range). */
+private fun deriveDisplay(value: Double?, max: Double?, unit: String, fallback: String): String {
+    if (value == null) return fallback.trim()
+    val num = if (max != null && max > value) "${plain(value)}–${plain(max)}" else plain(value)
+    return "$num ${unit.trim()}".trim()
+}
+
+/**
+ * The single host for all edit bottom sheets. The detail screen renders this when [target] is
+ * non-null. Existing items are updated live (the row behind the sheet reflects edits); "new"
+ * items (id == null) are committed by the sheet's Add button.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditBottomSheet(
+    target: EditTarget,
+    draft: EditDraft,
+    vm: RecipeDetailViewModel,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            when (target) {
+                is EditTarget.Details -> DetailsSheet(draft, vm)
+                is EditTarget.Section -> SectionSheet(target, draft, vm, onDismiss)
+                is EditTarget.Ingredient -> IngredientSheet(target, draft, vm, onDismiss)
+                is EditTarget.Step -> StepSheet(target, draft, vm, onDismiss)
+            }
+        }
+    }
+}
+
+// ── Recipe details (title / description / author / times / yield / tags / sources) ──
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DetailsSheet(draft: EditDraft, vm: RecipeDetailViewModel) {
+    SheetTitle("Recipe details")
+    OutlinedTextField(draft.title, vm::editTitle, label = { Text("Title *") },
+        modifier = Modifier.fillMaxWidth(), singleLine = true)
+    OutlinedTextField(draft.description, vm::editDescription, label = { Text("Description") },
+        modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 4)
+
+    var authorExpanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = authorExpanded, onExpandedChange = { authorExpanded = it }) {
+        OutlinedTextField(
+            value = if (draft.isPersonalAuthor) "Personal — ${vm.personalAuthorName}" else "Imported",
+            onValueChange = {}, readOnly = true, label = { Text("Author") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(authorExpanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(authorExpanded, { authorExpanded = false }) {
+            DropdownMenuItem(text = { Text("Imported") },
+                onClick = { vm.editIsPersonalAuthor(false); authorExpanded = false })
+            DropdownMenuItem(text = { Text("Personal — ${vm.personalAuthorName}") },
+                onClick = { vm.editIsPersonalAuthor(true); authorExpanded = false })
+        }
+    }
+    if (draft.isVariant) {
+        OutlinedTextField(draft.variantName, vm::editVariantName, label = { Text("Variation name") },
+            modifier = Modifier.fillMaxWidth(), singleLine = true)
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(draft.prepTimeMinutes, vm::editPrepTime, label = { Text("Prep (min)") },
+            modifier = Modifier.weight(1f), singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+        OutlinedTextField(draft.cookTimeMinutes, vm::editCookTime, label = { Text("Cook (min)") },
+            modifier = Modifier.weight(1f), singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween) {
+        Text("Range yield (e.g. 15–20)", style = MaterialTheme.typography.bodyMedium)
+        Switch(draft.isRangeYield, vm::editIsRangeYield)
+    }
+    if (draft.isRangeYield) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(draft.baseServingsMin, vm::editBaseServingsMin, label = { Text("Min") },
+                modifier = Modifier.weight(1f), singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(draft.baseServingsMax, vm::editBaseServingsMax, label = { Text("Max") },
+                modifier = Modifier.weight(1f), singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+        }
+    } else {
+        OutlinedTextField(draft.baseServings, vm::editBaseServings, label = { Text("Servings") },
+            modifier = Modifier.fillMaxWidth(), singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+    }
+    OutlinedTextField(draft.tagsText, vm::editTags, label = { Text("Tags") },
+        placeholder = { Text("e.g. Indian, weeknight") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+    OutlinedTextField(draft.sourceUrlsText, vm::editSourceUrls, label = { Text("Source URLs (one per line)") },
+        modifier = Modifier.fillMaxWidth(), minLines = 1, maxLines = 4)
+}
+
+// ── Section ──
+@Composable
+private fun SectionSheet(target: EditTarget.Section, draft: EditDraft, vm: RecipeDetailViewModel, onDismiss: () -> Unit) {
+    val existing = draft.sections.find { it.id == target.sectionId }
+    var name by remember(target) { mutableStateOf(existing?.name ?: "") }
+    SheetTitle(if (existing == null) "Add section" else "Edit section")
+    OutlinedTextField(
+        value = name,
+        onValueChange = { name = it; if (existing != null) vm.updateSectionName(existing.id, it) },
+        label = { Text("Section name") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+    )
+    if (existing == null) {
+        Button(onClick = { vm.addSection(name); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add section")
+        }
+    } else {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { vm.moveSectionUp(existing.id) }, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Default.KeyboardArrowUp, null); Text("Up")
+            }
+            OutlinedButton(onClick = { vm.moveSectionDown(existing.id) }, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Default.KeyboardArrowDown, null); Text("Down")
+            }
+        }
+        if (draft.sections.size > 1) {
+            DeleteButton("Delete section") { vm.deleteSection(existing.id); onDismiss() }
+        }
+        DoneButton(onDismiss)
+    }
+}
+
+// ── Ingredient ──
+@Composable
+private fun IngredientSheet(target: EditTarget.Ingredient, draft: EditDraft, vm: RecipeDetailViewModel, onDismiss: () -> Unit) {
+    val section = draft.sections.find { it.id == target.sectionId }
+    val existing = section?.ingredients?.find { it.id == target.ingredientId }
+    val base = existing ?: EditorIngredient()
+
+    var name by remember(target) { mutableStateOf(base.name) }
+    var qty by remember(target) { mutableStateOf(base.quantityValue?.let { plain(it) } ?: "") }
+    var max by remember(target) { mutableStateOf(base.quantityValueMax?.let { plain(it) } ?: "") }
+    var unit by remember(target) { mutableStateOf(base.quantityUnit) }
+    // Free-text display only used when there's no numeric amount (e.g. "to taste").
+    var text by remember(target) { mutableStateOf(if (base.quantityValue == null) base.quantityDisplay else "") }
+    var group by remember(target) { mutableStateOf(base.groupLabel) }
+    var optional by remember(target) { mutableStateOf(base.isOptional) }
+    var note by remember(target) { mutableStateOf(base.shoppingNote) }
+
+    fun build(): EditorIngredient {
+        val v = qty.toDoubleOrNull()
+        val m = max.toDoubleOrNull()
+        return base.copy(
+            name = name,
+            quantityValue = v,
+            quantityValueMax = m,
+            quantityUnit = unit,
+            quantityDisplay = deriveDisplay(v, m, unit, text),
+            groupLabel = group,
+            isOptional = optional,
+            shoppingNote = note,
+        )
+    }
+    // Live-update the row behind the sheet for existing ingredients.
+    fun push() { if (existing != null) vm.updateIngredient(target.sectionId, build()) }
+
+    SheetTitle(if (existing == null) "Add ingredient" else "Edit ingredient")
+    OutlinedTextField(name, { name = it; push() }, label = { Text("Ingredient") },
+        modifier = Modifier.fillMaxWidth(), singleLine = true)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(qty, { qty = it.filter { c -> c.isDigit() || c == '.' }; push() },
+            label = { Text("Quantity") }, modifier = Modifier.weight(1f), singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+        OutlinedTextField(max, { max = it.filter { c -> c.isDigit() || c == '.' }; push() },
+            label = { Text("to (range)") }, placeholder = { Text("—") },
+            modifier = Modifier.weight(1f), singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+    }
+    OutlinedTextField(unit, { unit = it; push() }, label = { Text("Unit") },
+        placeholder = { Text("cup, g, clove…") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+    // Only relevant when there's no numeric amount (e.g. "to taste", "a pinch").
+    if (qty.isBlank()) {
+        OutlinedTextField(text, { text = it; push() }, label = { Text("Or free text (e.g. to taste)") },
+            modifier = Modifier.fillMaxWidth(), singleLine = true)
+    }
+    OutlinedTextField(group, { group = it; push() }, label = { Text("Group (e.g. Spices)") },
+        modifier = Modifier.fillMaxWidth(), singleLine = true)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Switch(optional, { optional = it; push() })
+        Spacer(Modifier.width(8.dp)); Text("Optional", style = MaterialTheme.typography.bodyMedium)
+    }
+    OutlinedTextField(note, { note = it; push() }, label = { Text("Shopping note (e.g. Amul)") },
+        modifier = Modifier.fillMaxWidth(), singleLine = true)
+
+    if (existing == null) {
+        Button(onClick = { vm.addIngredient(target.sectionId, build()); onDismiss() },
+            modifier = Modifier.fillMaxWidth(), enabled = name.isNotBlank()) {
+            Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add ingredient")
+        }
+    } else {
+        DeleteButton("Delete ingredient") { vm.deleteIngredient(target.sectionId, existing.id); onDismiss() }
+        DoneButton(onDismiss)
+    }
+}
+
+// ── Step ──
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StepSheet(target: EditTarget.Step, draft: EditDraft, vm: RecipeDetailViewModel, onDismiss: () -> Unit) {
+    val section = draft.sections.find { it.id == target.sectionId }
+    val existing = section?.steps?.find { it.id == target.stepId }
+    val base = existing ?: EditorStep()
+
+    var instruction by remember(target) { mutableStateOf(base.instruction) }
+    // For a new step the chosen ingredient ids are held locally until "Add".
+    var ids by remember(target) { mutableStateOf(base.ingredientIds.toSet()) }
+    val allIngredients = draft.sections.flatMap { it.ingredients }.filter { it.name.isNotBlank() }
+
+    SheetTitle(if (existing == null) "Add step" else "Edit step")
+    OutlinedTextField(
+        value = instruction,
+        onValueChange = { instruction = it; if (existing != null) vm.updateStep(target.sectionId, existing.copy(instruction = it, ingredientIds = ids.toList())) },
+        label = { Text("Instruction") }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 8,
+    )
+    if (allIngredients.isNotEmpty()) {
+        Text("Uses ingredients", style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            allIngredients.forEach { ing ->
+                val selected = ing.id in ids
+                FilterChip(
+                    selected = selected,
+                    onClick = {
+                        ids = if (selected) ids - ing.id else ids + ing.id
+                        if (existing != null) vm.toggleStepIngredient(target.sectionId, existing.id, ing.id)
+                    },
+                    label = { Text(ing.name, style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+        }
+    }
+    if (existing == null) {
+        Button(onClick = { vm.addStep(target.sectionId, base.copy(instruction = instruction, ingredientIds = ids.toList())); onDismiss() },
+            modifier = Modifier.fillMaxWidth(), enabled = instruction.isNotBlank()) {
+            Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add step")
+        }
+    } else {
+        DeleteButton("Delete step") { vm.deleteStep(target.sectionId, existing.id); onDismiss() }
+        DoneButton(onDismiss)
+    }
+}
+
+// ── Small shared bits ──
+@Composable
+private fun SheetTitle(text: String) {
+    Text(text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 4.dp))
+}
+
+@Composable
+private fun DoneButton(onDismiss: () -> Unit) {
+    Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Done") }
+}
+
+@Composable
+private fun DeleteButton(label: String, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick, modifier = Modifier.fillMaxWidth(),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+    ) {
+        Icon(Icons.Default.DeleteForever, null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp)); Text(label)
+    }
+}

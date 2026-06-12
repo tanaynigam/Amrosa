@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -31,6 +32,7 @@ import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.domain.model.*
 import com.aerion.amrosa.ui.util.QuantityScaler
 import com.aerion.amrosa.ui.util.UnitMode
+import com.aerion.amrosa.ui.util.editable
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -85,6 +87,9 @@ fun RecipeDetailScreen(
     var showRemoveDialog by remember { mutableStateOf(false) }
     // Inline-edit delete-recipe confirmation
     var showDeleteDialog by remember { mutableStateOf(false) }
+    // Which per-item edit sheet is open (null = none). Hoisted so the top-bar ＋ menu can open it too.
+    var editTarget by remember { mutableStateOf<EditTarget?>(null) }
+    var showAddMenu by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Open in edit mode once when arrived via ?startEdit (import/freeform/variant). One-shot.
@@ -246,7 +251,31 @@ fun RecipeDetailScreen(
                 },
                 actions = {
                     if (state.isEditMode) {
-                        // Edit mode — only Save (Cancel is the nav X). Stays pinned as you scroll.
+                        // Edit mode — ＋ add menu + Save (Cancel is the nav X). Pinned as you scroll.
+                        val draft = state.draft
+                        Box {
+                            IconButton(onClick = { showAddMenu = true }) {
+                                Icon(Icons.Default.Add, contentDescription = "Add")
+                            }
+                            DropdownMenu(expanded = showAddMenu, onDismissRequest = { showAddMenu = false }) {
+                                // Default to the last section so a just-added section can receive items.
+                                val target = draft?.sections?.lastOrNull()
+                                DropdownMenuItem(
+                                    text = { Text("Add ingredient") },
+                                    enabled = target != null,
+                                    onClick = { showAddMenu = false; target?.let { editTarget = EditTarget.Ingredient(it.id, null) } },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Add step") },
+                                    enabled = target != null,
+                                    onClick = { showAddMenu = false; target?.let { editTarget = EditTarget.Step(it.id, null) } },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Add section") },
+                                    onClick = { showAddMenu = false; editTarget = EditTarget.Section(null) },
+                                )
+                            }
+                        }
                         if (state.isSavingEdit) {
                             CircularProgressIndicator(modifier = Modifier.size(36.dp).padding(end = 12.dp), strokeWidth = 2.dp)
                         } else {
@@ -298,23 +327,34 @@ fun RecipeDetailScreen(
             return@Scaffold
         }
 
-        val recipe = state.recipe ?: return@Scaffold
+        val baseRecipe = state.recipe ?: return@Scaffold
+        // In edit mode the body renders the *live draft* (as a Recipe) so the screen stays
+        // identical to the read-only view while popup edits reflect immediately.
+        val editing = state.isEditMode && state.draft != null
+        val recipe = if (editing) state.draft!!.toPreviewRecipe(baseRecipe) else baseRecipe
+        if (!editing && editTarget != null) editTarget = null
+        // Quantities are shown un-scaled / in original units while editing.
+        val effScale = if (editing) 1.0 else state.scaleFactor
+        val effUnit = if (editing) UnitMode.ORIGINAL else selectedUnit
+
         val listState = rememberLazyListState()
         val coroutineScope = rememberCoroutineScope()
 
         // Ingredient checklist ordered by SECTION (in step order) then by GROUP within.
         // Each block = (sectionName? , [ (groupLabel, [ingredients]) ]). Section names are
         // null for single-section recipes (no redundant sub-header). Ingredients with no/unknown
-        // section fall into a trailing "Other" block.
+        // section fall into a trailing "Other" block. While editing we show every draft
+        // ingredient (no substitute/optional filtering).
+        val ingredientSource = if (editing) recipe.ingredients else state.visibleIngredients
         val ingredientBlocks: List<Pair<String?, List<Pair<String, List<Ingredient>>>>> =
-            remember(recipe, state.visibleIngredients) {
+            remember(recipe, ingredientSource) {
                 val multiSection = recipe.sections.size > 1
                 fun groupsOf(ings: List<Ingredient>) =
                     ings.groupBy { it.groupLabel ?: "" }.toList()
                         .map { (label, list) -> label to list.sortedBy { it.orderIndex } }
 
                 val blocks = mutableListOf<Pair<String?, List<Pair<String, List<Ingredient>>>>>()
-                val bySection = state.visibleIngredients.groupBy { it.sectionId }
+                val bySection = ingredientSource.groupBy { it.sectionId }
                 recipe.sections.sortedBy { it.orderIndex }.forEach { section ->
                     val ings = bySection[section.id].orEmpty()
                     if (ings.isNotEmpty()) {
@@ -322,7 +362,7 @@ fun RecipeDetailScreen(
                     }
                 }
                 val knownSectionIds = recipe.sections.map { it.id }.toSet()
-                val orphan = state.visibleIngredients.filter {
+                val orphan = ingredientSource.filter {
                     it.sectionId == null || it.sectionId !in knownSectionIds
                 }
                 if (orphan.isNotEmpty()) {
@@ -382,25 +422,23 @@ fun RecipeDetailScreen(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(bottom = 32.dp)
         ) {
-            // ── Inline edit mode: render the editable draft and stop (keys match view mode
-            //    for header/steps so scroll position is preserved across the toggle). ──
-            val draft = state.draft
-            if (state.isEditMode && draft != null) {
-                recipeEditItems(draft, viewModel, onDeleteRecipe = { showDeleteDialog = true })
-                return@LazyColumn
-            }
-
             // ── Header ─────────────────────────────────────────────
             item(key = "header") {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    Text(recipe.title, style = MaterialTheme.typography.headlineLarge)
-                    recipe.description?.let {
-                        Spacer(Modifier.height(6.dp))
-                        Text(it, style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // Title + description — tappable in edit mode (opens the recipe-details sheet).
+                    Column(Modifier.editable(editing, 0) { editTarget = EditTarget.Details }) {
+                        Text(
+                            recipe.title.ifBlank { "Untitled recipe" },
+                            style = MaterialTheme.typography.headlineLarge,
+                        )
+                        recipe.description?.let {
+                            Spacer(Modifier.height(6.dp))
+                            Text(it, style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
-                    // Visibility chip — only shown to the recipe owner (Private / Co-Chefs / Public)
-                    if (state.isOwner) {
+                    // Visibility chip — only shown to the recipe owner; hidden while editing.
+                    if (state.isOwner && !editing) {
                         Spacer(Modifier.height(10.dp))
                         val (visIcon, visLabel) = when (state.visibility) {
                             "public"  -> Icons.Default.Public to "Public"
@@ -438,7 +476,7 @@ fun RecipeDetailScreen(
                     // ── Variation selector ──────────────────────────────
                     // Shows the base + its variations as switchable chips, plus an
                     // "Add variation" chip for the owner (up to MAX_VARIANTS).
-                    if (state.variants.size > 1 || state.canAddVariant) {
+                    if ((state.variants.size > 1 || state.canAddVariant) && !editing) {
                         Spacer(Modifier.height(10.dp))
                         Row(
                             modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -472,7 +510,8 @@ fun RecipeDetailScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .editable(editing, 1) { editTarget = EditTarget.Details },
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -486,6 +525,15 @@ fun RecipeDetailScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
+                    if (editing) {
+                        // No scaler while editing — the yield value is edited via the details sheet.
+                        val yieldText = if (recipe.baseServingsMin != null && recipe.baseServingsMax != null)
+                            "${recipe.baseServingsMin}–${recipe.baseServingsMax}" else recipe.baseServings.toString()
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Yield ", style = MaterialTheme.typography.labelMedium)
+                            Text(yieldText, style = MaterialTheme.typography.titleLarge)
+                        }
+                    } else
                     // Servings adjuster
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Yield ", style = MaterialTheme.typography.labelMedium)
@@ -539,23 +587,25 @@ fun RecipeDetailScreen(
             if (recipe.sourceUrls.isNotEmpty()) {
                 item {
                     val context = LocalContext.current
-                    SectionHeader("Sources")
-                    recipe.sourceUrls.forEach { url ->
-                        Text(
-                            text = "• $url",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
-                            modifier = Modifier
-                                .padding(horizontal = 16.dp, vertical = 2.dp)
-                                .clickable {
-                                    val intent = android.content.Intent(
-                                        android.content.Intent.ACTION_VIEW,
-                                        android.net.Uri.parse(url)
-                                    )
-                                    context.startActivity(intent)
-                                }
-                        )
+                    Column(Modifier.editable(editing, 2) { editTarget = EditTarget.Details }) {
+                        SectionHeader("Sources")
+                        recipe.sourceUrls.forEach { url ->
+                            Text(
+                                text = "• $url",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                                modifier = Modifier
+                                    .padding(horizontal = 16.dp, vertical = 2.dp)
+                                    .then(if (editing) Modifier else Modifier.clickable {
+                                        val intent = android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse(url)
+                                        )
+                                        context.startActivity(intent)
+                                    })
+                            )
+                        }
                     }
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 }
@@ -566,7 +616,7 @@ fun RecipeDetailScreen(
                 .filter { it.substituteGroupId != null }
                 .groupBy { it.substituteGroupId!! }
 
-            if (substituteGroups.isNotEmpty()) {
+            if (substituteGroups.isNotEmpty() && !editing) {
                 item { SectionHeader("Options") }
                 substituteGroups.forEach { (groupId, options) ->
                     item {
@@ -593,11 +643,11 @@ fun RecipeDetailScreen(
                 ) {
                     Text("Ingredients", style = MaterialTheme.typography.headlineMedium)
 
-                    // Unit toggle — only shown when at least one ingredient has conversions
+                    // Unit toggle — only shown when at least one ingredient has conversions; hidden while editing
                     val hasConversions = recipe.ingredients.any {
                         it.quantityValueMetric != null || it.quantityValueImperial != null
                     }
-                    if (hasConversions) {
+                    if (hasConversions && !editing) {
                         SingleChoiceSegmentedButtonRow {
                             UnitMode.entries.forEachIndexed { index, mode ->
                                 SegmentedButton(
@@ -624,6 +674,7 @@ fun RecipeDetailScreen(
             }
 
             ingredientBlocks.forEach { (sectionName, groups) ->
+                val blockSectionId = groups.flatMap { it.second }.firstOrNull()?.sectionId
                 if (sectionName != null) {
                     item {
                         Text(
@@ -645,14 +696,26 @@ fun RecipeDetailScreen(
                             )
                         }
                     }
-                    items(ings, key = { it.id }) { ing ->
-                        IngredientRow(
-                            ingredient = ing,
-                            scaledQty = QuantityScaler.scale(ing, state.scaleFactor, selectedUnit),
-                            isOptional = ing.isOptional,
-                            isOptionalEnabled = ing.id in state.enabledOptionals,
-                            onToggleOptional = { viewModel.toggleOptional(ing.id) }
-                        )
+                    itemsIndexed(ings, key = { _, it -> it.id }) { idx, ing ->
+                        Box(
+                            Modifier.editable(editing, idx) {
+                                editTarget = EditTarget.Ingredient(ing.sectionId ?: blockSectionId ?: "", ing.id)
+                            }
+                        ) {
+                            IngredientRow(
+                                ingredient = ing,
+                                scaledQty = QuantityScaler.scale(ing, effScale, effUnit),
+                                isOptional = ing.isOptional,
+                                isOptionalEnabled = ing.id in state.enabledOptionals,
+                                onToggleOptional = { viewModel.toggleOptional(ing.id) },
+                                editing = editing,
+                            )
+                        }
+                    }
+                }
+                if (editing && blockSectionId != null) {
+                    item(key = "add-ing-$blockSectionId") {
+                        GhostAddRow("Add ingredient") { editTarget = EditTarget.Ingredient(blockSectionId, null) }
                     }
                 }
             }
@@ -669,7 +732,8 @@ fun RecipeDetailScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                            .editable(editing, 0) { editTarget = EditTarget.Section(section.id) },
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -678,13 +742,15 @@ fun RecipeDetailScreen(
                             style = MaterialTheme.typography.headlineMedium,
                             modifier = Modifier.weight(1f, fill = false)
                         )
-                        TextButton(onClick = {
-                            cookingStartSectionId = section.id
-                            showCookingMode = true
-                        }) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Cook", style = MaterialTheme.typography.labelMedium)
+                        if (!editing) {
+                            TextButton(onClick = {
+                                cookingStartSectionId = section.id
+                                showCookingMode = true
+                            }) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Cook", style = MaterialTheme.typography.labelMedium)
+                            }
                         }
                     }
                 }
@@ -692,13 +758,24 @@ fun RecipeDetailScreen(
                     .filter { it.sectionId == section.id }
                     .sortedBy { it.orderIndex }
 
-                items(sectionSteps, key = { it.id }) { step ->
-                    StepRow(
-                        step = step,
-                        stepNumber = step.orderIndex + 1,
-                        recipe = recipe,
-                        state = state
-                    )
+                itemsIndexed(sectionSteps, key = { _, it -> it.id }) { idx, step ->
+                    Box(
+                        Modifier.editable(editing, idx) {
+                            editTarget = EditTarget.Step(section.id, step.id)
+                        }
+                    ) {
+                        StepRow(
+                            step = step,
+                            stepNumber = step.orderIndex + 1,
+                            recipe = recipe,
+                            state = state,
+                        )
+                    }
+                }
+                if (editing) {
+                    item(key = "add-step-${section.id}") {
+                        GhostAddRow("Add step") { editTarget = EditTarget.Step(section.id, null) }
+                    }
                 }
             }
 
@@ -712,12 +789,30 @@ fun RecipeDetailScreen(
                 }
             }
 
-            item {
+            // ── Edit-only footer: add section + delete recipe ──
+            if (editing) {
+                item(key = "add-section") {
+                    GhostAddRow("Add section") { editTarget = EditTarget.Section(null) }
+                }
+                item(key = "delete-recipe") {
+                    OutlinedButton(
+                        onClick = { showDeleteDialog = true },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) {
+                        Icon(Icons.Default.DeleteForever, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp)); Text("Delete recipe")
+                    }
+                }
+                item(key = "edit-bottom-spacer") { Spacer(Modifier.height(80.dp)) }
+            }
+
+            if (!editing) item {
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             }
 
             // ── Notes ───────────────────────────────────────────────
-            item {
+            if (!editing) item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -732,7 +827,7 @@ fun RecipeDetailScreen(
                 }
             }
 
-            if (showNoteInput) {
+            if (showNoteInput && !editing) {
                 item {
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                         OutlinedTextField(
@@ -755,11 +850,11 @@ fun RecipeDetailScreen(
                 }
             }
 
-            items(state.notes, key = { it.id }) { note ->
+            if (!editing) items(state.notes, key = { it.id }) { note ->
                 NoteRow(note = note, onDelete = { viewModel.deleteNote(note.id) })
             }
 
-            if (state.notes.isEmpty() && !showNoteInput) {
+            if (state.notes.isEmpty() && !showNoteInput && !editing) {
                 item {
                     Text(
                         "No notes yet. Tap + to add one.",
@@ -771,7 +866,7 @@ fun RecipeDetailScreen(
             }
 
             // ── Comments (shown when recipe is shared — Co-Chefs or Public) ──────────────
-            if (state.isPublished) {
+            if (state.isPublished && !editing) {
                 item {
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     Row(
@@ -849,6 +944,13 @@ fun RecipeDetailScreen(
 
                 item { Spacer(Modifier.height(16.dp)) }
             }
+        }
+
+        // ── Per-item edit bottom sheet (opened by tapping a jiggling element) ──
+        val sheetTarget = editTarget
+        val sheetDraft = state.draft
+        if (editing && sheetTarget != null && sheetDraft != null) {
+            EditBottomSheet(sheetTarget, sheetDraft, viewModel) { editTarget = null }
         }
     }
 
@@ -1418,6 +1520,23 @@ private fun SectionHeader(title: String) {
     )
 }
 
+/** Faint "＋ Add …" row shown only in edit mode, appended below a list (existing rows untouched). */
+@Composable
+private fun GhostAddRow(label: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+    }
+}
+
 /** A selectable row in the visibility chooser dialog (Private / Co-Chefs / Public). */
 @Composable
 private fun VisibilityOption(
@@ -1477,17 +1596,19 @@ private fun IngredientRow(
     scaledQty: String,
     isOptional: Boolean,
     isOptionalEnabled: Boolean,
-    onToggleOptional: () -> Unit
+    onToggleOptional: () -> Unit,
+    editing: Boolean = false,
 ) {
     // Display-only row. The checkable list lives on the Shopping List screen now;
-    // optional ingredients keep their enable/disable switch (it affects scaling).
+    // optional ingredients keep their enable/disable switch (it affects scaling). In edit
+    // mode the switch is suppressed so the whole row taps through to the edit sheet.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (isOptional) {
+        if (isOptional && !editing) {
             Switch(
                 checked = isOptionalEnabled,
                 onCheckedChange = { onToggleOptional() },

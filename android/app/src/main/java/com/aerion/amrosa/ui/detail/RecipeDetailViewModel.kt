@@ -593,6 +593,8 @@ class RecipeDetailViewModel(
 
     // Sections
     fun addSection() = updateDraft { it.copy(sections = it.sections + EditorSection(name = "New Section")) }
+    /** Add a section with a given name (used by the section edit sheet's "Add"). */
+    fun addSection(name: String) = updateDraft { it.copy(sections = it.sections + EditorSection(name = name.trim().ifBlank { "New Section" })) }
     fun updateSectionName(sectionId: String, name: String) = transformSection(sectionId) { it.copy(name = name) }
     fun deleteSection(sectionId: String) = updateDraft { d ->
         val section = d.sections.find { it.id == sectionId } ?: return@updateDraft d
@@ -608,6 +610,9 @@ class RecipeDetailViewModel(
 
     // Ingredients
     fun addIngredient(sectionId: String) = transformSection(sectionId) { it.copy(ingredients = it.ingredients + EditorIngredient()) }
+    /** Append a fully-specified ingredient (used by the ingredient edit sheet in "new" mode). */
+    fun addIngredient(sectionId: String, ingredient: EditorIngredient) =
+        transformSection(sectionId) { it.copy(ingredients = it.ingredients + ingredient) }
     fun updateIngredient(sectionId: String, updated: EditorIngredient) =
         transformSection(sectionId) { it.copy(ingredients = it.ingredients.map { i -> if (i.id == updated.id) updated else i }) }
     fun deleteIngredient(sectionId: String, ingredientId: String) = updateDraft { d ->
@@ -627,6 +632,9 @@ class RecipeDetailViewModel(
 
     // Steps
     fun addStep(sectionId: String) = transformSection(sectionId) { it.copy(steps = it.steps + EditorStep()) }
+    /** Append a fully-specified step (used by the step edit sheet in "new" mode). */
+    fun addStep(sectionId: String, step: EditorStep) =
+        transformSection(sectionId) { it.copy(steps = it.steps + step) }
     fun updateStep(sectionId: String, updated: EditorStep) =
         transformSection(sectionId) { it.copy(steps = it.steps.map { s -> if (s.id == updated.id) updated else s }) }
     fun deleteStep(sectionId: String, stepId: String) = updateDraft { d ->
@@ -853,4 +861,54 @@ class RecipeDetailViewModel(
                     RecipeDetailViewModel(repository, authRepository, sharedRecipeService, socialRepository, syncService, recipeId, gson) as T
             }
     }
+}
+
+/**
+ * Render the live edit [EditDraft] as a [Recipe] so the detail screen's normal view composables
+ * can display it unchanged while editing (edits reflect immediately). [base] supplies the fields
+ * the draft doesn't track (ids, image, timestamps, scaling anchor). Quantities are shown at 1×.
+ */
+internal fun EditDraft.toPreviewRecipe(base: Recipe): Recipe {
+    val sections = this.sections.mapIndexed { idx, s -> RecipeSection(id = s.id, name = s.name, orderIndex = idx) }
+    val ingredients = this.sections.flatMap { s ->
+        s.ingredients.mapIndexed { idx, ing ->
+            Ingredient(
+                id = ing.id, sectionId = s.id, name = ing.name,
+                quantityValue = ing.quantityValue,
+                quantityUnit = ing.quantityUnit.ifBlank { null },
+                quantityDisplay = ing.quantityDisplay.ifBlank { null },
+                quantityValueMetric = ing.quantityValueMetric, quantityUnitMetric = ing.quantityUnitMetric,
+                quantityDisplayMetric = ing.quantityDisplayMetric,
+                quantityValueImperial = ing.quantityValueImperial, quantityUnitImperial = ing.quantityUnitImperial,
+                quantityDisplayImperial = ing.quantityDisplayImperial,
+                quantityValueMax = ing.quantityValueMax, quantityValueMaxMetric = ing.quantityValueMaxMetric,
+                quantityValueMaxImperial = ing.quantityValueMaxImperial,
+                groupLabel = ing.groupLabel.ifBlank { null }, isOptional = ing.isOptional,
+                substituteGroupId = ing.substituteGroupId, substituteRatio = ing.substituteRatio,
+                orderIndex = idx, shoppingNote = ing.shoppingNote.ifBlank { null },
+            )
+        }
+    }
+    var stepOrder = 0
+    val steps = this.sections.flatMap { s ->
+        s.steps.map { st ->
+            Step(
+                id = st.id, sectionId = s.id, instruction = st.instruction, orderIndex = stepOrder++,
+                ingredientRefs = st.ingredientIds.map { StepIngredientRef(it, null) },
+            )
+        }
+    }
+    return base.copy(
+        title = this.title,
+        description = this.description.ifBlank { null },
+        sourceUrls = this.sourceUrlsText.lines().map { it.trim() }.filter { it.isNotBlank() },
+        baseServings = this.baseServings.toIntOrNull() ?: 1,
+        baseServingsMin = if (this.isRangeYield) this.baseServingsMin.toIntOrNull() else null,
+        baseServingsMax = if (this.isRangeYield) this.baseServingsMax.toIntOrNull() else null,
+        prepTimeMinutes = this.prepTimeMinutes.toIntOrNull(),
+        cookTimeMinutes = this.cookTimeMinutes.toIntOrNull(),
+        tags = this.tagsText.split(",").map { it.trim() }.filter { it.isNotBlank() },
+        sections = sections, ingredients = ingredients, steps = steps,
+        variantName = if (this.isVariant) this.variantName else base.variantName,
+    )
 }
