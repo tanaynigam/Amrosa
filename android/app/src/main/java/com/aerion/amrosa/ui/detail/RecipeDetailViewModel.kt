@@ -4,14 +4,23 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aerion.amrosa.data.auth.AuthRepository
-import com.aerion.amrosa.data.local.entity.RecipeNoteEntity
+import com.aerion.amrosa.data.local.entity.*
+import com.aerion.amrosa.data.remote.RecipeSyncService
 import com.aerion.amrosa.data.remote.SharedRecipeService
 import com.aerion.amrosa.data.remote.SocialRepository
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.domain.model.*
+import com.aerion.amrosa.ui.edit.EditorIngredient
+import com.aerion.amrosa.ui.edit.EditorSection
+import com.aerion.amrosa.ui.edit.EditorStep
+import com.google.firebase.functions.FirebaseFunctions
+import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /** One member of a recipe's variation family (the base or a variation). */
@@ -20,6 +29,27 @@ data class VariantRef(
     val label: String,
     val isCurrent: Boolean,
     val isBase: Boolean,
+)
+
+/** Editable draft used by the inline edit mode on the detail screen. */
+data class EditDraft(
+    val title: String = "",
+    val description: String = "",
+    val prepTimeMinutes: String = "",
+    val cookTimeMinutes: String = "",
+    val baseServings: String = "1",
+    val isRangeYield: Boolean = false,
+    val baseServingsMin: String = "",
+    val baseServingsMax: String = "",
+    val tagsText: String = "",          // comma-separated
+    val sourceUrlsText: String = "",    // newline-separated
+    val isPersonalAuthor: Boolean = false,
+    val isVariant: Boolean = false,
+    val variantName: String = "",
+    val sections: List<EditorSection> = emptyList(),
+    val deletedSectionIds: List<String> = emptyList(),
+    val deletedIngredientIds: List<String> = emptyList(),
+    val deletedStepIds: List<String> = emptyList(),
 )
 
 data class RecipeDetailUiState(
@@ -52,6 +82,16 @@ data class RecipeDetailUiState(
     val canAddVariant: Boolean = false,
     /** Non-null for one frame after a variation is created → screen navigates to its editor. */
     val createdVariantId: String? = null,
+    // ── Inline edit mode ──
+    val isEditMode: Boolean = false,
+    val draft: EditDraft? = null,
+    val isSavingEdit: Boolean = false,
+    val editError: String? = null,
+    val isConverting: Boolean = false,
+    val conversionMessage: String? = null,
+    val isDeleting: Boolean = false,
+    val deleteComplete: Boolean = false,
+    val variantCount: Int = 0,
 ) {
     val isPublic: Boolean get() = recipe?.visibility == "public"
 
@@ -124,7 +164,9 @@ class RecipeDetailViewModel(
     private val authRepository: AuthRepository,
     private val sharedRecipeService: SharedRecipeService,
     private val socialRepository: SocialRepository,
-    private val recipeId: String
+    private val syncService: RecipeSyncService,
+    private val recipeId: String,
+    private val gson: Gson,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RecipeDetailUiState())
@@ -452,6 +494,340 @@ class RecipeDetailViewModel(
         viewModelScope.launch { repository.markCooked(recipeId) }
     }
 
+    // ══ Inline edit mode ════════════════════════════════════════════════════════
+    // Ported from the old RecipeEditorViewModel; the detail screen renders this draft
+    // inline so editing keeps scroll context. The draft is built from the current recipe.
+
+    val personalAuthorName: String
+        get() = authRepository.displayName ?: authRepository.email ?: "Me"
+
+    // Originals preserved across an edit (not user-editable)
+    private var editScaleIngredientId: String? = null
+    private var editScaleStep: Double = 1.0
+    private var editImageUrl: String? = null
+    private var editCreatedAt: Long = 0L
+    private var editIsImported: Boolean = false
+    private var editVersion: Int = 1
+    private var editChangeLog: List<RecipeChange> = emptyList()
+    private var editAuthorId: String? = null
+    private var editVisibility: String = "private"
+    private var editParentRecipeId: String? = null
+
+    fun enterEdit() {
+        val recipe = _uiState.value.recipe ?: return
+        if (!_uiState.value.isOwner) return
+        editScaleIngredientId = recipe.scaleIngredientId
+        editScaleStep = recipe.scaleStep
+        editImageUrl = recipe.imageUrl
+        editCreatedAt = recipe.createdAt
+        editIsImported = recipe.isImported
+        editVersion = recipe.version
+        editChangeLog = recipe.changeLog
+        editAuthorId = recipe.authorId ?: authRepository.uid
+        editVisibility = recipe.visibility
+        editParentRecipeId = recipe.parentRecipeId
+
+        val sections = if (recipe.sections.isEmpty()) {
+            listOf(EditorSection(
+                id = "sec-default-${UUID.randomUUID()}", name = "",
+                ingredients = recipe.ingredients.sortedBy { it.orderIndex }.map { it.toEditor() },
+                steps = recipe.steps.sortedBy { it.orderIndex }.map { it.toEditor() }
+            ))
+        } else {
+            recipe.sections.sortedBy { it.orderIndex }.map { section ->
+                EditorSection(
+                    id = section.id, name = section.name,
+                    ingredients = recipe.ingredients.filter { it.sectionId == section.id }
+                        .sortedBy { it.orderIndex }.map { it.toEditor() },
+                    steps = recipe.steps.filter { it.sectionId == section.id }
+                        .sortedBy { it.orderIndex }.map { it.toEditor() }
+                )
+            }
+        }
+        val draft = EditDraft(
+            title = recipe.title,
+            description = recipe.description ?: "",
+            prepTimeMinutes = recipe.prepTimeMinutes?.toString() ?: "",
+            cookTimeMinutes = recipe.cookTimeMinutes?.toString() ?: "",
+            baseServings = recipe.baseServings.toString(),
+            isRangeYield = recipe.baseServingsMin != null,
+            baseServingsMin = recipe.baseServingsMin?.toString() ?: "",
+            baseServingsMax = recipe.baseServingsMax?.toString() ?: "",
+            tagsText = recipe.tags.joinToString(", "),
+            sourceUrlsText = recipe.sourceUrls.joinToString("\n"),
+            isPersonalAuthor = !recipe.isImported,
+            isVariant = recipe.parentRecipeId != null,
+            variantName = recipe.variantName ?: "",
+            sections = sections,
+        )
+        _uiState.update { it.copy(isEditMode = true, draft = draft, editError = null) }
+        viewModelScope.launch {
+            val vc = if (recipe.parentRecipeId == null) repository.getVariants(recipeId).size else 0
+            _uiState.update { it.copy(variantCount = vc) }
+        }
+    }
+
+    fun cancelEdit() = _uiState.update { it.copy(isEditMode = false, draft = null, editError = null) }
+    fun clearEditError() = _uiState.update { it.copy(editError = null) }
+    fun clearConversionMessage() = _uiState.update { it.copy(conversionMessage = null) }
+
+    private fun updateDraft(transform: (EditDraft) -> EditDraft) =
+        _uiState.update { st -> st.draft?.let { st.copy(draft = transform(it)) } ?: st }
+
+    private fun transformSection(sectionId: String, transform: (EditorSection) -> EditorSection) =
+        updateDraft { d -> d.copy(sections = d.sections.map { if (it.id == sectionId) transform(it) else it }) }
+
+    // Metadata
+    fun editTitle(v: String) = updateDraft { it.copy(title = v) }
+    fun editDescription(v: String) = updateDraft { it.copy(description = v) }
+    fun editPrepTime(v: String) = updateDraft { it.copy(prepTimeMinutes = v.filter(Char::isDigit)) }
+    fun editCookTime(v: String) = updateDraft { it.copy(cookTimeMinutes = v.filter(Char::isDigit)) }
+    fun editBaseServings(v: String) = updateDraft { it.copy(baseServings = v.filter(Char::isDigit)) }
+    fun editIsRangeYield(v: Boolean) = updateDraft { it.copy(isRangeYield = v) }
+    fun editBaseServingsMin(v: String) = updateDraft { it.copy(baseServingsMin = v.filter(Char::isDigit)) }
+    fun editBaseServingsMax(v: String) = updateDraft { it.copy(baseServingsMax = v.filter(Char::isDigit)) }
+    fun editTags(v: String) = updateDraft { it.copy(tagsText = v) }
+    fun editSourceUrls(v: String) = updateDraft { it.copy(sourceUrlsText = v) }
+    fun editIsPersonalAuthor(v: Boolean) = updateDraft { it.copy(isPersonalAuthor = v) }
+    fun editVariantName(v: String) = updateDraft { it.copy(variantName = v.take(MAX_VARIANT_NAME_LEN)) }
+
+    // Sections
+    fun addSection() = updateDraft { it.copy(sections = it.sections + EditorSection(name = "New Section")) }
+    fun updateSectionName(sectionId: String, name: String) = transformSection(sectionId) { it.copy(name = name) }
+    fun deleteSection(sectionId: String) = updateDraft { d ->
+        val section = d.sections.find { it.id == sectionId } ?: return@updateDraft d
+        d.copy(
+            sections = d.sections.filter { it.id != sectionId },
+            deletedSectionIds = d.deletedSectionIds + sectionId,
+            deletedIngredientIds = d.deletedIngredientIds + section.ingredients.map { it.id },
+            deletedStepIds = d.deletedStepIds + section.steps.map { it.id },
+        )
+    }
+    fun moveSectionUp(sectionId: String) = updateDraft { it.copy(sections = it.sections.moved(sectionId, { s -> s.id }, -1)) }
+    fun moveSectionDown(sectionId: String) = updateDraft { it.copy(sections = it.sections.moved(sectionId, { s -> s.id }, +1)) }
+
+    // Ingredients
+    fun addIngredient(sectionId: String) = transformSection(sectionId) { it.copy(ingredients = it.ingredients + EditorIngredient()) }
+    fun updateIngredient(sectionId: String, updated: EditorIngredient) =
+        transformSection(sectionId) { it.copy(ingredients = it.ingredients.map { i -> if (i.id == updated.id) updated else i }) }
+    fun deleteIngredient(sectionId: String, ingredientId: String) = updateDraft { d ->
+        d.copy(
+            sections = d.sections.map { s ->
+                s.copy(
+                    ingredients = if (s.id == sectionId) s.ingredients.filter { it.id != ingredientId } else s.ingredients,
+                    // also unlink from any step that used it
+                    steps = s.steps.map { st -> st.copy(ingredientIds = st.ingredientIds - ingredientId) },
+                )
+            },
+            deletedIngredientIds = d.deletedIngredientIds + ingredientId,
+        )
+    }
+    fun moveIngredientUp(sectionId: String, id: String) = transformSection(sectionId) { it.copy(ingredients = it.ingredients.moved(id, { i -> i.id }, -1)) }
+    fun moveIngredientDown(sectionId: String, id: String) = transformSection(sectionId) { it.copy(ingredients = it.ingredients.moved(id, { i -> i.id }, +1)) }
+
+    // Steps
+    fun addStep(sectionId: String) = transformSection(sectionId) { it.copy(steps = it.steps + EditorStep()) }
+    fun updateStep(sectionId: String, updated: EditorStep) =
+        transformSection(sectionId) { it.copy(steps = it.steps.map { s -> if (s.id == updated.id) updated else s }) }
+    fun deleteStep(sectionId: String, stepId: String) = updateDraft { d ->
+        d.copy(
+            sections = d.sections.map { s -> if (s.id == sectionId) s.copy(steps = s.steps.filter { it.id != stepId }) else s },
+            deletedStepIds = d.deletedStepIds + stepId,
+        )
+    }
+    fun moveStepUp(sectionId: String, id: String) = transformSection(sectionId) { it.copy(steps = it.steps.moved(id, { s -> s.id }, -1)) }
+    fun moveStepDown(sectionId: String, id: String) = transformSection(sectionId) { it.copy(steps = it.steps.moved(id, { s -> s.id }, +1)) }
+
+    /** #4 — set which ingredients a step uses (drives the cooking-mode card). */
+    fun toggleStepIngredient(sectionId: String, stepId: String, ingredientId: String) =
+        transformSection(sectionId) { s ->
+            s.copy(steps = s.steps.map { st ->
+                if (st.id != stepId) st
+                else st.copy(ingredientIds = if (ingredientId in st.ingredientIds) st.ingredientIds - ingredientId else st.ingredientIds + ingredientId)
+            })
+        }
+
+    fun saveEdit() {
+        val draft = _uiState.value.draft ?: return
+        val title = draft.title.trim()
+        if (title.isBlank()) { _uiState.update { it.copy(editError = "Title cannot be empty") }; return }
+        _uiState.update { it.copy(isSavingEdit = true, editError = null) }
+        val now = System.currentTimeMillis()
+        val newVersion = editVersion + 1
+        val newChangeLog = editChangeLog + RecipeChange(newVersion, now, "Edited recipe")
+        viewModelScope.launch {
+            try {
+                val recipeEntity = RecipeEntity(
+                    id = recipeId, title = title,
+                    description = draft.description.trim().ifBlank { null },
+                    sourceUrls = gson.toJson(draft.sourceUrlsText.lines().map { it.trim() }.filter { it.isNotBlank() }),
+                    baseServings = draft.baseServings.toIntOrNull() ?: 1,
+                    baseServingsMin = if (draft.isRangeYield) draft.baseServingsMin.toIntOrNull() else null,
+                    baseServingsMax = if (draft.isRangeYield) draft.baseServingsMax.toIntOrNull() else null,
+                    scaleIngredientId = editScaleIngredientId,
+                    scaleStep = editScaleStep,
+                    prepTimeMinutes = draft.prepTimeMinutes.toIntOrNull(),
+                    cookTimeMinutes = draft.cookTimeMinutes.toIntOrNull(),
+                    imageUrl = editImageUrl,
+                    tags = gson.toJson(draft.tagsText.split(",").map { it.trim() }.filter { it.isNotBlank() }),
+                    isCustomized = true,
+                    isImported = !draft.isPersonalAuthor,
+                    version = newVersion,
+                    changeLog = gson.toJson(newChangeLog),
+                    createdAt = editCreatedAt,
+                    updatedAt = now,
+                    syncedAt = null,
+                    authorId = editAuthorId,
+                    authorDisplayName = if (draft.isPersonalAuthor) (authRepository.displayName ?: authRepository.email) else "Imported",
+                    visibility = editVisibility,
+                    parentRecipeId = editParentRecipeId,
+                    variantName = if (editParentRecipeId != null) draft.variantName.trim().ifBlank { "Variation" } else null,
+                )
+                val sectionEntities = draft.sections.mapIndexed { idx, s ->
+                    RecipeSectionEntity(id = s.id, recipeId = recipeId, name = s.name.trim(), orderIndex = idx)
+                }
+                val ingredientEntities = draft.sections.flatMap { s ->
+                    s.ingredients.mapIndexed { idx, ing ->
+                        IngredientEntity(
+                            id = ing.id, recipeId = recipeId, sectionId = s.id, name = ing.name.trim(),
+                            quantityValue = ing.quantityValue,
+                            quantityUnit = ing.quantityUnit.trim().ifBlank { null },
+                            quantityDisplay = ing.quantityDisplay.trim().ifBlank { null },
+                            groupLabel = ing.groupLabel.trim().ifBlank { null },
+                            isOptional = ing.isOptional,
+                            substituteGroupId = ing.substituteGroupId,
+                            substituteRatio = ing.substituteRatio,
+                            orderIndex = idx,
+                            quantityValueMetric = ing.quantityValueMetric, quantityUnitMetric = ing.quantityUnitMetric,
+                            quantityDisplayMetric = ing.quantityDisplayMetric,
+                            quantityValueImperial = ing.quantityValueImperial, quantityUnitImperial = ing.quantityUnitImperial,
+                            quantityDisplayImperial = ing.quantityDisplayImperial,
+                            shoppingNote = ing.shoppingNote.trim().ifBlank { null },
+                        )
+                    }
+                }
+                val stepEntities = draft.sections.flatMap { s ->
+                    s.steps.mapIndexed { idx, step ->
+                        StepEntity(id = step.id, recipeId = recipeId, sectionId = s.id, instruction = step.instruction.trim(), orderIndex = idx)
+                    }
+                }
+                val ingredientById = draft.sections.flatMap { it.ingredients }.associateBy { it.id }
+                val refs = draft.sections.flatMap { s ->
+                    s.steps.flatMap { step ->
+                        step.ingredientIds.mapNotNull { ingId ->
+                            val ing = ingredientById[ingId] ?: return@mapNotNull null
+                            StepIngredientRefEntity(stepId = step.id, ingredientId = ingId,
+                                quantityDisplay = ing.quantityDisplay.trim().ifBlank { null })
+                        }
+                    }
+                }
+                withContext(Dispatchers.IO) {
+                    repository.updateFullRecipe(
+                        recipe = recipeEntity, sections = sectionEntities, ingredients = ingredientEntities,
+                        steps = stepEntities, refs = refs,
+                        deletedSectionIds = draft.deletedSectionIds,
+                        deletedIngredientIds = draft.deletedIngredientIds,
+                        deletedStepIds = draft.deletedStepIds,
+                    )
+                }
+                if (!editIsImported) {
+                    viewModelScope.launch(Dispatchers.IO) { syncService.pushPersonalRecipe(recipeId) }
+                }
+                if (editVisibility == "friends" || editVisibility == "public") {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        repository.getRecipeWithDetails(recipeId)?.let { sharedRecipeService.publish(it) }
+                    }
+                }
+                // Exit edit mode; the Room-Flow observer reloads the fresh recipe into view.
+                _uiState.update { it.copy(isSavingEdit = false, isEditMode = false, draft = null) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isSavingEdit = false, editError = "Save failed: ${e.message}") }
+            }
+        }
+    }
+
+    // ── Update conversions (Gemini) ─────────────────────────────────────────────
+    private val functions by lazy { FirebaseFunctions.getInstance("us-central1") }
+
+    fun updateConversions() {
+        val draft = _uiState.value.draft ?: return
+        val ingredients = draft.sections.flatMap { it.ingredients }
+        if (ingredients.isEmpty()) return
+        _uiState.update { it.copy(isConverting = true) }
+        viewModelScope.launch {
+            try {
+                val payload = ingredients.map { hashMapOf("id" to it.id, "name" to it.name, "quantityDisplay" to it.quantityDisplay) }
+                @Suppress("UNCHECKED_CAST")
+                val data = withContext(Dispatchers.IO) {
+                    functions.getHttpsCallable("convertIngredients").call(hashMapOf("ingredients" to payload)).await().getData()
+                } as? Map<String, Any?>
+                val byId = ((data?.get("ingredients") as? List<*>)?.filterIsInstance<Map<String, Any?>>() ?: emptyList())
+                    .associateBy { it["id"] as? String }
+                updateDraft { d ->
+                    d.copy(sections = d.sections.map { sec ->
+                        sec.copy(ingredients = sec.ingredients.map { ing ->
+                            val r = byId[ing.id] ?: return@map ing
+                            ing.copy(
+                                quantityValueMetric = (r["quantityValueMetric"] as? Number)?.toDouble(),
+                                quantityUnitMetric = r["quantityUnitMetric"] as? String,
+                                quantityDisplayMetric = r["quantityDisplayMetric"] as? String,
+                                quantityValueImperial = (r["quantityValueImperial"] as? Number)?.toDouble(),
+                                quantityUnitImperial = r["quantityUnitImperial"] as? String,
+                                quantityDisplayImperial = r["quantityDisplayImperial"] as? String,
+                            )
+                        })
+                    })
+                }
+                _uiState.update { it.copy(isConverting = false, conversionMessage = "Conversions updated") }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isConverting = false, conversionMessage = "Conversion failed: ${e.message}") }
+            }
+        }
+    }
+
+    // ── Delete recipe (cascade variations) ──────────────────────────────────────
+    fun deleteRecipe() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDeleting = true) }
+            withContext(Dispatchers.IO) {
+                if (editParentRecipeId == null) {
+                    repository.getVariants(recipeId).forEach { variant ->
+                        repository.deleteFullRecipe(variant.id)
+                        syncService.deletePersonalRecipe(variant.id)
+                        if (variant.visibility == "public") sharedRecipeService.unpublish(variant.id)
+                    }
+                }
+                repository.deleteFullRecipe(recipeId)
+                syncService.deletePersonalRecipe(recipeId)
+                if (editVisibility == "public") sharedRecipeService.unpublish(recipeId)
+            }
+            _uiState.update { it.copy(isDeleting = false, deleteComplete = true) }
+        }
+    }
+
+    // ── Editor mappings ─────────────────────────────────────────────────────────
+    private fun Ingredient.toEditor() = EditorIngredient(
+        id = id, name = name,
+        quantityDisplay = quantityDisplay ?: "", quantityUnit = quantityUnit ?: "",
+        groupLabel = groupLabel ?: "", isOptional = isOptional,
+        quantityValue = quantityValue, substituteGroupId = substituteGroupId, substituteRatio = substituteRatio,
+        quantityValueMetric = quantityValueMetric, quantityUnitMetric = quantityUnitMetric, quantityDisplayMetric = quantityDisplayMetric,
+        quantityValueImperial = quantityValueImperial, quantityUnitImperial = quantityUnitImperial, quantityDisplayImperial = quantityDisplayImperial,
+        shoppingNote = shoppingNote ?: "",
+    )
+
+    private fun Step.toEditor() = EditorStep(
+        id = id, instruction = instruction,
+        ingredientIds = ingredientRefs.map { it.ingredientId },
+    )
+
+    private fun <T> List<T>.moved(id: String, idOf: (T) -> String, direction: Int): List<T> {
+        val idx = indexOfFirst { idOf(it) == id }
+        val newIdx = idx + direction
+        if (idx < 0 || newIdx !in indices) return this
+        return toMutableList().also { val item = it.removeAt(idx); it.add(newIdx, item) }
+    }
+
     companion object {
         const val MAX_VARIANTS = 4
         const val MAX_VARIANT_NAME_LEN = 20
@@ -461,12 +837,14 @@ class RecipeDetailViewModel(
             authRepository: AuthRepository,
             sharedRecipeService: SharedRecipeService,
             socialRepository: SocialRepository,
-            recipeId: String
+            syncService: RecipeSyncService,
+            recipeId: String,
+            gson: Gson,
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    RecipeDetailViewModel(repository, authRepository, sharedRecipeService, socialRepository, recipeId) as T
+                    RecipeDetailViewModel(repository, authRepository, sharedRecipeService, socialRepository, syncService, recipeId, gson) as T
             }
     }
 }

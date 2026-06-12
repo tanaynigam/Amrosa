@@ -27,7 +27,6 @@ import com.aerion.amrosa.ui.account.AccountScreen
 import com.aerion.amrosa.ui.auth.AuthScreen
 import com.aerion.amrosa.ui.detail.RecipeDetailScreen
 import com.aerion.amrosa.ui.discover.DiscoverScreen
-import com.aerion.amrosa.ui.edit.RecipeEditorScreen
 import com.aerion.amrosa.ui.freeform.FreeformEntryScreen
 import com.aerion.amrosa.ui.home.HomeScreen
 import com.aerion.amrosa.ui.home.RecipeFilter
@@ -250,7 +249,7 @@ private fun MainAppScaffold() {
             composable("freeform") {
                 FreeformEntryScreen(
                     onBack = { navController.popBackStack() },
-                    onEditClick = { recipeId -> navController.navigate("recipe/edit/$recipeId") }
+                    onEditClick = { recipeId -> navController.navigate("recipe/$recipeId?startEdit=true") }
                 )
             }
 
@@ -268,25 +267,29 @@ private fun MainAppScaffold() {
                 ImportScreen(
                     onBack = { navController.popBackStack() },
                     onRecipeClick = { recipeId -> navController.navigate("recipe/$recipeId") },
-                    onEditClick = { recipeId -> navController.navigate("recipe/edit/$recipeId") },
+                    onEditClick = { recipeId -> navController.navigate("recipe/$recipeId?startEdit=true") },
                     reviewRecipeId = reviewId
                 )
             }
 
-            // ── Recipe detail (owner / Room-based) ────────────────────────────
+            // ── Recipe detail (owner / Room-based) — inline edit via ?startEdit ──
             composable(
-                route = "recipe/{recipeId}",
-                arguments = listOf(navArgument("recipeId") { type = NavType.StringType })
+                route = "recipe/{recipeId}?startEdit={startEdit}",
+                arguments = listOf(
+                    navArgument("recipeId") { type = NavType.StringType },
+                    navArgument("startEdit") { type = NavType.BoolType; defaultValue = false }
+                )
             ) { backStackEntry ->
                 val recipeId = backStackEntry.arguments?.getString("recipeId") ?: return@composable
+                val startEdit = backStackEntry.arguments?.getBoolean("startEdit") ?: false
                 RecipeDetailScreen(
                     recipeId = recipeId,
                     onBack = { navController.popBackStack() },
-                    onEditClick = { navController.navigate("recipe/edit/$recipeId") },
+                    startEdit = startEdit,
                     // Switch to another variation in the family.
                     onOpenRecipe = { id -> navController.navigate("recipe/$id") },
-                    // Open the editor for a freshly-created variation.
-                    onEditRecipe = { id -> navController.navigate("recipe/edit/$id") },
+                    // Open a freshly-created variation in inline edit mode.
+                    onEditRecipe = { id -> navController.navigate("recipe/$id?startEdit=true") },
                     // Open the combined shopping list at the current scale.
                     onShoppingClick = { servings, anchor ->
                         val a = anchor?.toString() ?: ""
@@ -331,24 +334,6 @@ private fun MainAppScaffold() {
                 )
             }
 
-            // ── Recipe editor ─────────────────────────────────────────────────
-            composable(
-                route = "recipe/edit/{recipeId}",
-                arguments = listOf(navArgument("recipeId") { type = NavType.StringType })
-            ) { backStackEntry ->
-                val recipeId = backStackEntry.arguments?.getString("recipeId") ?: return@composable
-                RecipeEditorScreen(
-                    recipeId = recipeId,
-                    onBack = { navController.popBackStack() },
-                    // On delete, pop the editor AND the underlying detail screen (which now
-                    // shows a deleted recipe), landing back on the recipe list. Falls back to
-                    // a single pop when there's no detail behind us (e.g. freeform/import edit).
-                    onDeleted = {
-                        val popped = navController.popBackStack("recipe/$recipeId", inclusive = true)
-                        if (!popped) navController.popBackStack()
-                    }
-                )
-            }
         }
     }
 }

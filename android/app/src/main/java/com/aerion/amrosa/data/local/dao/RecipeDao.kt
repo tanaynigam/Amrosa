@@ -173,6 +173,7 @@ abstract class RecipeDao {
         sections: List<RecipeSectionEntity>,
         ingredients: List<IngredientEntity>,
         steps: List<StepEntity>,
+        refs: List<StepIngredientRefEntity>,
         deletedSectionIds: List<String>,
         deletedIngredientIds: List<String>,
         deletedStepIds: List<String>
@@ -189,6 +190,9 @@ abstract class RecipeDao {
         insertSections(sections)
         insertIngredients(ingredients)
         insertSteps(steps)
+        // Rewrite step→ingredient refs from scratch (the editor now manages them).
+        deleteStepRefsForRecipe(recipe.id)
+        insertStepRefs(refs)
     }
 
     /**

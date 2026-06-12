@@ -404,28 +404,34 @@ Freeform flow passes `null` for `onIsOwnRecipeChange` — author toggle is hidde
 
 ---
 
-### F4 — Recipe Editor
+### F4 — Inline Recipe Editing (F14 — replaced the separate editor)
 
-Full inline editor. Entry points: pencil icon on detail screen; Edit button on review sheet.
+There is **no separate edit page**. The recipe **detail screen has a global Edit toggle**: the pencil
+(owners only) flips the *same* screen into edit mode **in place, preserving scroll** — the one
+`LazyColumn` + `rememberLazyListState` renders read-only or editable variants of each item, with
+**stable keys** (header, ingredient ids, step ids) so toggling at step 3 leaves you on step 3, now
+editable. Save ✓ + Cancel ✕ live in the pinned top bar (Cancel is the nav X). No navigation on toggle.
 
-- **Fork dialog** when editing a seeded or shared-copied recipe (becomes a personal copy)
-- Editable fields: title, description, prep/cook times, yield (single or range), tags, source URLs, **author (dropdown)**, **variation name (only for variations — see F10)**, sections, ingredients (name, quantity display, unit, group label, optional flag), steps
-- Every save increments `version`, appends `RecipeChange`, pushes to `personal_recipes/{uid}/recipes/`
-- **Delete returns to the recipe list** (pops past the detail screen). Deleting a **base** recipe **cascade-deletes its variations** (confirmation copy notes the count).
-
-#### Author dropdown (editor)
-
-The author field is an **`ExposedDropdownMenuBox`** with two options:
-- **Imported** — saves `isImported = true`, `authorDisplayName = "Imported"`. Default for any recipe opened from an URL/file import.
-- **Personal — [User's Name]** — saves `isImported = false`, `authorDisplayName = authRepository.displayName ?: email`. Default for freeform-typed recipes.
-
-Changing the dropdown on save also updates `isImported` in Room, keeping the My Recipes filter chips in sync.
-
-`RecipeEditorViewModel` exposes:
-- `val personalAuthorName: String` — the signed-in user's display name (used for the "Personal" option label)
-- `updateIsPersonalAuthor(Boolean)` — updates `EditorUiState.isPersonalAuthor`
-
-**Preserved on save (not exposed in UI):** `originalAuthorId`, `originalVisibility`, `originalParentRecipeId`. When forking a seeded recipe (`authorId == null`), stamps the current user's UID as `authorId`.
+- **All editing logic lives in `RecipeDetailViewModel`** (ported from the deleted `RecipeEditorViewModel`):
+  `isEditMode` + an `EditDraft` (metadata + `List<EditorSection>` from `ui/edit/EditorModels.kt`) +
+  `enterEdit()`/`cancelEdit()`/`saveEdit()` + per-field/section/ingredient/step **update/add/delete/move**
+  ops. The draft is built from the *currently loaded* recipe (fresh via the Room-Flow refresh); `saveEdit`
+  maps it to entities, `version++`, appends `RecipeChange`, `repository.updateFullRecipe(...)`, pushes to
+  `personal_recipes`, and re-publishes the mirror if the recipe is friends/public. Exiting edit lets the
+  Room-Flow observer reload the view.
+- The inline edit UI is `ui/detail/RecipeEditContent.kt` (`LazyListScope.recipeEditItems`): editable
+  metadata card (title, description, **author dropdown**, variation name, prep/cook, yield range,
+  tags, source URLs, "Update unit conversions"), per-section ingredient rows (name/qty/unit/group/optional/
+  shopping-note, add/delete/move), per-step rows (instruction, add/delete/move) + a **"Uses ingredients"
+  chip picker (F4 step-ingredient editing)**, add-section, and Delete-recipe (cascades variations).
+- **Step→ingredient refs** are now editable + persisted: `EditorStep.ingredientIds`; `replaceFullRecipe`/
+  `updateFullRecipe` rewrite `step_ingredient_refs` (delete-all + insert from the draft; ref display
+  defaults to the ingredient's). This is what cooking mode shows inline.
+- **Entry points → inline edit**: detail pencil (in-screen, no nav); import/freeform "Edit" + a newly
+  created variation navigate to `recipe/{id}?startEdit=true` (a one-shot `startEdit` nav arg that calls
+  `enterEdit()` on load). This retired the old `recipe/edit/{id}` route + `RecipeEditorScreen`.
+- **Author dropdown** unchanged in behavior: Imported (`isImported=true`, name "Imported") vs
+  Personal (`isImported=false`, real name); `personalAuthorName` getter on the VM.
 
 ---
 
@@ -486,7 +492,7 @@ Gemini's imperial fields are **zeroed in `validateRecipe()`** before `computeImp
 
 For recipes that predate conversions or have stale ones, the **Recipe Editor** has an **"Update unit conversions"** button:
 - `convertIngredients` Cloud Function: input `{ ingredients: [{id, name, quantityDisplay}] }`. Gemini produces **metric** per ingredient — **weight (g/kg) for dry/solid items using density** (so imperial becomes oz/lb), **volume (ml/L) for liquids** (imperial becomes fl oz). `computeImperialFromMetric` then fills imperial. Output `{ ingredients: [{id + 6 conversion fields}] }`.
-- `RecipeEditorViewModel.updateConversions()` calls it and merges results into editor state; the user then **Saves** to persist (push to cloud + re-publish if public).
+- `RecipeDetailViewModel.updateConversions()` (inline edit mode) calls it and merges results into the edit draft; the user then **Saves** to persist (push to cloud + re-publish if public).
 - Button is placed **directly above the ingredients/sections** in the editor (after the metadata card).
 - **`EditorIngredient` carries the 6 conversion fields** and the save mapping writes them — fixing a prior bug where editing a recipe wiped its conversions.
 - **Note:** after conversion, a dry ingredient's *Metric* column is weight-based (e.g. flour `120 g`, not `480 ml`) since imperial-as-weight (oz/lb) requires metric-as-weight. Original column is unchanged.
@@ -1128,7 +1134,8 @@ RecipeDetailScreen  (pushed route "recipe/{recipeId}")
   │           Option A (default): "Send to follower" → FollowerPickerSheet
   │           Option B: "Share link" → if public: Android share sheet with HTTPS URL
   │                                    if private: publish dialog → setVisibility("public") → share sheet
-  │     [Edit pencil] → RecipeEditorScreen
+  │     [Edit pencil] → flips THIS screen into inline edit mode (no nav; scroll preserved).
+  │         Top bar becomes Save ✓ + Cancel ✕; items render editable variants (F4/F14).
   ├── Visibility FilterChip in body (owner only): 🔒 Private | 🌐 Public
   │     Confirms before toggling; public → comments section shown
   └── Comments section (when recipe is public)
@@ -1152,18 +1159,15 @@ ReceivedRecipeScreen  (pushed route "received/{shareId}") — review screen
         → new Room copy (new UUIDs) with authorId=currentUid, isImported=false, visibility=private
         → popBackStack() to Shared tab (card stays in feed; copy now in My Recipes)
 
-RecipeEditorScreen  (pushed route "recipe/edit/{recipeId}")
-  ├── Fork dialog (seeded/shared-copied recipes)
-  ├── Metadata: title, description, times, yield (single/range), tags, URLs
-  ├── Author dropdown (ExposedDropdownMenuBox):
-  │     [Imported]  — isImported=true, authorDisplayName="Imported"
-  │     [Personal — Name]  — isImported=false, authorDisplayName=user's name
-  │     Default: Imported for imported recipes; Personal for freeform recipes
-  ├── Sections with ingredients + steps (add/reorder/delete)
-  ├── Save → Room (updates isImported + authorDisplayName) + push to personal_recipes Firestore
-  ├── "Variation name" field (with n/20 counter) — shown only for variations (F10)
-  └── "Delete Recipe" button (red outlined, bottom) → confirmation dialog → deleteFullRecipe()
-        → returns to the recipe LIST (base delete cascades to variations)
+Inline edit mode (NO separate route — F4/F14, ui/detail/RecipeEditContent.kt)
+  ├── Entered via the detail pencil, or arriving with ?startEdit=true (import/freeform/new variation)
+  ├── Same LazyColumn/scroll; editable items: metadata card (title/desc/author dropdown/variation
+  │     name/times/yield range/tags/URLs/"Update unit conversions"), per-section ingredient rows
+  │     (qty/unit/group/optional/shopping-note + add/delete/move), per-step rows (instruction +
+  │     add/delete/move + "Uses ingredients" chip picker = F4 step refs), add-section
+  ├── Save ✓ (top bar) → updateFullRecipe (version++, push, re-publish if shared) → back to view
+  ├── Cancel ✕ (nav) → discard draft
+  └── "Delete recipe" (bottom) → confirm (cascades variations) → leaves the recipe
 
 ShoppingListScreen  (pushed route "shopping/{recipeId}?servings=&anchor=")
   ├── Combined checklist: ingredients merged by name, quantities summed (ShoppingAggregator)
@@ -1263,6 +1267,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F13 — Discover Phase 2 (popularity)** | `saveCount`/`likeCount` on `shared_recipes` via 4 Admin-SDK Cloud Functions (received-save & like triggers); likes (`setLiked`/`likeStateFlow`) with ❤ on the review screen + read-only counts on the owner's detail; popularity term in the ranker + a "Popular" shelf (recent ∪ popular). **Android only** (iOS pending). Needs index `shared_recipes (visibility, saveCount desc)`. |
 | **F13 — Discover Phase 3a (search)** | Cross-scope search bar (own>friends>public, deduped): own/friends client-side `contains`; public via `searchTokens` array on `shared_recipes` + `searchPublicRecipes` (array-contains + client refine), debounced. Backfill script for existing mirrors. **Android only** (iOS pending). Needs index `shared_recipes (visibility, searchTokens)`. |
 | **F13 — Discover Phase 3b (polish)** | Public chef profiles via user search (`ProfileViewModel` resolves co-chef vs public via `getFollowStatus`); explicit cuisine prefs (`UserPreferences`) overriding affinity, edited in Account; `CompactSearchField` (shorter); pull-to-refresh; **Discover promoted to the default tab**. **Android only** (iOS pending). |
+| **F14 — Inline recipe editing** | Replaced the separate `RecipeEditorScreen` with a **global Edit toggle on the detail screen** that edits in place, preserving scroll (one LazyColumn, matching keys). All editing logic ported into `RecipeDetailViewModel` (`EditDraft`); new `RecipeEditContent.kt`. Adds **step-ingredient editing** (refs now rewritten by `updateFullRecipe`) and retires the import→edit→save redirect bug. `?startEdit` nav arg; `recipe/edit` route + editor screen deleted. **Android only** (iOS keeps its editor). |
 | **F8 — Share button** | Top bar icon (owners only); if public → Android share sheet with `amrosa://shared/{id}`; if private → dialog → publish → share sheet |
 | **F8 — Deep links + App Links** | HTTPS App Links (`https://amrosa-2ec82.web.app/shared/{id}`) + `amrosa://` fallback; `assetlinks.json` in Firebase Hosting; `navDeepLink` for both patterns in NavGraph |
 | **F8 — Firebase Hosting** | `shared.html` recipe viewer (browser fallback); `index.html` landing page; deployed at `amrosa-2ec82.web.app` |
@@ -1485,7 +1490,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 - **Auth gate**: `AmrosaNavGraph` collects `authStateFlow()`. `isSignedIn = currentUser?.isAnonymous == false`. When false → renders `AuthScreen()` (root, no back). When true → renders `MainAppScaffold()`.
 - **MainAppScaffold** is a separate private composable with its own `rememberNavController()`. Created fresh on each sign-in.
 - Tab routes: `"yours_tab"`, `"shared_tab"`, `"discover_tab"`, `"account_tab"` (All tab removed)
-- Push routes: `"recipe/{recipeId}"`, `"recipe/edit/{recipeId}"`, `"shared/{recipeId}"`, `"freeform"`, `"import?reviewId={reviewId}"`, `"user_search"`, `"friends"`, `"received/{shareId}"` (the `"notifications"` route is removed — push is OS-level via FCM)
+- Push routes: `"recipe/{recipeId}?startEdit={bool}"` (inline edit, no separate edit route), `"shared/{recipeId}"`, `"freeform"`, `"import?reviewId={reviewId}"`, `"profile/{uid}?name="`, `"profileRecipe/..."`, `"shopping/..."`, `"user_search"`, `"friends"`, `"received/{shareId}"` (the `"notifications"` route is removed — push is OS-level via FCM)
 - The `"auth"` route is **removed** from the nav graph — auth is handled at the outer `AmrosaNavGraph` level.
 - Import route uses optional query param `reviewId`; default empty string, treated as null in screen.
 - `showBottomBar` is true only when `currentDestination?.route` is one of the 4 tab routes.
@@ -1525,7 +1530,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 - **Merged share button**: single Share icon → `ShareOptionsSheet` with "Send to co-chef" and "Share link".
 - **Shared tab (Tab 2, `SharedInboxScreen`)** = inbox of received recipes as full recipe cards. Load from `shared_to/{uid}/recipes/` — NOT `shared_recipes` community collection. The same feed is reachable via the My Recipes "Shared" filter chip (`HomeViewModel` loads it via `getReceivedRecipesSummaryFlow()` only when `filter == YOURS`).
 - **`HomeViewModel`** — `YourRecipesFilter` enum now `{ ALL, PERSONAL, IMPORTED, SHARED }`. `filteredRecipes` returns empty in SHARED mode; `filteredSharedRecipes` returns the shared feed (search-filtered) only in SHARED mode. Switching chip resets `selectedCategory`.
-- **Delete recipe**: `RecipeEditorViewModel.deleteRecipe()` calls `repository.deleteFullRecipe(recipeId)` on IO dispatcher, sets `deleteComplete = true` → screen navigates back.
+- **Delete recipe**: `RecipeDetailViewModel.deleteRecipe()` (inline edit mode) cascades variations, calls `repository.deleteFullRecipe`, removes the cloud copy + unpublishes mirror, sets `deleteComplete = true` → screen pops back.
 
 ### AppContainer
 - `clearAllLocalData(context: Context)` — `database.clearAllTables()` + clears `amrosa_sync` prefs. Called on sign-out.

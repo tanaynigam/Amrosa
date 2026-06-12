@@ -59,11 +59,12 @@ class RecipeRepository(
         sections: List<RecipeSectionEntity>,
         ingredients: List<IngredientEntity>,
         steps: List<StepEntity>,
+        refs: List<StepIngredientRefEntity>,
         deletedSectionIds: List<String>,
         deletedIngredientIds: List<String>,
         deletedStepIds: List<String>
     ) = recipeDao.replaceFullRecipe(
-        recipe, sections, ingredients, steps,
+        recipe, sections, ingredients, steps, refs,
         deletedSectionIds, deletedIngredientIds, deletedStepIds
     )
 

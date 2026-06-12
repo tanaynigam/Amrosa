@@ -40,7 +40,7 @@ import java.util.*
 fun RecipeDetailScreen(
     recipeId: String,
     onBack: () -> Unit,
-    onEditClick: () -> Unit = {},
+    startEdit: Boolean = false,
     onOpenRecipe: (String) -> Unit = {},
     onEditRecipe: (String) -> Unit = {},
     onShoppingClick: (servings: Int, anchorQty: Double?) -> Unit = { _, _ -> },
@@ -54,7 +54,9 @@ fun RecipeDetailScreen(
             authRepository = app.container.authRepository,
             sharedRecipeService = app.container.sharedRecipeService,
             socialRepository = app.container.socialRepository,
-            recipeId = recipeId
+            syncService = app.container.syncService,
+            recipeId = recipeId,
+            gson = app.container.gson,
         )
     )
     val state by viewModel.uiState.collectAsState()
@@ -81,7 +83,48 @@ fun RecipeDetailScreen(
     var pendingShareRecipient by remember { mutableStateOf<Pair<String, String>?>(null) }
     // Confirm dialog for removing a received recipe from Tab 2
     var showRemoveDialog by remember { mutableStateOf(false) }
+    // Inline-edit delete-recipe confirmation
+    var showDeleteDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Open in edit mode once when arrived via ?startEdit (import/freeform/variant). One-shot.
+    var startEditConsumed by remember { mutableStateOf(false) }
+    LaunchedEffect(startEdit, state.recipe, state.isOwner) {
+        if (startEdit && !startEditConsumed && state.recipe != null && state.isOwner && !state.isEditMode) {
+            startEditConsumed = true
+            viewModel.enterEdit()
+        }
+    }
+
+    // After delete completes, leave the recipe.
+    LaunchedEffect(state.deleteComplete) { if (state.deleteComplete) onBack() }
+
+    // Edit error + conversion snackbars
+    LaunchedEffect(state.editError) {
+        state.editError?.let { snackbarHostState.showSnackbar(it); viewModel.clearEditError() }
+    }
+    LaunchedEffect(state.conversionMessage) {
+        state.conversionMessage?.let { snackbarHostState.showSnackbar(it); viewModel.clearConversionMessage() }
+    }
+
+    // Delete-recipe confirm (inline edit)
+    if (showDeleteDialog) {
+        val vc = state.variantCount
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Delete Recipe?") },
+            text = {
+                val note = if (vc > 0) " and its $vc variation${if (vc == 1) "" else "s"}" else ""
+                Text("\"${state.recipe?.title ?: ""}\"$note will be permanently deleted. This cannot be undone.")
+            },
+            confirmButton = {
+                Button(onClick = { showDeleteDialog = false; viewModel.deleteRecipe() },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") } }
+        )
+    }
 
     // Cooking-mode step checklist: ticked ingredient ids, scoped to this recipe screen so it
     // clears automatically when you leave the recipe (session-only, never persisted).
@@ -189,45 +232,57 @@ fun RecipeDetailScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text(state.recipe?.title ?: "", maxLines = 1) },
+                title = { Text(if (state.isEditMode) "Editing" else state.recipe?.title ?: "", maxLines = 1) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    if (state.isEditMode) {
+                        IconButton(onClick = viewModel::cancelEdit) {
+                            Icon(Icons.Default.Close, contentDescription = "Cancel edit")
+                        }
+                    } else {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
                 },
                 actions = {
-                    if (state.isReceived) {
+                    if (state.isEditMode) {
+                        // Edit mode — only Save (Cancel is the nav X). Stays pinned as you scroll.
+                        if (state.isSavingEdit) {
+                            CircularProgressIndicator(modifier = Modifier.size(36.dp).padding(end = 12.dp), strokeWidth = 2.dp)
+                        } else {
+                            TextButton(onClick = viewModel::saveEdit) {
+                                Text("Save", style = MaterialTheme.typography.labelLarge)
+                            }
+                        }
+                    } else if (state.isReceived) {
                         // Received recipe (Tab 2) — read-only: only Remove + Cooking Mode
                         IconButton(onClick = { showRemoveDialog = true }) {
                             Icon(Icons.Default.Delete, contentDescription = "Remove from my recipes")
                         }
+                        IconButton(onClick = { cookingStartSectionId = null; showCookingMode = true }) {
+                            Icon(Icons.Default.MenuBook, contentDescription = "Cooking Mode")
+                        }
                     } else {
-                        // My recipe — share (owners) + edit
                         if (state.isOwner) {
                             IconButton(
-                                onClick = {
-                                    viewModel.loadFollowing()
-                                    showShareOptions = true
-                                },
+                                onClick = { viewModel.loadFollowing(); showShareOptions = true },
                                 enabled = !state.isVisibilityUpdating
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = "Share recipe")
                             }
+                            IconButton(onClick = { viewModel.enterEdit() }) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit Recipe")
+                            }
                         }
-                        IconButton(onClick = onEditClick) {
-                            Icon(Icons.Default.Edit, contentDescription = "Edit Recipe")
+                        IconButton(onClick = {
+                            onShoppingClick(state.selectedServings,
+                                if (state.usesAnchorScaling) state.scaleAnchorQty else null)
+                        }) {
+                            Icon(Icons.Default.ShoppingCart, contentDescription = "Shopping List")
                         }
-                    }
-                    IconButton(onClick = {
-                        onShoppingClick(
-                            state.selectedServings,
-                            if (state.usesAnchorScaling) state.scaleAnchorQty else null
-                        )
-                    }) {
-                        Icon(Icons.Default.ShoppingCart, contentDescription = "Shopping List")
-                    }
-                    IconButton(onClick = { cookingStartSectionId = null; showCookingMode = true }) {
-                        Icon(Icons.Default.MenuBook, contentDescription = "Cooking Mode")
+                        IconButton(onClick = { cookingStartSectionId = null; showCookingMode = true }) {
+                            Icon(Icons.Default.MenuBook, contentDescription = "Cooking Mode")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -327,6 +382,14 @@ fun RecipeDetailScreen(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(bottom = 32.dp)
         ) {
+            // ── Inline edit mode: render the editable draft and stop (keys match view mode
+            //    for header/steps so scroll position is preserved across the toggle). ──
+            val draft = state.draft
+            if (state.isEditMode && draft != null) {
+                recipeEditItems(draft, viewModel, onDeleteRecipe = { showDeleteDialog = true })
+                return@LazyColumn
+            }
+
             // ── Header ─────────────────────────────────────────────
             item(key = "header") {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
