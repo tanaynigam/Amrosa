@@ -52,4 +52,5 @@ class AppContainer(context: Context) {
     val syncService = RecipeSyncService(context, repository, authRepository, gson)
     val sharedRecipeService = SharedRecipeService(authRepository, gson)
     val socialRepository = SocialRepository(authRepository)
+    val userPreferences = com.aerion.amrosa.data.UserPreferences(context)
 }

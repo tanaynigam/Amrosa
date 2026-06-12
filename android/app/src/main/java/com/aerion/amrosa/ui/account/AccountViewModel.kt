@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -31,7 +32,10 @@ data class AccountUiState(
     /** uid of pending accept/decline action. */
     val pendingFollowAction: String? = null,
     /** Non-null for one snackbar display after a successful name update. */
-    val nameUpdateMessage: String? = null
+    val nameUpdateMessage: String? = null,
+    // F13 — explicit cuisine preferences (override Discover's implicit affinity)
+    val availableCuisines: List<String> = emptyList(),
+    val selectedCuisines: Set<String> = emptySet(),
 )
 
 class AccountViewModel(
@@ -57,6 +61,33 @@ class AccountViewModel(
         }
         loadStats()
         observeSocial()
+        loadCuisinePrefs()
+    }
+
+    private val userPreferences
+        get() = (context.applicationContext as AmrosaApplication).container.userPreferences
+
+    private fun loadCuisinePrefs() {
+        viewModelScope.launch {
+            val selected = userPreferences.cuisinePreferences()
+            val ownTags = withContext(Dispatchers.IO) {
+                runCatching { repository.getAllRecipes().first().flatMap { it.tags } }.getOrDefault(emptyList())
+            }
+            val available = (CURATED_CUISINES + ownTags)
+                .map { it.trim() }.filter { it.isNotBlank() }
+                .filter { it.lowercase() !in com.aerion.amrosa.ui.discover.MealClassifier.allMealKeywords }
+                .distinctBy { it.lowercase() }
+                .sortedBy { it.lowercase() }
+            _uiState.update { it.copy(availableCuisines = available, selectedCuisines = selected) }
+        }
+    }
+
+    /** Toggle a cuisine preference and persist it. */
+    fun toggleCuisine(cuisine: String) {
+        val key = cuisine.lowercase()
+        val updated = _uiState.value.selectedCuisines.let { if (key in it) it - key else it + key }
+        _uiState.update { it.copy(selectedCuisines = updated) }
+        userPreferences.setCuisinePreferences(updated)
     }
 
     private fun observeSocial() {
@@ -151,6 +182,11 @@ class AccountViewModel(
     }
 
     companion object {
+        private val CURATED_CUISINES = listOf(
+            "Indian", "Italian", "Mexican", "Chinese", "Thai", "Japanese",
+            "American", "Mediterranean", "French", "Korean", "Middle Eastern"
+        )
+
         fun factory(
             authRepository: AuthRepository,
             repository: RecipeRepository,

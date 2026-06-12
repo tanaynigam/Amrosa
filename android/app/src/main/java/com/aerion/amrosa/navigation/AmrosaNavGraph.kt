@@ -119,7 +119,7 @@ private fun MainAppScaffold() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = BottomTab.Yours.route,
+            startDestination = BottomTab.Discover.route,
             modifier = Modifier.padding(innerPadding)
         ) {
             // ── Tab: Your Recipes ─────────────────────────────────────────────

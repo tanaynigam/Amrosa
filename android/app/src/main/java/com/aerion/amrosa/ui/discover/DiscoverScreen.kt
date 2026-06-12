@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +34,7 @@ fun DiscoverScreen(
             app.container.socialRepository,
             app.container.sharedRecipeService,
             app.container.authRepository,
+            app.container.userPreferences,
         )
     )
     val state by vm.uiState.collectAsState()
@@ -93,25 +95,31 @@ fun DiscoverScreen(
                         CircularProgressIndicator()
                     }
                     state.shelves.isEmpty() -> EmptyState()
-                    else -> LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp)
+                    else -> PullToRefreshBox(
+                        isRefreshing = state.isRefreshing,
+                        onRefresh = vm::refresh,
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        items(state.shelves, key = { it.title }) { shelf ->
-                            Column {
-                                Text(
-                                    shelf.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                                )
-                                LazyRow(
-                                    contentPadding = PaddingValues(horizontal = 16.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    items(shelf.recipes, key = { it.recipeId }) { r ->
-                                        DiscoverCard(r, onClick = { onRecipeClick(r) })
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(20.dp)
+                        ) {
+                            items(state.shelves, key = { it.title }) { shelf ->
+                                Column {
+                                    Text(
+                                        shelf.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                                    )
+                                    LazyRow(
+                                        contentPadding = PaddingValues(horizontal = 16.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        items(shelf.recipes, key = { it.recipeId }) { r ->
+                                            DiscoverCard(r, onClick = { onRecipeClick(r) })
+                                        }
                                     }
                                 }
                             }

@@ -27,7 +27,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AccountScreen(
     onSignInClick: () -> Unit = {},
@@ -250,6 +250,27 @@ fun AccountScreen(
                     }
                 }
 
+                HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+            }
+
+            // ── Recipe preferences (Discover affinity) ────────────────────────
+            if (state.availableCuisines.isNotEmpty()) {
+                AccountSectionHeader("Recipe preferences")
+                Text(
+                    "Pick cuisines you love — Discover recommends more of them. Leave empty to learn from your recipes.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.availableCuisines.forEach { cuisine ->
+                        FilterChip(
+                            selected = cuisine.lowercase() in state.selectedCuisines,
+                            onClick = { viewModel.toggleCuisine(cuisine) },
+                            label = { Text(cuisine) }
+                        )
+                    }
+                }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
             }
 

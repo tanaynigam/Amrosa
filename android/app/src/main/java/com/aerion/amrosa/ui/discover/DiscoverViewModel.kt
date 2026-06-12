@@ -3,6 +3,7 @@ package com.aerion.amrosa.ui.discover
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.aerion.amrosa.data.UserPreferences
 import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.remote.SharedRecipeService
 import com.aerion.amrosa.data.remote.SocialRepository
@@ -24,6 +25,8 @@ data class DiscoverUiState(
     val shelves: List<DiscoverShelf> = emptyList(),
     /** Ranked, meal-appropriate pool used by "Surprise me". */
     val surprisePool: List<DiscoverRecipe> = emptyList(),
+    /** Pull-to-refresh in progress (distinct from the initial full-screen load). */
+    val isRefreshing: Boolean = false,
     // F13 Phase 3a — cross-scope search
     val searchQuery: String = "",
     val searchResults: List<DiscoverRecipe> = emptyList(),
@@ -35,6 +38,7 @@ class DiscoverViewModel(
     private val socialRepository: SocialRepository,
     private val sharedRecipeService: SharedRecipeService,
     private val authRepository: AuthRepository,
+    private val userPreferences: UserPreferences,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DiscoverUiState())
@@ -45,13 +49,13 @@ class DiscoverViewModel(
     private var friendCandidatesCache: List<DiscoverRecipe> = emptyList()
     private var searchJob: Job? = null
 
-    init { load() }
+    init { load(isRefresh = false) }
 
-    fun refresh() = load()
+    fun refresh() = load(isRefresh = true)
 
-    private fun load() {
+    private fun load(isRefresh: Boolean) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.update { if (isRefresh) it.copy(isRefreshing = true) else it.copy(isLoading = true) }
             val now = System.currentTimeMillis()
             val meal = MealClassifier.currentMeal(LocalTime.now().hour)
             val myUid = authRepository.uid
@@ -59,7 +63,9 @@ class DiscoverViewModel(
             // ── Local recipes (your kitchen) ──
             val local = repository.getAllRecipes().first()
             val ownTags = local.flatMap { it.tags }
-            val topCuisines = DiscoverRanker.topCuisines(ownTags)
+            // Explicit cuisine prefs (Account) override the implicit collection-based affinity.
+            val explicit = userPreferences.cuisinePreferences()
+            val topCuisines = explicit.ifEmpty { DiscoverRanker.topCuisines(ownTags) }
             val cookedAt = repository.cookedLogFlow().first()
             val localIds = local.map { it.id }.toSet()
 
@@ -131,7 +137,7 @@ class DiscoverViewModel(
             friendCandidatesCache = friendCandidates
 
             _uiState.update {
-                it.copy(isLoading = false, leadMeal = meal, shelves = shelves,
+                it.copy(isLoading = false, isRefreshing = false, leadMeal = meal, shelves = shelves,
                     surprisePool = leadPool.ifEmpty { all })
             }
         }
@@ -183,10 +189,11 @@ class DiscoverViewModel(
             socialRepository: SocialRepository,
             sharedRecipeService: SharedRecipeService,
             authRepository: AuthRepository,
+            userPreferences: UserPreferences,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                DiscoverViewModel(repository, socialRepository, sharedRecipeService, authRepository) as T
+                DiscoverViewModel(repository, socialRepository, sharedRecipeService, authRepository, userPreferences) as T
         }
     }
 }

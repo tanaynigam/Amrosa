@@ -1014,8 +1014,14 @@ constructs a transient `RecipeDetailUiState` to host Cooking Mode for unsaved re
 - **Backfill**: existing mirrors get tokens via `backend/firestore/backfill-search-tokens.js`
   (run once with the service-account key) — or naturally on the next re-publish.
 
-**Deferred (later phases):** chef search + public profile (`getAuthorRecipes(includeFriendsOnly=false)`);
-explicit cuisine prefs in Account; promoting Discover to the default tab; pull-to-refresh.
+#### Phase 3b — Polish ✅
+- **Explicit cuisine preferences**: `data/UserPreferences.kt` (SharedPreferences `amrosa_prefs`,
+  local-only) stores chosen cuisine tags. Account → "Recipe preferences" = `FilterChip`s (curated
+  list ∪ the user's own tags, minus meal words). When set, they **override** the implicit affinity in
+  `DiscoverViewModel.load` (`explicit.ifEmpty { DiscoverRanker.topCuisines(ownTags) }`). Changing prefs
+  reflects on the next Discover refresh.
+- **Pull-to-refresh**: `PullToRefreshBox` around the Discover shelves → `vm.refresh()` (`isRefreshing` state).
+- **Discover is now the default tab**: `AmrosaNavGraph` `startDestination = BottomTab.Discover.route`.
 
 ---
 
@@ -1256,6 +1262,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F13 — Discover tab (Phase 1)** | Recommendation feed: time-of-day meal shelves, implicit cuisine affinity, source boost (own>friend>public), recency penalty via new `cooked_log` (DB v13). Reuses F12 review screen for view-free/cook/save; `CookingModeScreen` now `internal` + "Done"→`markCooked`. **Android only** (iOS pending). |
 | **F13 — Discover Phase 2 (popularity)** | `saveCount`/`likeCount` on `shared_recipes` via 4 Admin-SDK Cloud Functions (received-save & like triggers); likes (`setLiked`/`likeStateFlow`) with ❤ on the review screen + read-only counts on the owner's detail; popularity term in the ranker + a "Popular" shelf (recent ∪ popular). **Android only** (iOS pending). Needs index `shared_recipes (visibility, saveCount desc)`. |
 | **F13 — Discover Phase 3a (search)** | Cross-scope search bar (own>friends>public, deduped): own/friends client-side `contains`; public via `searchTokens` array on `shared_recipes` + `searchPublicRecipes` (array-contains + client refine), debounced. Backfill script for existing mirrors. **Android only** (iOS pending). Needs index `shared_recipes (visibility, searchTokens)`. |
+| **F13 — Discover Phase 3b (polish)** | Public chef profiles via user search (`ProfileViewModel` resolves co-chef vs public via `getFollowStatus`); explicit cuisine prefs (`UserPreferences`) overriding affinity, edited in Account; `CompactSearchField` (shorter); pull-to-refresh; **Discover promoted to the default tab**. **Android only** (iOS pending). |
 | **F8 — Share button** | Top bar icon (owners only); if public → Android share sheet with `amrosa://shared/{id}`; if private → dialog → publish → share sheet |
 | **F8 — Deep links + App Links** | HTTPS App Links (`https://amrosa-2ec82.web.app/shared/{id}`) + `amrosa://` fallback; `assetlinks.json` in Firebase Hosting; `navDeepLink` for both patterns in NavGraph |
 | **F8 — Firebase Hosting** | `shared.html` recipe viewer (browser fallback); `index.html` landing page; deployed at `amrosa-2ec82.web.app` |
@@ -1291,7 +1298,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | # | Feature | Description |
 |---|---|---|
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil (Android) / AsyncImage (iOS) display. **Both platforms.** Largest remaining feature. |
-| — | Discover tab — later phases | Phases 1 (feed) + 2 (popularity) + 3a (search) + chef search/public profile are DONE on Android (F13). Remaining: explicit **cuisine prefs**; promote Discover to **default tab**; pull-to-refresh. |
+| — | Discover tab | **Fully built on Android (F13):** feed · popularity · search · chef/public profiles · cuisine prefs · pull-to-refresh · default tab. (iOS port pending in the other session.) Future ideas if wanted: ratings, dietary filters, seasonal boosts. |
 | — | Gemini brand/substitute suggestions | The deferred half of F11 — AI-suggested top brands + substitutes per ingredient (author notes already ship). |
 | — | iOS: Universal Links | `apple-app-site-association` file + `Associated Domains` entitlement (Android App Links already done). |
 | — | Shopping list — cross-recipe / standalone | Optional: combine multiple recipes into one shopping trip (current F11 is per-recipe). |
@@ -1389,7 +1396,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 | Gap | Detail |
 |---|---|
 | **F12 — Visibility tiers + Co-Chef profiles** | Android-only. iOS needs: the `"friends"` tier in `setVisibility`/publish (`buildDocument` must write the real `visibility`, not `"public"`); a 3-option visibility chooser; private direct-share → friends; a `ProfileView` from the friends list **and user search** (co-chef vs public resolved via `getFollowStatus` → `getAuthorRecipes(includeFriendsOnly)`); and review/"Add to Shared tab" reuse for `Direct(recipeId, authorUid, authorName)` entry. The Firestore rule + composite index are already deployed (shared infra). |
-| **F13 — Discover tab (Phases 1+2+3a)** | Android-only. iOS needs: a `cooked_log` SwiftData model + `markCooked` on Cooking Mode "Done"; a `MealClassifier`/ranker port (incl. the popularity term); `getPublicRecipeSummaries`/`getPopularPublicRecipes`/`searchPublicRecipes` (reading `saveCount`/`likeCount`/`searchTokens`); `setLiked`/`likeStateFlow` + a ❤ on the review screen; a `DiscoverView` of meal/source/Popular shelves + a cross-scope search bar. The Cloud Functions, rules, indexes, and `searchTokens` in `buildDocument` are already deployed (shared infra). |
+| **F13 — Discover tab (full)** | Android-only. iOS needs the whole feature: a `cooked_log` SwiftData model + `markCooked` on Cooking Mode "Done"; a `MealClassifier`/ranker port (meal + affinity + popularity + recency); `getPublicRecipeSummaries`/`getPopularPublicRecipes`/`searchPublicRecipes` (reading `saveCount`/`likeCount`/`searchTokens`); `setLiked`/`likeStateFlow` + ❤ on the review screen; cuisine prefs (UserPreferences) override; pull-to-refresh; Discover as the default tab; a `DiscoverView` of meal/source/Popular shelves + cross-scope search. The Cloud Functions, rules, indexes, and `searchTokens` in `buildDocument` are already deployed (shared infra). |
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
 
