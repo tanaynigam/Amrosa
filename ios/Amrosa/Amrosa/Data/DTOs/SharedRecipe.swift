@@ -51,6 +51,10 @@ struct SharedIngredient: Identifiable {
     let quantityDisplayImperial: String?
     /// F11 shopping note — travels with the recipe through sharing.
     var shoppingNote: String? = nil
+    // F15 quantity-range upper bounds.
+    var quantityValueMax: Double? = nil
+    var quantityValueMaxMetric: Double? = nil
+    var quantityValueMaxImperial: Double? = nil
 
     var hasConversionData: Bool { quantityValueMetric != nil || quantityValueImperial != nil }
 }

@@ -22,6 +22,11 @@ final class IngredientModel {
     var quantityDisplayImperial: String?
     /// F11: author-entered brand/comment, shown on the Shopping List. Travels with the recipe.
     var shoppingNote: String? = nil
+    // F15 — quantity range upper bounds (e.g. "4–6 cloves"). nil = single value.
+    // Unit/display are shared with the min; only the value scales. Backend supplies the conversions.
+    var quantityValueMax: Double? = nil
+    var quantityValueMaxMetric: Double? = nil
+    var quantityValueMaxImperial: Double? = nil
 
     var recipe: RecipeModel?
     var section: RecipeSectionModel?
@@ -46,7 +51,10 @@ final class IngredientModel {
         quantityValueImperial: Double? = nil,
         quantityUnitImperial: String? = nil,
         quantityDisplayImperial: String? = nil,
-        shoppingNote: String? = nil
+        shoppingNote: String? = nil,
+        quantityValueMax: Double? = nil,
+        quantityValueMaxMetric: Double? = nil,
+        quantityValueMaxImperial: Double? = nil
     ) {
         self.id = id
         self.name = name
@@ -65,6 +73,9 @@ final class IngredientModel {
         self.quantityUnitImperial = quantityUnitImperial
         self.quantityDisplayImperial = quantityDisplayImperial
         self.shoppingNote = shoppingNote
+        self.quantityValueMax = quantityValueMax
+        self.quantityValueMaxMetric = quantityValueMaxMetric
+        self.quantityValueMaxImperial = quantityValueMaxImperial
     }
 
     var hasConversionData: Bool {

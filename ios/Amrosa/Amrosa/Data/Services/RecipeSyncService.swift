@@ -182,6 +182,9 @@ final class RecipeSyncService {
             if let v = ing.quantityUnitImperial    { d["quantityUnitImperial"] = v }
             if let v = ing.quantityDisplayImperial { d["quantityDisplayImperial"] = v }
             if let v = ing.shoppingNote          { d["shoppingNote"] = v }
+            if let v = ing.quantityValueMax         { d["quantityValueMax"] = v }
+            if let v = ing.quantityValueMaxMetric   { d["quantityValueMaxMetric"] = v }
+            if let v = ing.quantityValueMaxImperial { d["quantityValueMaxImperial"] = v }
             return d
         }
 

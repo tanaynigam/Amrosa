@@ -97,38 +97,37 @@ struct CookingModeView: View {
                                 .lineSpacing(6)
                                 .fixedSize(horizontal: false, vertical: true)
 
-                            // Referenced ingredients
-                            let refs = step.ingredientRefs
-                            if !refs.isEmpty {
+                            // Referenced ingredients (augmented: collectively-referenced
+                            // ingredients attach to their section's first step — QOL #3).
+                            let stepIngs = viewModel.cookingStepIngredients[step.id] ?? []
+                            if !stepIngs.isEmpty {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text("Ingredients for this step")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    ForEach(refs) { ref in
-                                        if let ing = ref.ingredient {
-                                            // Tick off ingredients as they're added (session-only;
-                                            // clears when you leave the recipe screen).
-                                            let checked = viewModel.checkedIngredientIds.contains(ing.id)
-                                            Button {
-                                                if checked { viewModel.checkedIngredientIds.remove(ing.id) }
-                                                else { viewModel.checkedIngredientIds.insert(ing.id) }
-                                            } label: {
-                                                HStack {
-                                                    Image(systemName: checked ? "checkmark.square.fill" : "square")
-                                                        .foregroundStyle(checked ? Color.accentColor : Color.secondary)
-                                                    // Unit-aware + scaled (honours the toggle)
-                                                    Text(viewModel.scaledQuantity(for: ing))
-                                                        .fontWeight(.medium)
-                                                    Text(ing.name)
-                                                    Spacer()
-                                                }
-                                                .font(.subheadline)
-                                                .strikethrough(checked)
-                                                .foregroundStyle(checked ? Color.secondary : Color.primary)
-                                                .contentShape(Rectangle())
+                                    ForEach(stepIngs) { ing in
+                                        // Tick off ingredients as they're added (session-only;
+                                        // clears when you leave the recipe screen).
+                                        let checked = viewModel.checkedIngredientIds.contains(ing.id)
+                                        Button {
+                                            if checked { viewModel.checkedIngredientIds.remove(ing.id) }
+                                            else { viewModel.checkedIngredientIds.insert(ing.id) }
+                                        } label: {
+                                            HStack {
+                                                Image(systemName: checked ? "checkmark.square.fill" : "square")
+                                                    .foregroundStyle(checked ? Color.accentColor : Color.secondary)
+                                                // Unit-aware + scaled (honours the toggle)
+                                                Text(viewModel.scaledQuantity(for: ing))
+                                                    .fontWeight(.medium)
+                                                Text(ing.name)
+                                                Spacer()
                                             }
-                                            .buttonStyle(.plain)
+                                            .font(.subheadline)
+                                            .strikethrough(checked)
+                                            .foregroundStyle(checked ? Color.secondary : Color.primary)
+                                            .contentShape(Rectangle())
                                         }
+                                        .buttonStyle(.plain)
                                     }
                                 }
                                 .padding()

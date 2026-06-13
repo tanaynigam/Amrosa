@@ -7,7 +7,7 @@ enum UnitMode: String, CaseIterable {
 }
 
 enum QuantityScaler {
-    // MARK: - Scale ingredient display string
+    // MARK: - Scale ingredient display string (range-aware, F15)
 
     static func scale(
         ingredient: IngredientModel,
@@ -16,29 +16,17 @@ enum QuantityScaler {
     ) -> String {
         switch unitMode {
         case .metric where ingredient.quantityValueMetric != nil:
-            let scaled = (ingredient.quantityValueMetric! * scaleFactor)
-            return formatDisplay(
-                value: scaled,
-                unit: ingredient.quantityUnitMetric,
-                baseDisplay: ingredient.quantityDisplayMetric
-            )
+            return rangeDisplay(min: ingredient.quantityValueMetric, max: ingredient.quantityValueMaxMetric,
+                                unit: ingredient.quantityUnitMetric, baseDisplay: ingredient.quantityDisplayMetric,
+                                scale: scaleFactor)
         case .imperial where ingredient.quantityValueImperial != nil:
-            let scaled = (ingredient.quantityValueImperial! * scaleFactor)
-            return formatDisplay(
-                value: scaled,
-                unit: ingredient.quantityUnitImperial,
-                baseDisplay: ingredient.quantityDisplayImperial
-            )
+            return rangeDisplay(min: ingredient.quantityValueImperial, max: ingredient.quantityValueMaxImperial,
+                                unit: ingredient.quantityUnitImperial, baseDisplay: ingredient.quantityDisplayImperial,
+                                scale: scaleFactor)
         default:
-            if let value = ingredient.quantityValue {
-                let scaled = value * scaleFactor
-                return formatDisplay(
-                    value: scaled,
-                    unit: ingredient.quantityUnit,
-                    baseDisplay: ingredient.quantityDisplay
-                )
-            }
-            return ingredient.quantityDisplay ?? ""
+            return rangeDisplay(min: ingredient.quantityValue, max: ingredient.quantityValueMax,
+                                unit: ingredient.quantityUnit, baseDisplay: ingredient.quantityDisplay,
+                                scale: scaleFactor)
         }
     }
 
@@ -51,17 +39,17 @@ enum QuantityScaler {
     ) -> String {
         switch unitMode {
         case .metric where ingredient.quantityValueMetric != nil:
-            let scaled = ingredient.quantityValueMetric! * scaleFactor
-            return formatDisplay(value: scaled, unit: ingredient.quantityUnitMetric, baseDisplay: ingredient.quantityDisplayMetric)
+            return rangeDisplay(min: ingredient.quantityValueMetric, max: ingredient.quantityValueMaxMetric,
+                                unit: ingredient.quantityUnitMetric, baseDisplay: ingredient.quantityDisplayMetric,
+                                scale: scaleFactor)
         case .imperial where ingredient.quantityValueImperial != nil:
-            let scaled = ingredient.quantityValueImperial! * scaleFactor
-            return formatDisplay(value: scaled, unit: ingredient.quantityUnitImperial, baseDisplay: ingredient.quantityDisplayImperial)
+            return rangeDisplay(min: ingredient.quantityValueImperial, max: ingredient.quantityValueMaxImperial,
+                                unit: ingredient.quantityUnitImperial, baseDisplay: ingredient.quantityDisplayImperial,
+                                scale: scaleFactor)
         default:
-            if let value = ingredient.quantityValue {
-                let scaled = value * scaleFactor
-                return formatDisplay(value: scaled, unit: ingredient.quantityUnit, baseDisplay: ingredient.quantityDisplay)
-            }
-            return ingredient.quantityDisplay ?? ""
+            return rangeDisplay(min: ingredient.quantityValue, max: ingredient.quantityValueMax,
+                                unit: ingredient.quantityUnit, baseDisplay: ingredient.quantityDisplay,
+                                scale: scaleFactor)
         }
     }
 
@@ -73,21 +61,34 @@ enum QuantityScaler {
         quantityDisplay: String?,
         scale: Double
     ) -> String {
-        guard let value = quantityValue else {
-            return quantityDisplay ?? ""
-        }
-        let scaled = value * scale
-        return formatDisplay(value: scaled, unit: quantityUnit, baseDisplay: quantityDisplay)
+        rangeDisplay(min: quantityValue, max: nil, unit: quantityUnit, baseDisplay: quantityDisplay, scale: scale)
+    }
+
+    /// Range-aware (F15): renders "min–max unit" scaling BOTH ends when `max > min`,
+    /// otherwise a single scaled value. Falls back to `quantityDisplay` when `quantityValue` is nil.
+    static func scale(
+        quantityValue: Double?,
+        quantityValueMax: Double?,
+        quantityUnit: String?,
+        quantityDisplay: String?,
+        scale: Double
+    ) -> String {
+        rangeDisplay(min: quantityValue, max: quantityValueMax, unit: quantityUnit, baseDisplay: quantityDisplay, scale: scale)
     }
 
     // MARK: - Private helpers
 
-    private static func formatDisplay(value: Double, unit: String?, baseDisplay: String?) -> String {
-        let formatted = formatValue(value)
-        if let unit = unit, !unit.isEmpty {
-            return "\(formatted) \(unit)"
+    private static func rangeDisplay(min: Double?, max: Double?, unit: String?, baseDisplay: String?, scale: Double) -> String {
+        guard let min = min else { return baseDisplay ?? "" }
+        let minStr = formatValue(min * scale)
+        let number: String
+        if let max = max, max > min {
+            number = "\(minStr)–\(formatValue(max * scale))"
+        } else {
+            number = minStr
         }
-        return formatted
+        if let unit = unit, !unit.isEmpty { return "\(number) \(unit)" }
+        return number
     }
 
     private static func formatValue(_ value: Double) -> String {

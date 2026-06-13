@@ -193,6 +193,43 @@ final class RecipeDetailViewModel {
         recipe.steps.filter { $0.section?.id == section?.id }.sorted { $0.orderIndex < $1.orderIndex }
     }
 
+    /// Ingredients to show per step in cooking mode, with collectively-referenced
+    /// ("add all the paste ingredients") orphans attached to their section's first step.
+    /// Mirrors Android `augmentedStepRefs()`: any ingredient referenced by NO step in its
+    /// section is attached to that section's first step (fallback: the recipe's first step),
+    /// so it still surfaces in cooking mode. A no-op when refs are already complete.
+    var cookingStepIngredients: [String: [IngredientModel]] {
+        let steps = recipe.steps
+        var result: [String: [IngredientModel]] = [:]
+        for step in steps {
+            result[step.id] = step.ingredientRefs.compactMap { $0.ingredient }
+        }
+        let referenced = Set(steps.flatMap { $0.ingredientRefs.compactMap { $0.ingredient?.id } })
+
+        // Distinct section keys (section ids + ingredient sections, including nil).
+        var seenKeys = Set<String>()
+        var sectionKeys: [String?] = []
+        for key in recipe.sections.map({ $0.id as String? }) + recipe.ingredients.map({ $0.section?.id }) {
+            let token = key ?? "__nil__"
+            if seenKeys.insert(token).inserted { sectionKeys.append(key) }
+        }
+
+        let globalFirstStepId = steps.min(by: { $0.orderIndex < $1.orderIndex })?.id
+        for key in sectionKeys {
+            let firstStepId = steps.filter { $0.section?.id == key }
+                .min(by: { $0.orderIndex < $1.orderIndex })?.id ?? globalFirstStepId
+            guard let firstStepId else { continue }
+            let orphans = recipe.ingredients.filter { $0.section?.id == key && !referenced.contains($0.id) }
+            if orphans.isEmpty { continue }
+            var list = result[firstStepId] ?? []
+            for ing in orphans where !list.contains(where: { $0.id == ing.id }) {
+                list.append(ing)
+            }
+            result[firstStepId] = list
+        }
+        return result
+    }
+
     /// Substitute groups — used to render "Options" selectors above ingredients.
     var substituteGroups: [(groupId: String, options: [IngredientModel])] {
         let grouped = Dictionary(grouping: recipe.ingredients.filter { $0.substituteGroupId != nil },

@@ -42,6 +42,10 @@ struct ParsedIngredient: Codable {
     let quantityDisplayImperial: String?
     /// F11 shopping note — set by Firestore pull paths, never by Gemini import/freeform.
     var shoppingNote: String? = nil
+    // F15 quantity-range upper bounds (Gemini sets quantityValueMax on import; backend supplies conversions).
+    var quantityValueMax: Double? = nil
+    var quantityValueMaxMetric: Double? = nil
+    var quantityValueMaxImperial: Double? = nil
 }
 
 struct ParsedStep: Codable {

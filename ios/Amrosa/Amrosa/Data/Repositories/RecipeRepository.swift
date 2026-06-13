@@ -183,7 +183,10 @@ final class RecipeRepository {
                 quantityValueImperial: pi.quantityValueImperial,
                 quantityUnitImperial: pi.quantityUnitImperial,
                 quantityDisplayImperial: pi.quantityDisplayImperial,
-                shoppingNote: pi.shoppingNote
+                shoppingNote: pi.shoppingNote,
+                quantityValueMax: pi.quantityValueMax,
+                quantityValueMaxMetric: pi.quantityValueMaxMetric,
+                quantityValueMaxImperial: pi.quantityValueMaxImperial
             )
             context.insert(ing)
             ing.recipe = recipe
@@ -244,7 +247,10 @@ final class RecipeRepository {
                 quantityValueMetric: pi.quantityValueMetric, quantityUnitMetric: pi.quantityUnitMetric,
                 quantityDisplayMetric: pi.quantityDisplayMetric, quantityValueImperial: pi.quantityValueImperial,
                 quantityUnitImperial: pi.quantityUnitImperial, quantityDisplayImperial: pi.quantityDisplayImperial,
-                shoppingNote: pi.shoppingNote
+                shoppingNote: pi.shoppingNote,
+                quantityValueMax: pi.quantityValueMax,
+                quantityValueMaxMetric: pi.quantityValueMaxMetric,
+                quantityValueMaxImperial: pi.quantityValueMaxImperial
             )
             context.insert(ing); ing.recipe = existing
             if let sid = pi.sectionId { ing.section = sectionMap[sid] }
@@ -319,7 +325,10 @@ final class RecipeRepository {
                 quantityDisplayMetric: i.quantityDisplayMetric,
                 quantityValueImperial: i.quantityValueImperial, quantityUnitImperial: i.quantityUnitImperial,
                 quantityDisplayImperial: i.quantityDisplayImperial,
-                shoppingNote: i.shoppingNote
+                shoppingNote: i.shoppingNote,
+                quantityValueMax: i.quantityValueMax,
+                quantityValueMaxMetric: i.quantityValueMaxMetric,
+                quantityValueMaxImperial: i.quantityValueMaxImperial
             )
             context.insert(m); m.recipe = recipe
             if let sid = i.sectionId { m.section = sectionMap[sid] }
@@ -417,7 +426,10 @@ final class RecipeRepository {
                 quantityDisplayMetric: i.quantityDisplayMetric,
                 quantityValueImperial: i.quantityValueImperial, quantityUnitImperial: i.quantityUnitImperial,
                 quantityDisplayImperial: i.quantityDisplayImperial,
-                shoppingNote: i.shoppingNote
+                shoppingNote: i.shoppingNote,
+                quantityValueMax: i.quantityValueMax,
+                quantityValueMaxMetric: i.quantityValueMaxMetric,
+                quantityValueMaxImperial: i.quantityValueMaxImperial
             )
             context.insert(m); m.recipe = variant
             if let sid = i.section?.id { m.section = sectionMap[sectionIdMap[sid]!] }
@@ -547,6 +559,9 @@ final class RecipeRepository {
                     existing.quantityUnitImperial = edIng.quantityUnitImperial
                     existing.quantityDisplayImperial = edIng.quantityDisplayImperial
                     existing.shoppingNote = edIng.shoppingNote.trimmed.isEmpty ? nil : edIng.shoppingNote.trimmed
+                    existing.quantityValueMax = edIng.quantityValueMax
+                    existing.quantityValueMaxMetric = edIng.quantityValueMaxMetric
+                    existing.quantityValueMaxImperial = edIng.quantityValueMaxImperial
                 } else {
                     let ing = IngredientModel(
                         id: edIng.id,
@@ -563,7 +578,10 @@ final class RecipeRepository {
                         quantityValueImperial: edIng.quantityValueImperial,
                         quantityUnitImperial: edIng.quantityUnitImperial,
                         quantityDisplayImperial: edIng.quantityDisplayImperial,
-                        shoppingNote: edIng.shoppingNote.trimmed.isEmpty ? nil : edIng.shoppingNote.trimmed
+                        shoppingNote: edIng.shoppingNote.trimmed.isEmpty ? nil : edIng.shoppingNote.trimmed,
+                        quantityValueMax: edIng.quantityValueMax,
+                        quantityValueMaxMetric: edIng.quantityValueMaxMetric,
+                        quantityValueMaxImperial: edIng.quantityValueMaxImperial
                     )
                     context.insert(ing)
                     ing.recipe = recipe
@@ -779,7 +797,10 @@ final class RecipeRepository {
                 quantityValueImperial: (i["quantityValueImperial"] as? NSNumber)?.doubleValue,
                 quantityUnitImperial: i["quantityUnitImperial"] as? String,
                 quantityDisplayImperial: i["quantityDisplayImperial"] as? String,
-                shoppingNote: i["shoppingNote"] as? String
+                shoppingNote: i["shoppingNote"] as? String,
+                quantityValueMax: (i["quantityValueMax"] as? NSNumber)?.doubleValue,
+                quantityValueMaxMetric: (i["quantityValueMaxMetric"] as? NSNumber)?.doubleValue,
+                quantityValueMaxImperial: (i["quantityValueMaxImperial"] as? NSNumber)?.doubleValue
             )
         }
         let stepsRaw = data["steps"] as? [[String: Any]] ?? []

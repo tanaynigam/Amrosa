@@ -377,6 +377,9 @@ final class SocialRepository {
             if let v = ing.quantityUnitImperial   { d["quantityUnitImperial"] = v }
             if let v = ing.quantityDisplayImperial { d["quantityDisplayImperial"] = v }
             if let v = ing.shoppingNote           { d["shoppingNote"] = v }
+            if let v = ing.quantityValueMax         { d["quantityValueMax"] = v }
+            if let v = ing.quantityValueMaxMetric   { d["quantityValueMaxMetric"] = v }
+            if let v = ing.quantityValueMaxImperial { d["quantityValueMaxImperial"] = v }
             return d
         }
         let steps = recipe.steps.sorted { $0.orderIndex < $1.orderIndex }.map { step -> [String: Any] in
@@ -500,7 +503,10 @@ final class SocialRepository {
                 quantityValueImperial: (i["quantityValueImperial"] as? NSNumber)?.doubleValue,
                 quantityUnitImperial: i["quantityUnitImperial"] as? String,
                 quantityDisplayImperial: i["quantityDisplayImperial"] as? String,
-                shoppingNote: i["shoppingNote"] as? String
+                shoppingNote: i["shoppingNote"] as? String,
+                quantityValueMax: (i["quantityValueMax"] as? NSNumber)?.doubleValue,
+                quantityValueMaxMetric: (i["quantityValueMaxMetric"] as? NSNumber)?.doubleValue,
+                quantityValueMaxImperial: (i["quantityValueMaxImperial"] as? NSNumber)?.doubleValue
             )
         }.sorted { $0.orderIndex < $1.orderIndex }
 

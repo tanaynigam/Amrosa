@@ -22,6 +22,10 @@ struct EditorIngredient: Identifiable {
     var quantityDisplayImperial: String? = nil
     /// F11: author-entered shopping note (brand/comment); shown on the Shopping List.
     var shoppingNote: String = ""
+    // F15 — quantity-range upper bounds (editor sets the original max; conversions come from the button).
+    var quantityValueMax: Double? = nil
+    var quantityValueMaxMetric: Double? = nil
+    var quantityValueMaxImperial: Double? = nil
 
     init(id: String = UUID().uuidString,
          name: String = "",
@@ -54,6 +58,9 @@ struct EditorIngredient: Identifiable {
         self.quantityUnitImperial = model.quantityUnitImperial
         self.quantityDisplayImperial = model.quantityDisplayImperial
         self.shoppingNote = model.shoppingNote ?? ""
+        self.quantityValueMax = model.quantityValueMax
+        self.quantityValueMaxMetric = model.quantityValueMaxMetric
+        self.quantityValueMaxImperial = model.quantityValueMaxImperial
     }
 }
 
@@ -392,6 +399,9 @@ final class RecipeEditorViewModel {
                         updated.quantityValueImperial = (r["quantityValueImperial"] as? NSNumber)?.doubleValue
                         updated.quantityUnitImperial = r["quantityUnitImperial"] as? String
                         updated.quantityDisplayImperial = r["quantityDisplayImperial"] as? String
+                        // F15: backend supplies the scaled range maxes alongside the conversions
+                        updated.quantityValueMaxMetric = (r["quantityValueMaxMetric"] as? NSNumber)?.doubleValue
+                        updated.quantityValueMaxImperial = (r["quantityValueMaxImperial"] as? NSNumber)?.doubleValue
                         return updated
                     }
                     return s

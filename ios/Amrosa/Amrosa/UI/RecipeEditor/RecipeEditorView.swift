@@ -316,7 +316,18 @@ private struct IngredientEditorRow: View {
                     set: { ingredient.quantityDisplay = $0
                            ingredient.quantityValue = Double($0) }
                 ))
-                .frame(width: 60)
+                .frame(width: 56)
+                .keyboardType(.decimalPad)
+                .textFieldStyle(.roundedBorder)
+                .font(.subheadline)
+
+                // F15 — optional range upper bound ("4–6 cloves")
+                Text("to").font(.caption2).foregroundStyle(.tertiary)
+                TextField("max", text: Binding(
+                    get: { ingredient.quantityValueMax.map { formatNumber($0) } ?? "" },
+                    set: { ingredient.quantityValueMax = Double($0) }
+                ))
+                .frame(width: 48)
                 .keyboardType(.decimalPad)
                 .textFieldStyle(.roundedBorder)
                 .font(.subheadline)
