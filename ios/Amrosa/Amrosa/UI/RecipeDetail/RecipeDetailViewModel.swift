@@ -340,6 +340,8 @@ final class RecipeDetailViewModel {
     // MARK: - Visibility & Sharing
 
     var isPublic: Bool { recipe.visibility == "public" }
+    /// Published = visible to others (Co-Chefs or Public). Drives comments + direct-share gate.
+    var isPublished: Bool { recipe.visibility != "private" }
 
     func handleShareTap() {
         if isPublic {
@@ -361,17 +363,19 @@ final class RecipeDetailViewModel {
         }
     }
 
+    /// F12: three tiers. "friends" and "public" both publish the mirror (with the real tier);
+    /// "private" unpublishes it.
     func setVisibility(_ visibility: String) {
         Task {
             try? repository.updateVisibility(recipeId: recipe.id, visibility: visibility)
-            recipe.visibility = visibility   // update in-memory so isPublic reflects immediately
-            if visibility == "public" {
-                _ = await sharedRecipeService.publish(recipe)
-                startCommentListener()
-            } else {
+            recipe.visibility = visibility   // update in-memory so the chip reflects immediately
+            if visibility == "private" {
                 _ = await sharedRecipeService.unpublish(recipe.id)
                 stopCommentListener()
                 comments = []
+            } else {
+                _ = await sharedRecipeService.publish(recipe)
+                startCommentListener()
             }
         }
     }
@@ -398,12 +402,16 @@ final class RecipeDetailViewModel {
 
     /// Make the recipe Public (publishes the canonical mirror), then share it.
     /// Used when the user confirms the "make public to share" prompt for a private recipe.
-    func makePublicAndShareToFollower(uid: String, name: String) {
+    /// F12: direct-share a private recipe → publish at the **Co-Chefs** tier (not Public).
+    /// An already-public recipe is left Public. Used by the "share makes this visible to co-chefs" prompt.
+    func makeSharableAndShareToFollower(uid: String, name: String) {
         Task {
-            _ = await sharedRecipeService.publish(recipe)
-            try? repository.updateVisibility(recipeId: recipe.id, visibility: "public")
-            recipe.visibility = "public"
-            startCommentListener()
+            if recipe.visibility == "private" {
+                try? repository.updateVisibility(recipeId: recipe.id, visibility: "friends")
+                recipe.visibility = "friends"
+                _ = await sharedRecipeService.publish(recipe)
+                startCommentListener()
+            }
             await shareToFollowerInternal(uid: uid, name: name)
         }
     }

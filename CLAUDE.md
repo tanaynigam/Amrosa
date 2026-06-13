@@ -1385,6 +1385,14 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 **Collective step-ingredient linking (cooking-mode fallback) — ported:**
 - `RecipeDetailViewModel.cookingStepIngredients` mirrors `augmentedStepRefs()`: any ingredient referenced by no step in its section attaches to that section's first step (fallback: the recipe's first step). `CookingModeView` renders this augmented list so collectively-referenced ingredients still surface.
 
+**F12 Visibility tiers + Co-Chef profiles — ported:**
+- 3 tiers: `setVisibility("private"|"friends"|"public")` publishes the mirror for friends/public (with the real tier via `buildDocument`, no longer hard-coded "public") and unpublishes for private. `isPublished = visibility != "private"` gates comments + the direct-share path.
+- `VisibilityChip` opens a 3-option chooser (🔒 Private / 👥 Co-Chefs / 🌐 Public).
+- Direct-share of a private recipe → `makeSharableAndShareToFollower` publishes at `"friends"` (already-public left public); the prompt says "visible to your co-chefs". The Share-link flow still requires Public (`handleShareTap`).
+- `SocialRepository.getAuthorRecipes(authorUid:includeFriendsOnly:)` queries `shared_recipes` by author + tier (`whereField visibility in […]`) → `ProfileRecipeSummary`. Needs the deployed composite index `shared_recipes (authorId, visibility)`.
+- `ProfileView` + `ProfileViewModel`: reached by tapping a row in `FriendsView` **and** `UserSearchView`; resolves co-chef vs public via `getFollowStatus`; header badge "Co-Chef"/"Chef".
+- `ReceivedRecipeView` generalized via `ReviewSource { .pointer(shareId) | .direct(recipeId, authorUid, authorName) }`. Profile recipes open in `.direct` mode with an **"Add to Shared tab"** button (saves a received reference; no pointer to consume). Inbox keeps `.pointer`.
+
 ### iOS ✅ Implemented & Matching Android
 
 | Feature | Notes |
@@ -1434,7 +1442,6 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 | Gap | Detail |
 |---|---|
-| **F12 — Visibility tiers + Co-Chef profiles** | Android-only. iOS needs: the `"friends"` tier in `setVisibility`/publish (`buildDocument` must write the real `visibility`, not `"public"`); a 3-option visibility chooser; private direct-share → friends; a `ProfileView` from the friends list **and user search** (co-chef vs public resolved via `getFollowStatus` → `getAuthorRecipes(includeFriendsOnly)`); and review/"Add to Shared tab" reuse for `Direct(recipeId, authorUid, authorName)` entry. The Firestore rule + composite index are already deployed (shared infra). |
 | **F13 — Discover tab (full)** | Android-only. iOS needs the whole feature: a `cooked_log` SwiftData model + `markCooked` on Cooking Mode "Done"; a `MealClassifier`/ranker port (meal + affinity + popularity + recency); `getPublicRecipeSummaries`/`getPopularPublicRecipes`/`searchPublicRecipes` (reading `saveCount`/`likeCount`/`searchTokens`); `setLiked`/`likeStateFlow` + ❤ on the review screen; cuisine prefs (UserPreferences) override; pull-to-refresh; Discover as the default + **left-most** tab; a `DiscoverView` of meal/source/Popular shelves + cross-scope search. The Cloud Functions, rules, indexes, and `searchTokens` in `buildDocument` are already deployed (shared infra). |
 | **F16 — Edit mode redesign (jiggle + popups)** | Android-only. iOS currently has its **own separate editor** (`RecipeEditorView`); to match Android it would render the detail screen as the editable surface with a jiggle affordance + per-item edit sheets (Ingredient/Step/Section/Details) and ghost "＋ Add" rows. **Lower priority** — the iOS editor still works; align the UX later. The data model + save semantics are already shared. |
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |

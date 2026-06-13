@@ -271,7 +271,8 @@ final class SharedRecipeService {
             "isCustomized": recipe.isCustomized,
             "isImported": recipe.isImported,
             "version": recipe.version,
-            "visibility": "public",
+            // F12: write the real tier ("friends" or "public") so the read rule + profile query work.
+            "visibility": recipe.visibility == "private" ? "public" : recipe.visibility,
             "sharedAt": Date().timeIntervalSince1970 * 1000,
             "updatedAt": recipe.updatedAt.timeIntervalSince1970 * 1000,
             "createdAt": recipe.createdAt.timeIntervalSince1970 * 1000,

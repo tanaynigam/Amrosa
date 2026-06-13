@@ -46,17 +46,21 @@ final class FriendsViewModel {
 struct FriendsView: View {
     @Environment(AppContainer.self) private var container
     @State private var viewModel: FriendsViewModel?
+    @State private var selectedProfile: UserProfile?
 
     var body: some View {
         Group {
             if let vm = viewModel {
-                FriendsContent(viewModel: vm)
+                FriendsContent(viewModel: vm, onOpenProfile: { selectedProfile = $0 })
             } else {
                 ProgressView()
             }
         }
         .navigationTitle("Co-Chefs")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(item: $selectedProfile) { p in
+            ProfileView(uid: p.uid, name: p.displayName)
+        }
         .onAppear {
             if viewModel == nil {
                 viewModel = FriendsViewModel(socialRepository: container.socialRepository)
@@ -73,6 +77,7 @@ struct FriendsView: View {
 
 private struct FriendsContent: View {
     @Bindable var viewModel: FriendsViewModel
+    var onOpenProfile: (UserProfile) -> Void = { _ in }
 
     var body: some View {
         Group {
@@ -92,14 +97,21 @@ private struct FriendsContent: View {
             } else {
                 List(viewModel.friends) { friend in
                     HStack(spacing: 12) {
-                        // Avatar
-                        ZStack {
-                            Circle().fill(Color.accentColor.opacity(0.12)).frame(width: 42, height: 42)
-                            Text(String(friend.displayName.prefix(1)).uppercased())
-                                .font(.headline).foregroundStyle(Color.accentColor)
+                        // Avatar + name → open the co-chef's profile
+                        Button {
+                            onOpenProfile(friend)
+                        } label: {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    Circle().fill(Color.accentColor.opacity(0.12)).frame(width: 42, height: 42)
+                                    Text(String(friend.displayName.prefix(1)).uppercased())
+                                        .font(.headline).foregroundStyle(Color.accentColor)
+                                }
+                                Text(friend.displayName).font(.body).foregroundStyle(.primary)
+                            }
+                            .contentShape(Rectangle())
                         }
-
-                        Text(friend.displayName).font(.body)
+                        .buttonStyle(.plain)
 
                         Spacer()
 

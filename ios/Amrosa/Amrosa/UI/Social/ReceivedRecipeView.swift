@@ -1,12 +1,19 @@
 import SwiftUI
 
+/// How the review screen was entered (F12): a pending inbox share (consumes the pointer on save)
+/// or a chef-profile recipe (resolves the mirror directly; nothing to consume).
+enum ReviewSource {
+    case pointer(shareId: String)
+    case direct(recipeId: String, authorUid: String, authorName: String)
+}
+
 // MARK: - ViewModel
 
 @Observable
 @MainActor
 final class ReceivedRecipeViewModel {
     var recipe: SharedRecipe? = nil
-    var fromDisplayName: String = "Someone"   // who SENT it (distinct from recipe author)
+    var fromDisplayName: String = "Someone"   // who SENT it / the author (distinct from current user)
     var isLoading: Bool = true
     var isSaved: Bool = false
     var isSaving: Bool = false
@@ -14,14 +21,16 @@ final class ReceivedRecipeViewModel {
     var selectedServings: Int = 1
     var scaleFactor: Double = 1.0
 
-    private let shareId: String
+    private let source: ReviewSource
     private let socialRepository: SocialRepository
     private let sharedRecipeService: SharedRecipeService
     private let repository: RecipeRepository
-    private var pointer: ReceivedPointer? = nil
+    // Resolved during load(): canonical recipeId + author for the save step.
+    private var resolvedRecipeId: String?
+    private var resolvedAuthorUid: String = ""
 
-    init(shareId: String, socialRepository: SocialRepository, sharedRecipeService: SharedRecipeService, repository: RecipeRepository) {
-        self.shareId = shareId
+    init(source: ReviewSource, socialRepository: SocialRepository, sharedRecipeService: SharedRecipeService, repository: RecipeRepository) {
+        self.source = source
         self.socialRepository = socialRepository
         self.sharedRecipeService = sharedRecipeService
         self.repository = repository
@@ -29,20 +38,28 @@ final class ReceivedRecipeViewModel {
 
     func load() async {
         isLoading = true
-        // 1. Read the pending pointer → canonical recipeId + author
-        let p = await socialRepository.getReceivedPointer(shareId: shareId)
-        pointer = p
-        // 2. Read the live recipe from the public mirror (shared_recipes/{recipeId})
-        if let p = p {
-            fromDisplayName = p.fromDisplayName
-            recipe = await sharedRecipeService.getSharedRecipeDetail(recipeId: p.recipeId)
-            if let r = recipe { selectedServings = r.baseServings }
+        switch source {
+        case .pointer(let shareId):
+            // Pending inbox share → read pointer, then the live mirror.
+            if let p = await socialRepository.getReceivedPointer(shareId: shareId) {
+                fromDisplayName = p.fromDisplayName
+                resolvedAuthorUid = p.authorUid
+                resolvedRecipeId = p.recipeId
+                recipe = await sharedRecipeService.getSharedRecipeDetail(recipeId: p.recipeId)
+            } else {
+                errorMessage = "This share is no longer available."
+            }
+        case .direct(let recipeId, let authorUid, let authorName):
+            // Chef-profile recipe → resolve the mirror directly.
+            fromDisplayName = authorName
+            resolvedAuthorUid = authorUid
+            resolvedRecipeId = recipeId
+            recipe = await sharedRecipeService.getSharedRecipeDetail(recipeId: recipeId)
         }
-        errorMessage = {
-            if p == nil { return "This share is no longer available." }
-            if recipe == nil { return "This recipe is no longer shared by its author." }
-            return nil
-        }()
+        if recipe == nil && errorMessage == nil {
+            errorMessage = "This recipe is no longer shared by its author."
+        }
+        if let r = recipe { selectedServings = r.baseServings }
         isLoading = false
     }
 
@@ -55,30 +72,30 @@ final class ReceivedRecipeViewModel {
         }
     }
 
-    /// Save this received recipe as a reference (Recipe Ownership Model v2):
-    ///   1. write received_recipes/{uid}/items/{recipeId}
-    ///   2. cache locally with isReceived = true (original author preserved)
-    ///   3. consume the pending share pointer
-    /// `onSaved` fires after success so the caller can pop back to the Shared tab.
+    /// Save as a received reference (v2): write `received_recipes/{uid}/items/{recipeId}`,
+    /// cache locally with isReceived=true, and — pointer mode only — consume the pending pointer.
+    /// `onSaved` fires after success so the caller can pop back.
     func saveRecipe(onSaved: @escaping () -> Void) {
-        guard let r = recipe, let p = pointer, !isSaved, !isSaving else { return }
+        guard let r = recipe, let recipeId = resolvedRecipeId, !isSaved, !isSaving else { return }
         isSaving = true
         Task {
             // Real author name: the mirror's name unless it's blank/"Imported" (legacy/iOS),
-            // in which case the sender IS the author → use fromDisplayName.
+            // in which case the sender/author IS fromDisplayName.
             let mirrorName = r.authorDisplayName
             let realAuthorName: String
             if let m = mirrorName, !m.trimmingCharacters(in: .whitespaces).isEmpty, m.lowercased() != "imported" {
                 realAuthorName = m
             } else {
-                realAuthorName = p.fromDisplayName
+                realAuthorName = fromDisplayName
             }
             await socialRepository.saveReceivedReference(
-                recipeId: r.id, authorUid: p.authorUid, authorName: realAuthorName
+                recipeId: recipeId, authorUid: resolvedAuthorUid, authorName: realAuthorName
             )
             do {
                 try repository.cacheReceivedRecipe(r, isImported: r.isImported, authorDisplayName: realAuthorName)
-                await socialRepository.deleteReceivedPointer(shareId: shareId)
+                if case .pointer(let shareId) = source {
+                    await socialRepository.deleteReceivedPointer(shareId: shareId)
+                }
                 isSaved = true
                 isSaving = false
                 onSaved()
@@ -120,10 +137,17 @@ final class ReceivedRecipeViewModel {
 // MARK: - View
 
 struct ReceivedRecipeView: View {
-    let shareId: String
+    let source: ReviewSource
     @Environment(AppContainer.self) private var container
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: ReceivedRecipeViewModel?
+
+    /// Inbox entry — a pending share pointer.
+    init(shareId: String) { self.source = .pointer(shareId: shareId) }
+    /// Chef-profile entry — resolve the mirror directly.
+    init(source: ReviewSource) { self.source = source }
+
+    private var isDirect: Bool { if case .direct = source { return true }; return false }
 
     var body: some View {
         Group {
@@ -131,7 +155,8 @@ struct ReceivedRecipeView: View {
                 if vm.isLoading {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let recipe = vm.recipe {
-                    ReceivedRecipeContent(viewModel: vm, recipe: recipe, onSaved: { dismiss() })
+                    ReceivedRecipeContent(viewModel: vm, recipe: recipe, onSaved: { dismiss() },
+                                          saveLabel: isDirect ? "Add to Shared tab" : "Save Recipe")
                 } else {
                     VStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle")
@@ -150,7 +175,7 @@ struct ReceivedRecipeView: View {
         .onAppear {
             if viewModel == nil {
                 viewModel = ReceivedRecipeViewModel(
-                    shareId: shareId,
+                    source: source,
                     socialRepository: container.socialRepository,
                     sharedRecipeService: container.sharedRecipeService,
                     repository: container.recipeRepository
@@ -167,6 +192,7 @@ private struct ReceivedRecipeContent: View {
     @Bindable var viewModel: ReceivedRecipeViewModel
     let recipe: SharedRecipe
     let onSaved: () -> Void
+    var saveLabel: String = "Save Recipe"
 
     var body: some View {
         ScrollView {
@@ -281,7 +307,7 @@ private struct ReceivedRecipeContent: View {
 
                 Divider().padding(.horizontal, 16).padding(.vertical, 8)
 
-                // Save button — "Save Recipe", pops back to Shared tab after save
+                // Save button — saves a received reference, pops back after save
                 Button {
                     viewModel.saveRecipe(onSaved: onSaved)
                 } label: {
@@ -289,7 +315,7 @@ private struct ReceivedRecipeContent: View {
                         if viewModel.isSaving {
                             ProgressView()
                         } else {
-                            Label("Save Recipe", systemImage: "plus")
+                            Label(saveLabel, systemImage: "plus")
                         }
                     }
                     .font(.headline)

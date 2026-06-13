@@ -152,6 +152,32 @@ final class SocialRepository {
         return status
     }
 
+    // MARK: - Chef profiles (F12)
+
+    /// A chef's shared recipes. Co-chefs (`includeFriendsOnly = true`) get friends + public;
+    /// everyone else gets public only. The `shared_recipes` read rule enforces the same gate.
+    /// Requires composite index `shared_recipes (authorId ASC, visibility ASC)`.
+    func getAuthorRecipes(authorUid: String, includeFriendsOnly: Bool) async -> [ProfileRecipeSummary] {
+        guard !authorUid.isEmpty else { return [] }
+        let tiers = includeFriendsOnly ? ["friends", "public"] : ["public"]
+        guard let snapshot = try? await db.collection("shared_recipes")
+            .whereField("authorId", isEqualTo: authorUid)
+            .whereField("visibility", in: tiers)
+            .getDocuments() else { return [] }
+        return snapshot.documents.compactMap { doc -> ProfileRecipeSummary? in
+            let data = doc.data()
+            guard let title = data["title"] as? String else { return nil }
+            return ProfileRecipeSummary(
+                recipeId: doc.documentID,
+                title: title,
+                prepTimeMinutes: data["prepTimeMinutes"] as? Int,
+                cookTimeMinutes: data["cookTimeMinutes"] as? Int,
+                tags: (data["tags"] as? [String]) ?? [],
+                visibility: data["visibility"] as? String ?? "public"
+            )
+        }.sorted { $0.title.lowercased() < $1.title.lowercased() }
+    }
+
     // MARK: - Live streams
 
     /// Live stream of pending Co-Chef requests directed at the current user.

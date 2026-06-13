@@ -112,7 +112,8 @@ struct RecipeDetailView: View {
             .sheet(isPresented: $showFollowerPicker) {
                 if let vm = viewModel {
                     FollowerPickerSheet(viewModel: vm, isPresented: $showFollowerPicker) { uid, name in
-                        if vm.isPublic { vm.shareToFollower(uid: uid, name: name) }
+                        // Published (Co-Chefs or Public) → share directly; private → prompt to publish at Co-Chefs.
+                        if vm.isPublished { vm.shareToFollower(uid: uid, name: name) }
                         else { pendingShareRecipient = (uid, name) }
                     }
                 }
@@ -211,13 +212,13 @@ private struct SentAndRemoveDialogs: ViewModifier {
             ) {
                 Button("Share") {
                     if let r = pendingShareRecipient {
-                        viewModel?.makePublicAndShareToFollower(uid: r.uid, name: r.name)
+                        viewModel?.makeSharableAndShareToFollower(uid: r.uid, name: r.name)
                     }
                     pendingShareRecipient = nil
                 }
                 Button("Cancel", role: .cancel) { pendingShareRecipient = nil }
             } message: {
-                Text("Sharing makes this recipe public so they can view it. You can make it private again later.")
+                Text("Sharing makes this recipe visible to your co-chefs so they can view it. You can make it private again later.")
             }
             .confirmationDialog("Remove this recipe?", isPresented: $showRemoveConfirm, titleVisibility: .visible) {
                 Button("Remove", role: .destructive) { viewModel?.removeReceivedRecipe() }
@@ -501,8 +502,8 @@ private struct RecipeDetailContent: View {
                         .padding(.vertical, 8)
                 }
 
-                // ── Comments (public recipes only) ────────────────────
-                if viewModel.isPublic {
+                // ── Comments (published recipes: Co-Chefs or Public) ──
+                if viewModel.isPublished {
                     CommentsSection(viewModel: viewModel)
                 }
 
@@ -698,35 +699,34 @@ private struct SubstituteSelector: View {
 
 private struct VisibilityChip: View {
     @Bindable var viewModel: RecipeDetailViewModel
-    @State private var showConfirm = false
+    @State private var showChooser = false
+
+    private var tier: String { viewModel.recipe.visibility }
+    private var label: String {
+        switch tier { case "public": return "Public"; case "friends": return "Co-Chefs"; default: return "Private" }
+    }
+    private var icon: String {
+        switch tier { case "public": return "globe"; case "friends": return "person.2"; default: return "lock" }
+    }
+    private var isShared: Bool { tier != "private" }
 
     var body: some View {
-        Button { showConfirm = true } label: {
-            Label(
-                viewModel.isPublic ? "Public" : "Private",
-                systemImage: viewModel.isPublic ? "globe" : "lock"
-            )
-            .font(.caption).fontWeight(.medium)
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(viewModel.isPublic ? Color.accentColor.opacity(0.12) : Color(.secondarySystemBackground))
-            .foregroundStyle(viewModel.isPublic ? Color.accentColor : Color.secondary)
-            .clipShape(Capsule())
+        Button { showChooser = true } label: {
+            Label(label, systemImage: icon)
+                .font(.caption).fontWeight(.medium)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(isShared ? Color.accentColor.opacity(0.12) : Color(.secondarySystemBackground))
+                .foregroundStyle(isShared ? Color.accentColor : Color.secondary)
+                .clipShape(Capsule())
         }
         .buttonStyle(.plain)
-        .confirmationDialog(
-            viewModel.isPublic ? "Make Private?" : "Make Public?",
-            isPresented: $showConfirm, titleVisibility: .visible
-        ) {
-            if viewModel.isPublic {
-                Button("Make Private", role: .destructive) { viewModel.setVisibility("private") }
-            } else {
-                Button("Make Public") { viewModel.setVisibility("public") }
-            }
+        .confirmationDialog("Who can see this recipe?", isPresented: $showChooser, titleVisibility: .visible) {
+            Button("🔒 Private") { viewModel.setVisibility("private") }
+            Button("👥 Co-Chefs only") { viewModel.setVisibility("friends") }
+            Button("🌐 Public (anyone with the link)") { viewModel.setVisibility("public") }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(viewModel.isPublic
-                ? "This recipe will no longer be accessible via its link."
-                : "This recipe will be visible to anyone with the link.")
+            Text("Private: only you. Co-Chefs: people you follow each other with. Public: anyone with the link.")
         }
     }
 }

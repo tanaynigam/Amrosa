@@ -69,18 +69,22 @@ struct UserSearchView: View {
     @Environment(AppContainer.self) private var container
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: UserSearchViewModel?
+    @State private var selectedProfile: UserProfile?
 
     var body: some View {
         NavigationStack {
             Group {
                 if let vm = viewModel {
-                    UserSearchContent(viewModel: vm)
+                    UserSearchContent(viewModel: vm, onOpenProfile: { selectedProfile = $0 })
                 } else {
                     ProgressView()
                 }
             }
             .navigationTitle("Find People")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(item: $selectedProfile) { p in
+                ProfileView(uid: p.uid, name: p.displayName)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
@@ -99,6 +103,7 @@ struct UserSearchView: View {
 
 private struct UserSearchContent: View {
     @Bindable var viewModel: UserSearchViewModel
+    var onOpenProfile: (UserProfile) -> Void = { _ in }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -133,7 +138,8 @@ private struct UserSearchContent: View {
                         status: viewModel.followStatus[user.uid] ?? "none",
                         isPending: viewModel.pendingAction == user.uid,
                         onFollow: { viewModel.sendFollowRequest(user) },
-                        onUnfollow: { viewModel.unfollow(user) }
+                        onUnfollow: { viewModel.unfollow(user) },
+                        onOpenProfile: { onOpenProfile(user) }
                     )
                 }
                 .listStyle(.plain)
@@ -150,21 +156,28 @@ private struct UserSearchRow: View {
     let isPending: Bool      // in-flight network action
     let onFollow: () -> Void
     let onUnfollow: () -> Void
+    var onOpenProfile: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 12) {
-            // Avatar circle — first letter
-            ZStack {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.15))
-                    .frame(width: 42, height: 42)
-                Text(String(user.displayName.prefix(1)).uppercased())
-                    .font(.headline)
-                    .foregroundStyle(Color.accentColor)
+            // Avatar + name → open the chef's profile
+            Button(action: onOpenProfile) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.accentColor.opacity(0.15))
+                            .frame(width: 42, height: 42)
+                        Text(String(user.displayName.prefix(1)).uppercased())
+                            .font(.headline)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    Text(user.displayName)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                }
+                .contentShape(Rectangle())
             }
-
-            Text(user.displayName)
-                .font(.body)
+            .buttonStyle(.plain)
 
             Spacer()
 
