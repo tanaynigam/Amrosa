@@ -707,7 +707,27 @@ final class RecipeRepository {
         let all = try fetchAllRecipes()
         for recipe in all { context.delete(recipe) }
         try context.delete(model: ShoppingCheckModel.self)
+        try context.delete(model: CookedLogModel.self)
         try context.save()
+    }
+
+    // MARK: - Cooked log (F13 — local only, never synced)
+
+    /// Record that a recipe was cooked now (Cooking Mode "Done"). Upserts the row.
+    func markCooked(recipeId: String) throws {
+        let descriptor = FetchDescriptor<CookedLogModel>(predicate: #Predicate { $0.recipeId == recipeId })
+        if let existing = try context.fetch(descriptor).first {
+            existing.cookedAt = Date()
+        } else {
+            context.insert(CookedLogModel(recipeId: recipeId))
+        }
+        try context.save()
+    }
+
+    /// recipeId → last-cooked Date. Drives the Discover recency penalty + "Recently cooked" shelf.
+    func cookedLog() throws -> [String: Date] {
+        let rows = try context.fetch(FetchDescriptor<CookedLogModel>())
+        return Dictionary(rows.map { ($0.recipeId, $0.cookedAt) }, uniquingKeysWith: { a, _ in a })
     }
 
     // MARK: - Shopping list checked items (F11 — local only, never synced)

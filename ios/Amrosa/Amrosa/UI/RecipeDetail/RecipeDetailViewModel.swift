@@ -423,6 +423,11 @@ final class RecipeDetailViewModel {
 
     // MARK: - Received recipes (Tab 2)
 
+    /// F13: record that this recipe was cooked (Cooking Mode "Done!").
+    func markCooked() {
+        try? repository.markCooked(recipeId: recipe.id)
+    }
+
     /// Remove a received recipe: deletes the cloud reference + local cache.
     /// The author's canonical instance is untouched.
     func removeReceivedRecipe() {

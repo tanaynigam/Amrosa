@@ -62,6 +62,36 @@ final class SharedRecipeService {
     }
 
     /// One-shot fetch of a single shared recipe (full detail).
+    // MARK: - Discover feed (F13)
+
+    /// Lightweight list of public recipes for the Discover feed. Newest first, capped.
+    /// Returns `DiscoverRecipe` cards (no sections/ingredients) — full detail fetched on tap.
+    func getPublicRecipeSummaries(limit: Int = 50) async -> [DiscoverRecipe] {
+        guard let snapshot = try? await db.collection(sharedCollection)
+            .whereField("visibility", isEqualTo: "public")
+            .order(by: "sharedAt", descending: true)
+            .limit(to: limit)
+            .getDocuments() else { return [] }
+        return snapshot.documents.compactMap { parsePublicSummary($0.documentID, $0.data()) }
+    }
+
+    private func parsePublicSummary(_ id: String, _ data: [String: Any]) -> DiscoverRecipe? {
+        guard let title = data["title"] as? String else { return nil }
+        return DiscoverRecipe(
+            recipeId: id,
+            title: title,
+            tags: (data["tags"] as? [String]) ?? [],
+            prepTimeMinutes: data["prepTimeMinutes"] as? Int,
+            cookTimeMinutes: data["cookTimeMinutes"] as? Int,
+            source: .public,
+            authorUid: data["authorId"] as? String,
+            authorName: data["authorDisplayName"] as? String,
+            isLocal: false,
+            saveCount: data["saveCount"] as? Int ?? 0,
+            likeCount: data["likeCount"] as? Int ?? 0
+        )
+    }
+
     func getSharedRecipeDetail(recipeId: String) async -> SharedRecipe? {
         guard let doc = try? await db.collection(sharedCollection).document(recipeId).getDocument() else { return nil }
         guard let data = doc.data() else { return nil }

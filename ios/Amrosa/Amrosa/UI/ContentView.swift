@@ -71,26 +71,27 @@ private struct MainAppView: View {
     @Binding var deepLinkRecipeId: String?
     @Binding var pushShareId: String?
     @Binding var pushGoToAccount: Bool
+    // F13: Discover is the default + left-most tab.
     @State private var selectedTab = 0
 
     var body: some View {
         TabView(selection: $selectedTab) {
             NavigationStack {
+                DiscoverView()
+            }
+            .tabItem { Label("Discover", systemImage: "sparkles") }
+            .tag(0)
+
+            NavigationStack {
                 YourRecipesView()
             }
             .tabItem { Label("My Recipes", systemImage: "bookmark") }
-            .tag(0)
+            .tag(1)
 
             NavigationStack {
                 SharedInboxView(openShareId: $pushShareId)
             }
             .tabItem { Label("Shared", systemImage: "tray") }
-            .tag(1)
-
-            NavigationStack {
-                DiscoverView()
-            }
-            .tabItem { Label("Discover", systemImage: "sparkles") }
             .tag(2)
 
             NavigationStack {
@@ -99,10 +100,10 @@ private struct MainAppView: View {
             .tabItem { Label("Account", systemImage: "person") }
             .tag(3)
         }
-        // Deep link (HTTPS / custom scheme) → Shared tab
-        .onChange(of: deepLinkRecipeId) { _, id in if id != nil { selectedTab = 1 } }
+        // Deep link (HTTPS / custom scheme) → Shared tab (now tag 2)
+        .onChange(of: deepLinkRecipeId) { _, id in if id != nil { selectedTab = 2 } }
         // Push: recipe shared → Shared tab; SharedInboxView consumes pushShareId → opens review
-        .onChange(of: pushShareId) { _, id in if id != nil { selectedTab = 1 } }
+        .onChange(of: pushShareId) { _, id in if id != nil { selectedTab = 2 } }
         // Push: follow request/accepted → Account tab
         .onChange(of: pushGoToAccount) { _, go in
             if go { selectedTab = 3; pushGoToAccount = false }

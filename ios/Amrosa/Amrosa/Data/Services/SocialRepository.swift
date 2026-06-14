@@ -202,6 +202,20 @@ final class SocialRepository {
     }
 
     /// Live stream of accepted Co-Chefs for the current user.
+    /// One-shot list of accepted co-chefs (for the Discover feed assembly).
+    func getFriendsOnce() async -> [UserProfile] {
+        guard let myUid = authRepository.uid else { return [] }
+        guard let snapshot = try? await db.collection("follows")
+            .whereField("followerId", isEqualTo: myUid)
+            .whereField("status", isEqualTo: "accepted")
+            .getDocuments() else { return [] }
+        return snapshot.documents.compactMap { doc -> UserProfile? in
+            let d = doc.data()
+            guard let uid = d["followeeId"] as? String, let name = d["followeeName"] as? String else { return nil }
+            return UserProfile(id: uid, uid: uid, displayName: name, photoUrl: nil)
+        }
+    }
+
     func friendsStream() -> AsyncStream<[UserProfile]> {
         guard let myUid = authRepository.uid else { return AsyncStream { $0.finish() } }
         return AsyncStream { continuation in

@@ -156,6 +156,7 @@ struct CookingModeView: View {
 
                     if currentStepIndex == allSteps.count - 1 {
                         Button {
+                            viewModel.markCooked()   // F13: record for recency + "Recently cooked"
                             dismiss()
                         } label: {
                             Text("Done!")
