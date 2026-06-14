@@ -1442,7 +1442,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 | Gap | Detail |
 |---|---|
-| **F16 — Edit mode redesign (jiggle + popups)** | Android-only. iOS currently has its **own separate editor** (`RecipeEditorView`); to match Android it would render the detail screen as the editable surface with a jiggle affordance + per-item edit sheets (Ingredient/Step/Section/Details) and ghost "＋ Add" rows. **Lower priority** — the iOS editor still works; align the UX later. The data model + save semantics are already shared. |
+| **F16 — Edit mode redesign (jiggle + popups)** | ✅ **Ported.** The detail pencil now flips the screen into an inline edit body (`RecipeEditContent`) rendering the live draft; every editable element jiggles + outlines (`.editable`, `UI/Util/EditAffordance.swift`) and a tap opens its sheet (`EditSheetHost` in `RecipeEditSheets.swift`: Details/Section/Ingredient/Step via `EditTarget`). Ghost "＋ Add" rows + a top-bar ＋ menu (targets the last section); Save ✓ / Cancel ✕ in the bar. Edit state + ops live in `RecipeDetailViewModel+Edit.swift` (`enterEdit`/`cancelEdit`/`saveEdit`/`updateConversions`/`deleteRecipe`); save maps the draft via `updateFullRecipe` (now also rewrites step→ingredient refs from `EditorStep.ingredientIds`), pushes, and re-publishes if shared. `RecipeEditorView` is retained for the import/freeform & new-variation entry points. |
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
 
@@ -1708,7 +1708,6 @@ ios/Amrosa/
 |---|---|
 | **F12 — Visibility tiers + Co-Chef profiles** | `"friends"` tier in publish; 3-option visibility chooser; co-chef/public `ProfileView`. See the authoritative gaps table above. |
 | **F15 — Ingredient quantity ranges** | Add `quantityValueMax` (+ `…Metric`/`…Imperial`, all `Double?`) to the SwiftData ingredient model; scaler renders "min–max unit" scaling both ends; thread through push/pull + parsed-import maps; editor sets the range max. Backend already returns the maxes — no client conversion math. |
-| **F16 — Edit mode redesign (jiggle + popups)** | Optional UX alignment: make the detail screen the editable surface (jiggle + per-item edit sheets + ghost "＋ Add" rows) instead of the separate `RecipeEditorView`. iOS editor still works; lower priority. |
 | **Collective step-ingredient cooking-mode fallback** | Mirror `augmentedStepRefs()`: attach any ingredient referenced by no step in its section to that section's first step, so collectively-referenced ingredients show in cooking mode. Import-side server net is shared backend. |
 | **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` but requires `Associated Domains` entitlement + `apple-app-site-association` on the hosting server for the OS to intercept them before Safari |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |

@@ -608,6 +608,26 @@ final class RecipeRepository {
             }
         }
 
+        // F4/F16: rewrite step→ingredient refs from the draft's EditorStep.ingredientIds.
+        // Clear all existing refs, then recreate from the draft so additions/removals persist.
+        let stepMap = Dictionary(uniqueKeysWithValues: recipe.steps.map { ($0.id, $0) })
+        let ingMap = Dictionary(uniqueKeysWithValues: recipe.ingredients.map { ($0.id, $0) })
+        for step in recipe.steps {
+            for ref in step.ingredientRefs { context.delete(ref) }
+        }
+        for edSec in sections {
+            for edStep in edSec.steps {
+                guard let step = stepMap[edStep.id] else { continue }
+                for ingId in edStep.ingredientIds {
+                    guard let ing = ingMap[ingId] else { continue }
+                    let refModel = StepIngredientRefModel(quantityDisplay: ing.quantityDisplay)
+                    context.insert(refModel)
+                    refModel.step = step
+                    refModel.ingredient = ing
+                }
+            }
+        }
+
         try context.save()
     }
 

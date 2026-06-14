@@ -67,15 +67,19 @@ struct EditorIngredient: Identifiable {
 struct EditorStep: Identifiable {
     var id: String
     var instruction: String
+    /// F4/F16: ids of the ingredients this step uses (drives inline refs + cooking-mode card).
+    var ingredientIds: [String]
 
-    init(id: String = UUID().uuidString, instruction: String = "") {
+    init(id: String = UUID().uuidString, instruction: String = "", ingredientIds: [String] = []) {
         self.id = id
         self.instruction = instruction
+        self.ingredientIds = ingredientIds
     }
 
     init(from model: StepModel) {
         self.id = model.id
         self.instruction = model.instruction
+        self.ingredientIds = model.ingredientRefs.compactMap { $0.ingredient?.id }
     }
 }
 

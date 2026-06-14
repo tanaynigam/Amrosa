@@ -49,19 +49,48 @@ final class RecipeDetailViewModel {
     /// Set to a freshly created variation's id so the view can open its editor.
     var createdVariantId: String? = nil
 
-    private let repository: RecipeRepository
-    private let authRepository: AuthRepository
-    private let sharedRecipeService: SharedRecipeService
-    private let socialRepository: SocialRepository
-    private let syncService: RecipeSyncService?
+    // ── Inline edit mode (F16) ──────────────────────────────────────────────
+    var isEditMode = false
+    var editTarget: EditTarget? = nil
+    var editError: String? = nil
+    var isSavingEdit = false
+    var isConverting = false
+    var conversionMessage: String? = nil
+    var isDeleting = false
+    // Live draft (mirrors the read-only layout while editing)
+    var editTitle = ""
+    var editDescription = ""
+    var editPrepTime = ""
+    var editCookTime = ""
+    var editBaseServings = "1"
+    var editIsRangeYield = false
+    var editServingsMin = ""
+    var editServingsMax = ""
+    var editTagsText = ""           // comma-separated
+    var editSourceUrlsText = ""     // newline-separated
+    var editIsPersonalAuthor = false
+    var editIsVariant = false
+    var editVariantName = ""
+    var editSections: [EditorSection] = []
+    var deletedSectionIds: Set<String> = []
+    var deletedIngredientIds: Set<String> = []
+    var deletedStepIds: Set<String> = []
 
-    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService, socialRepository: SocialRepository, syncService: RecipeSyncService? = nil) {
+    let repository: RecipeRepository
+    let authRepository: AuthRepository
+    let sharedRecipeService: SharedRecipeService
+    private let socialRepository: SocialRepository
+    let syncService: RecipeSyncService?
+    let cloudFunctions: CloudFunctionsService?
+
+    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService, socialRepository: SocialRepository, syncService: RecipeSyncService? = nil, cloudFunctions: CloudFunctionsService? = nil) {
         self.recipe = recipe
         self.repository = repository
         self.authRepository = authRepository
         self.sharedRecipeService = sharedRecipeService
         self.socialRepository = socialRepository
         self.syncService = syncService
+        self.cloudFunctions = cloudFunctions
         self.selectedServings = recipe.baseServings
         // Seed anchor quantity from the anchor ingredient's base value
         if let anchorId = recipe.scaleIngredientId,

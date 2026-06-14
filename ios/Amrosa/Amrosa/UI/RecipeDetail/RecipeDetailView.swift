@@ -39,19 +39,35 @@ struct RecipeDetailView: View {
     private var coreView: some View {
         Group {
             if let vm = viewModel {
-                RecipeDetailContent(
-                    viewModel: vm,
-                    onOpenVariant: { openVariant = $0 },
-                    onAddVariant: { newVariantName = ""; showAddVariant = true },
-                    onCookFromSection: { cookFromSectionId = $0; showCookingMode = true }
-                )
+                if vm.isEditMode {
+                    RecipeEditContent(viewModel: vm)
+                } else {
+                    RecipeDetailContent(
+                        viewModel: vm,
+                        onOpenVariant: { openVariant = $0 },
+                        onAddVariant: { newVariantName = ""; showAddVariant = true },
+                        onCookFromSection: { cookFromSectionId = $0; showCookingMode = true }
+                    )
+                }
             } else {
                 ProgressView()
             }
         }
-        .navigationTitle(recipe.title)
+        .navigationTitle(viewModel?.isEditMode == true ? "Edit recipe" : recipe.title)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(viewModel?.isEditMode == true)
         .toolbar { toolbarContent }
+        .sheet(item: Binding(get: { viewModel?.editTarget }, set: { viewModel?.editTarget = $0 })) { target in
+            if let vm = viewModel { EditSheetHost(target: target, viewModel: vm) }
+        }
+        .alert("Couldn't save", isPresented: Binding(
+            get: { viewModel?.editError != nil },
+            set: { if !$0 { viewModel?.editError = nil } })
+        ) {
+            Button("OK", role: .cancel) { viewModel?.editError = nil }
+        } message: {
+            Text(viewModel?.editError ?? "")
+        }
     }
 
     @ViewBuilder
@@ -134,7 +150,8 @@ struct RecipeDetailView: View {
                 authRepository: container.authRepository,
                 sharedRecipeService: container.sharedRecipeService,
                 socialRepository: container.socialRepository,
-                syncService: container.syncService
+                syncService: container.syncService,
+                cloudFunctions: container.cloudFunctions
             )
             viewModel?.startCommentListener()
             viewModel?.loadVariants()
@@ -156,6 +173,28 @@ struct RecipeDetailView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        if viewModel?.isEditMode == true {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Cancel") { viewModel?.cancelEdit() }
+            }
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                // ＋ add menu — targets the last section (matches Android).
+                Menu {
+                    Button { viewModel?.editTarget = .section(sectionId: nil) } label: { Label("Section", systemImage: "square.stack") }
+                    if let last = viewModel?.editSections.last?.id {
+                        Button { viewModel?.editTarget = .ingredient(sectionId: last, ingredientId: nil) } label: { Label("Ingredient", systemImage: "leaf") }
+                        Button { viewModel?.editTarget = .step(sectionId: last, stepId: nil) } label: { Label("Step", systemImage: "list.number") }
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                }
+                if viewModel?.isSavingEdit == true {
+                    ProgressView()
+                } else {
+                    Button { viewModel?.saveEdit() } label: { Image(systemName: "checkmark") }
+                }
+            }
+        } else {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
             if viewModel?.isReceived == true {
                 Button(role: .destructive) { showRemoveConfirm = true } label: {
@@ -172,9 +211,9 @@ struct RecipeDetailView: View {
                     Button { viewModel?.loadFollowing(); showShareOptions = true } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
-                }
-                Button { navigateToEditor = true } label: {
-                    Image(systemName: "pencil")
+                    Button { viewModel?.enterEdit() } label: {
+                        Image(systemName: "pencil")
+                    }
                 }
                 Button { showShoppingList = true } label: {
                     Image(systemName: "cart")
@@ -183,6 +222,7 @@ struct RecipeDetailView: View {
                     Image(systemName: "book.closed")
                 }
             }
+        }
         }
     }
 }
