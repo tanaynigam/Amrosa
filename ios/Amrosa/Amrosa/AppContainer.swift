@@ -14,6 +14,7 @@ final class AppContainer {
     let cloudFunctions: CloudFunctionsService
     let sharedRecipeService: SharedRecipeService
     let socialRepository: SocialRepository
+    let userPreferences = UserPreferences()
 
     init() {
         let schema = Schema([

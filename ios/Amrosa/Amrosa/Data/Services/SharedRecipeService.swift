@@ -75,6 +75,39 @@ final class SharedRecipeService {
         return snapshot.documents.compactMap { parsePublicSummary($0.documentID, $0.data()) }
     }
 
+    /// Most-saved public recipes (the "Popular" shelf + popularity ranking).
+    /// Requires composite index (visibility ==, saveCount desc).
+    func getPopularPublicRecipes(limit: Int = 20) async -> [DiscoverRecipe] {
+        guard let snapshot = try? await db.collection(sharedCollection)
+            .whereField("visibility", isEqualTo: "public")
+            .order(by: "saveCount", descending: true)
+            .limit(to: limit)
+            .getDocuments() else { return [] }
+        return snapshot.documents.compactMap { parsePublicSummary($0.documentID, $0.data()) }
+    }
+
+    /// Search public recipes by a query word (F13 Phase 3a). Firestore has no full-text, so we match
+    /// against the precomputed `searchTokens` array (title + tag words): query the longest token via
+    /// array-contains, then refine client-side to the full query so multi-word searches narrow.
+    /// Requires index (visibility ==, searchTokens array-contains).
+    func searchPublicRecipes(query: String, limit: Int = 25) async -> [DiscoverRecipe] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard q.count >= 2 else { return [] }
+        let words = q.split { !$0.isLetter && !$0.isNumber }.map(String.init).filter { $0.count >= 2 }
+        guard let token = words.max(by: { $0.count < $1.count }) else { return [] }
+        guard let snapshot = try? await db.collection(sharedCollection)
+            .whereField("visibility", isEqualTo: "public")
+            .whereField("searchTokens", arrayContains: token)
+            .limit(to: limit)
+            .getDocuments() else { return [] }
+        return snapshot.documents
+            .compactMap { parsePublicSummary($0.documentID, $0.data()) }
+            // Refine to the full query (substring on title or any tag).
+            .filter { r in
+                r.title.lowercased().contains(q) || r.tags.contains { $0.lowercased().contains(q) }
+            }
+    }
+
     private func parsePublicSummary(_ id: String, _ data: [String: Any]) -> DiscoverRecipe? {
         guard let title = data["title"] as? String else { return nil }
         return DiscoverRecipe(
@@ -90,6 +123,50 @@ final class SharedRecipeService {
             saveCount: data["saveCount"] as? Int ?? 0,
             likeCount: data["likeCount"] as? Int ?? 0
         )
+    }
+
+    // MARK: - Likes (F13 Phase 2)
+
+    /// Whether the current user liked a recipe + the like/save counts (counters are
+    /// Cloud-Function-maintained on the mirror doc).
+    struct LikeState: Equatable {
+        var isLiked: Bool = false
+        var likeCount: Int = 0
+        var saveCount: Int = 0
+    }
+
+    /// Like / unlike a shared recipe as the current user (counter maintained by a Cloud Function).
+    func setLiked(recipeId: String, liked: Bool) async {
+        guard let uid = authRepository.uid else { return }
+        let ref = db.collection(sharedCollection).document(recipeId).collection("likes").document(uid)
+        if liked {
+            try? await ref.setData(["likedAt": Date().timeIntervalSince1970 * 1000])
+        } else {
+            try? await ref.delete()
+        }
+    }
+
+    /// Live like state for a recipe: the current user's like + the like/save counts.
+    func likeStateStream(recipeId: String) -> AsyncStream<LikeState> {
+        AsyncStream { continuation in
+            let uid = self.authRepository.uid
+            var state = LikeState()
+            let recipeReg = self.db.collection(self.sharedCollection).document(recipeId)
+                .addSnapshotListener { snap, _ in
+                    state.likeCount = (snap?.get("likeCount") as? Int) ?? 0
+                    state.saveCount = (snap?.get("saveCount") as? Int) ?? 0
+                    continuation.yield(state)
+                }
+            let likeReg = uid.map { u in
+                self.db.collection(self.sharedCollection).document(recipeId)
+                    .collection("likes").document(u)
+                    .addSnapshotListener { snap, _ in
+                        state.isLiked = snap?.exists == true
+                        continuation.yield(state)
+                    }
+            }
+            continuation.onTermination = { _ in recipeReg.remove(); likeReg?.remove() }
+        }
     }
 
     func getSharedRecipeDetail(recipeId: String) async -> SharedRecipe? {
@@ -249,6 +326,17 @@ final class SharedRecipeService {
 
     // MARK: - Private helpers
 
+    /// Lowercased distinct words (≥2 chars) from title + tags — the searchable token set.
+    private static func searchTokens(title: String, tags: [String]) -> [String] {
+        let words = (title + " " + tags.joined(separator: " "))
+            .lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { $0.count >= 2 }
+        var seen = Set<String>()
+        return words.filter { seen.insert($0).inserted }.prefix(30).map { $0 }
+    }
+
     private func buildDocument(_ recipe: RecipeModel) -> [String: Any] {
         let sections = recipe.sections.sorted { $0.orderIndex < $1.orderIndex }.map { s -> [String: Any] in
             ["id": s.id, "name": s.name, "orderIndex": s.orderIndex]
@@ -311,6 +399,8 @@ final class SharedRecipeService {
             // vs "X" label is computed at display time — never overwrite the name here.
             "authorDisplayName": recipe.authorDisplayName ?? "User",
             "tags": recipe.tags,
+            // F13 Phase 3a: lowercased word tokens (title + tags) for public search.
+            "searchTokens": Self.searchTokens(title: recipe.title, tags: recipe.tags),
             "sourceUrls": recipe.sourceUrls,
             "sections": sections,
             "ingredients": ingredients,

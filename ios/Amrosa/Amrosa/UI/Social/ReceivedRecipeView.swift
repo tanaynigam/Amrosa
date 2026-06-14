@@ -20,20 +20,27 @@ final class ReceivedRecipeViewModel {
     var errorMessage: String? = nil
     var selectedServings: Int = 1
     var scaleFactor: Double = 1.0
+    // F13 Phase 2 — likes
+    var likeState = SharedRecipeService.LikeState()
+    var canLike: Bool = false
 
     private let source: ReviewSource
     private let socialRepository: SocialRepository
     private let sharedRecipeService: SharedRecipeService
     private let repository: RecipeRepository
+    private let authRepository: AuthRepository
     // Resolved during load(): canonical recipeId + author for the save step.
     private var resolvedRecipeId: String?
     private var resolvedAuthorUid: String = ""
+    private var likeTask: Task<Void, Never>?
 
-    init(source: ReviewSource, socialRepository: SocialRepository, sharedRecipeService: SharedRecipeService, repository: RecipeRepository) {
+    init(source: ReviewSource, socialRepository: SocialRepository, sharedRecipeService: SharedRecipeService, repository: RecipeRepository, authRepository: AuthRepository) {
         self.source = source
         self.socialRepository = socialRepository
         self.sharedRecipeService = sharedRecipeService
         self.repository = repository
+        self.authRepository = authRepository
+        self.canLike = authRepository.isSignedIn
     }
 
     func load() async {
@@ -60,7 +67,23 @@ final class ReceivedRecipeViewModel {
             errorMessage = "This recipe is no longer shared by its author."
         }
         if let r = recipe { selectedServings = r.baseServings }
+        // Observe like/save counts for the resolved mirror.
+        if let rid = resolvedRecipeId, likeTask == nil {
+            likeTask = Task { [weak self] in
+                guard let self else { return }
+                for await ls in self.sharedRecipeService.likeStateStream(recipeId: rid) {
+                    if Task.isCancelled { break }
+                    self.likeState = ls
+                }
+            }
+        }
         isLoading = false
+    }
+
+    func toggleLike() {
+        guard canLike, let rid = resolvedRecipeId else { return }
+        let nowLiked = !likeState.isLiked
+        Task { await sharedRecipeService.setLiked(recipeId: rid, liked: nowLiked) }
     }
 
     func adjustServings(delta: Int) {
@@ -172,13 +195,31 @@ struct ReceivedRecipeView: View {
         }
         .navigationTitle(viewModel?.recipe?.title ?? "Recipe")
         .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            if let vm = viewModel, vm.recipe != nil {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    HStack(spacing: 4) {
+                        if vm.likeState.likeCount > 0 {
+                            Text("\(vm.likeState.likeCount)")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Button { vm.toggleLike() } label: {
+                            Image(systemName: vm.likeState.isLiked ? "heart.fill" : "heart")
+                                .foregroundStyle(vm.likeState.isLiked ? Color.red : Color.accentColor)
+                        }
+                        .disabled(!vm.canLike)
+                    }
+                }
+            }
+        }
         .onAppear {
             if viewModel == nil {
                 viewModel = ReceivedRecipeViewModel(
                     source: source,
                     socialRepository: container.socialRepository,
                     sharedRecipeService: container.sharedRecipeService,
-                    repository: container.recipeRepository
+                    repository: container.recipeRepository,
+                    authRepository: container.authRepository
                 )
                 Task { await viewModel?.load() }
             }

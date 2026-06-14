@@ -19,21 +19,33 @@ final class DiscoverViewModel {
     var shelves: [DiscoverShelf] = []
     /// Ranked, meal-appropriate pool used by "Surprise me".
     var surprisePool: [DiscoverRecipe] = []
+    // F13 Phase 3a — cross-scope search
+    var searchQuery: String = ""
+    var searchResults: [DiscoverRecipe] = []
+    var isSearching: Bool = false
 
     private let repository: RecipeRepository
     private let socialRepository: SocialRepository
     private let sharedRecipeService: SharedRecipeService
     private let authRepository: AuthRepository
+    private let userPreferences: UserPreferences
+
+    // Cached candidates from the last feed load — searched client-side (own + friends).
+    private var localCandidates: [DiscoverRecipe] = []
+    private var friendCandidatesCache: [DiscoverRecipe] = []
+    private var searchTask: Task<Void, Never>?
 
     private static let shelfLimit = 12
     private static let friendCap = 10
 
     init(repository: RecipeRepository, socialRepository: SocialRepository,
-         sharedRecipeService: SharedRecipeService, authRepository: AuthRepository) {
+         sharedRecipeService: SharedRecipeService, authRepository: AuthRepository,
+         userPreferences: UserPreferences) {
         self.repository = repository
         self.socialRepository = socialRepository
         self.sharedRecipeService = sharedRecipeService
         self.authRepository = authRepository
+        self.userPreferences = userPreferences
     }
 
     func load(isRefresh: Bool = false) async {
@@ -45,7 +57,9 @@ final class DiscoverViewModel {
         // ── Local recipes (your kitchen) — base recipes I own ──
         let local = (try? repository.fetchMyRecipes()) ?? []
         let ownTags = local.flatMap { $0.tags }
-        let topCuisines = DiscoverRanker.topCuisines(ownTags)   // implicit affinity (explicit prefs = Phase 7)
+        // Explicit cuisine prefs (Account) override the implicit collection-based affinity.
+        let explicit = userPreferences.cuisinePreferences()
+        let topCuisines = explicit.isEmpty ? DiscoverRanker.topCuisines(ownTags) : explicit
         let cookedAt = (try? repository.cookedLog()) ?? [:]
         let localIds = Set(local.map { $0.id })
 
@@ -69,10 +83,11 @@ final class DiscoverViewModel {
         }
         friendCandidates = dedupe(friendCandidates)
 
-        // ── Public recipes (recent), excluding mine + dupes ──
+        // ── Public recipes: recent ∪ popular (cold-start safe), excluding mine + dupes ──
         let friendIds = Set(friendCandidates.map { $0.recipeId })
         let recentPublic = await sharedRecipeService.getPublicRecipeSummaries()
-        let publicCandidates = dedupe(recentPublic).filter {
+        let popularPublic = await sharedRecipeService.getPopularPublicRecipes()
+        let publicCandidates = dedupe(popularPublic + recentPublic).filter {
             $0.authorUid != myUid && !localIds.contains($0.recipeId) && !friendIds.contains($0.recipeId)
         }
 
@@ -94,14 +109,21 @@ final class DiscoverViewModel {
                                source: .own, authorUid: r.authorId, authorName: r.authorDisplayName, isLocal: true)
             }
 
+        let popularShelf = publicCandidates
+            .filter { $0.saveCount > 0 || $0.likeCount > 0 }
+            .sorted { ($0.saveCount * 2 + $0.likeCount) > ($1.saveCount * 2 + $1.likeCount) }
+
         let built: [DiscoverShelf] = [
             DiscoverShelf(title: "\(meal.label) ideas", recipes: Array(leadPool.prefix(Self.shelfLimit))),
             DiscoverShelf(title: "From your kitchen", recipes: Array(ranked(ownCandidates).prefix(Self.shelfLimit))),
             DiscoverShelf(title: "From your co-chefs", recipes: Array(ranked(friendCandidates).prefix(Self.shelfLimit))),
+            DiscoverShelf(title: "Popular", recipes: Array(popularShelf.prefix(Self.shelfLimit))),
             DiscoverShelf(title: "Fresh from the community", recipes: Array(publicCandidates.prefix(Self.shelfLimit))),
             DiscoverShelf(title: "Recently cooked", recipes: Array(recentlyCooked.prefix(Self.shelfLimit)))
         ].filter { !$0.recipes.isEmpty }
 
+        localCandidates = ownCandidates
+        friendCandidatesCache = friendCandidates
         leadMeal = meal
         shelves = built
         surprisePool = leadPool.isEmpty ? all : leadPool
@@ -110,6 +132,42 @@ final class DiscoverViewModel {
     }
 
     func surprise() -> DiscoverRecipe? { surprisePool.randomElement() }
+
+    // ── Cross-scope search (own > friends > public) ──────────────────────────
+
+    private func matches(_ r: DiscoverRecipe, _ q: String) -> Bool {
+        r.title.localizedCaseInsensitiveContains(q) || r.tags.contains { $0.localizedCaseInsensitiveContains(q) }
+    }
+
+    func onSearchChange(_ raw: String) {
+        searchQuery = raw
+        searchTask?.cancel()
+        let q = raw.trimmingCharacters(in: .whitespaces)
+        guard q.count >= 2 else { searchResults = []; isSearching = false; return }
+        searchTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: 300_000_000)  // debounce
+            if Task.isCancelled { return }
+            self.isSearching = true
+            let myUid = self.authRepository.uid
+            let own = self.localCandidates.filter { self.matches($0, q) }
+            let ownIds = Set(own.map { $0.recipeId })
+            let friends = self.friendCandidatesCache.filter { self.matches($0, q) && !ownIds.contains($0.recipeId) }
+            let excluded = ownIds.union(friends.map { $0.recipeId })
+            let pub = await self.sharedRecipeService.searchPublicRecipes(query: q)
+                .filter { !excluded.contains($0.recipeId) && $0.authorUid != myUid }
+            if Task.isCancelled { return }
+            self.searchResults = self.dedupe(own + friends + pub)
+            self.isSearching = false
+        }
+    }
+
+    func clearSearch() {
+        searchTask?.cancel()
+        searchQuery = ""
+        searchResults = []
+        isSearching = false
+    }
 
     private func dedupe(_ list: [DiscoverRecipe]) -> [DiscoverRecipe] {
         var seen = Set<String>()
@@ -134,6 +192,7 @@ struct DiscoverView: View {
             }
         }
         .navigationTitle("Discover")
+        .searchable(text: searchBinding, prompt: "Search recipes & co-chefs")
         .navigationDestination(item: $openLocal) { recipe in
             RecipeDetailView(recipe: recipe)
         }
@@ -148,16 +207,27 @@ struct DiscoverView: View {
                     repository: container.recipeRepository,
                     socialRepository: container.socialRepository,
                     sharedRecipeService: container.sharedRecipeService,
-                    authRepository: container.authRepository
+                    authRepository: container.authRepository,
+                    userPreferences: container.userPreferences
                 )
                 Task { await viewModel?.load() }
             }
         }
     }
 
+    /// Binding that drives the VM's debounced cross-scope search.
+    private var searchBinding: Binding<String> {
+        Binding(
+            get: { viewModel?.searchQuery ?? "" },
+            set: { viewModel?.onSearchChange($0) }
+        )
+    }
+
     @ViewBuilder
     private func content(_ vm: DiscoverViewModel) -> some View {
-        if vm.isLoading {
+        if !vm.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+            searchResults(vm)
+        } else if vm.isLoading {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if vm.shelves.isEmpty {
             ContentUnavailableView(
@@ -199,6 +269,21 @@ struct DiscoverView: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func searchResults(_ vm: DiscoverViewModel) -> some View {
+        if vm.isSearching && vm.searchResults.isEmpty {
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if vm.searchResults.isEmpty {
+            ContentUnavailableView.search(text: vm.searchQuery)
+        } else {
+            List(vm.searchResults) { recipe in
+                Button { open(recipe) } label: { DiscoverSearchRow(recipe: recipe) }
+                    .buttonStyle(.plain)
+            }
+            .listStyle(.plain)
         }
     }
 
@@ -254,5 +339,38 @@ private struct DiscoverCard: View {
         .frame(width: 170, height: 130, alignment: .topLeading)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+// MARK: - Search result row
+
+private struct DiscoverSearchRow: View {
+    let recipe: DiscoverRecipe
+
+    private var subtitle: String? {
+        switch recipe.source {
+        case .own: return "Your recipe"
+        case .friend: return recipe.authorName.map { "Co-chef · \($0)" } ?? "Co-chef"
+        case .public: return recipe.authorName.map { "Community · \($0)" } ?? "Community"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: recipe.source == .own ? "bookmark.fill"
+                  : recipe.source == .friend ? "person.2.fill" : "globe")
+                .foregroundStyle(.secondary)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(recipe.title).font(.body).lineLimit(2)
+                if let sub = subtitle {
+                    Text(sub).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 4)
     }
 }

@@ -15,6 +15,15 @@ final class AccountViewModel {
     var followingCount: Int = 0
     var pendingFollowAction: String? = nil
 
+    // F13 Phase 3b — explicit cuisine preferences (override Discover affinity)
+    var availableCuisines: [String] = []
+    var selectedCuisines: Set<String> = []
+
+    private static let curatedCuisines = [
+        "Indian", "Italian", "Mexican", "Chinese", "Thai", "Japanese",
+        "American", "Mediterranean", "French", "Korean", "Middle Eastern"
+    ]
+
     private let authRepository: AuthRepository
     private let repository: RecipeRepository
     private let container: AppContainer
@@ -38,6 +47,28 @@ final class AccountViewModel {
         recipeCount = (try? repository.count()) ?? 0
         let ts = UserDefaults.standard.double(forKey: "amrosa_last_sync")
         lastSyncDate = ts > 0 ? Date(timeIntervalSince1970: ts) : nil
+        loadCuisinePrefs()
+    }
+
+    /// Available chips = curated list ∪ the user's own tags (minus meal words); current selection.
+    private func loadCuisinePrefs() {
+        selectedCuisines = container.userPreferences.cuisinePreferences()
+        let ownTags = ((try? repository.fetchMyRecipes()) ?? []).flatMap { $0.tags }
+        availableCuisines = (Self.curatedCuisines + ownTags)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !MealClassifier.allMealKeywords.contains($0.lowercased()) }
+            .reduce(into: [String]()) { acc, c in
+                if !acc.contains(where: { $0.lowercased() == c.lowercased() }) { acc.append(c) }
+            }
+            .sorted { $0.lowercased() < $1.lowercased() }
+    }
+
+    /// Toggle a cuisine preference and persist it (reflected on the next Discover refresh).
+    func toggleCuisine(_ cuisine: String) {
+        let key = cuisine.lowercased()
+        if selectedCuisines.contains(key) { selectedCuisines.remove(key) }
+        else { selectedCuisines.insert(key) }
+        container.userPreferences.setCuisinePreferences(selectedCuisines)
     }
 
     /// Start live social observers. Called from AccountView.onAppear.

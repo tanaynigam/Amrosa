@@ -97,6 +97,19 @@ struct AccountView: View {
                     }
                 }
 
+                // Recipe preferences (Discover affinity)
+                if !vm.availableCuisines.isEmpty {
+                    Section {
+                        FlowChips(items: vm.availableCuisines,
+                                  isSelected: { vm.selectedCuisines.contains($0.lowercased()) },
+                                  onTap: { vm.toggleCuisine($0) })
+                    } header: {
+                        Text("Recipe preferences")
+                    } footer: {
+                        Text("Pick cuisines you cook most — Discover will lean toward them.")
+                    }
+                }
+
                 // Sign Out
                 Section {
                     Button(role: .destructive) {
@@ -207,5 +220,33 @@ struct AccountView: View {
         .onDisappear {
             viewModel?.stopObserving()
         }
+    }
+}
+
+// MARK: - Wrapping selectable chips
+
+private struct FlowChips: View {
+    let items: [String]
+    let isSelected: (String) -> Bool
+    let onTap: (String) -> Void
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 8)], alignment: .leading, spacing: 8) {
+            ForEach(items, id: \.self) { item in
+                let selected = isSelected(item)
+                Button { onTap(item) } label: {
+                    Text(item)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .frame(maxWidth: .infinity)
+                        .background(selected ? Color.accentColor : Color(.secondarySystemBackground))
+                        .foregroundStyle(selected ? Color.white : Color.primary)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
