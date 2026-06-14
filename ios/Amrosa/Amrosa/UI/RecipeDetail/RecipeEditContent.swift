@@ -17,8 +17,9 @@ struct RecipeEditContent: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
+        // No own ScrollView — embedded inside RecipeDetailContent's shared ScrollView so
+        // toggling edit mode preserves scroll position (F16: same surface becomes editable).
+        VStack(alignment: .leading, spacing: 0) {
 
                 // ── Details (description + meta) — tap to edit ──
                 VStack(alignment: .leading, spacing: 6) {
@@ -80,7 +81,6 @@ struct RecipeEditContent: View {
                 .tint(.red)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 32)
-            }
         }
         .confirmationDialog("Delete this recipe?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { viewModel.deleteRecipe() }

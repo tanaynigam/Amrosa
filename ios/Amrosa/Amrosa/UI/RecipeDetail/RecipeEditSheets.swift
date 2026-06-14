@@ -35,6 +35,7 @@ struct EditSheetHost: View {
     let target: EditTarget
     @Bindable var viewModel: RecipeDetailViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var detent: PresentationDetent = .large
 
     var body: some View {
         NavigationStack {
@@ -55,7 +56,9 @@ struct EditSheetHost: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }
-        .presentationDetents([.medium, .large])
+        // Open fully expanded so every field is visible immediately (matches Android's
+        // skipPartiallyExpanded). .medium kept as a secondary drag detent.
+        .presentationDetents([.medium, .large], selection: $detent)
     }
 }
 
@@ -100,11 +103,18 @@ private struct DetailsSheet: View {
 // MARK: - Section
 
 private struct SectionSheet: View {
-    @Bindable var viewModel: RecipeDetailViewModel
+    let viewModel: RecipeDetailViewModel
     let sectionId: String?
     let dismiss: () -> Void
-    @State private var name = ""
-    @State private var seeded = false
+    @State private var name: String
+
+    init(viewModel: RecipeDetailViewModel, sectionId: String?, dismiss: @escaping () -> Void) {
+        self.viewModel = viewModel
+        self.sectionId = sectionId
+        self.dismiss = dismiss
+        let existing = viewModel.editSections.first { $0.id == sectionId }
+        _name = State(initialValue: existing?.name ?? "")
+    }
 
     private var existing: EditorSection? {
         viewModel.editSections.first { $0.id == sectionId }
@@ -134,28 +144,44 @@ private struct SectionSheet: View {
                 }
             }
         }
-        Color.clear.onAppear { if !seeded { name = existing?.name ?? ""; seeded = true } }
     }
 }
 
 // MARK: - Ingredient
 
 private struct IngredientSheet: View {
-    @Bindable var viewModel: RecipeDetailViewModel
+    let viewModel: RecipeDetailViewModel
     let sectionId: String
     let ingredientId: String?
     let dismiss: () -> Void
 
-    @State private var name = ""
-    @State private var qty = ""
-    @State private var maxQty = ""
-    @State private var unit = ""
-    @State private var freeText = ""
-    @State private var group = ""
-    @State private var optional = false
-    @State private var note = ""
-    @State private var base = EditorIngredient()
-    @State private var seeded = false
+    @State private var name: String
+    @State private var qty: String
+    @State private var maxQty: String
+    @State private var unit: String
+    @State private var freeText: String
+    @State private var group: String
+    @State private var optional: Bool
+    @State private var note: String
+    @State private var base: EditorIngredient
+
+    init(viewModel: RecipeDetailViewModel, sectionId: String, ingredientId: String?, dismiss: @escaping () -> Void) {
+        self.viewModel = viewModel
+        self.sectionId = sectionId
+        self.ingredientId = ingredientId
+        self.dismiss = dismiss
+        let b = viewModel.editSections.first { $0.id == sectionId }?
+            .ingredients.first { $0.id == ingredientId } ?? EditorIngredient()
+        _base = State(initialValue: b)
+        _name = State(initialValue: b.name)
+        _qty = State(initialValue: b.quantityValue.map(plain) ?? "")
+        _maxQty = State(initialValue: b.quantityValueMax.map(plain) ?? "")
+        _unit = State(initialValue: b.quantityUnit)
+        _freeText = State(initialValue: b.quantityValue == nil ? b.quantityDisplay : "")
+        _group = State(initialValue: b.groupLabel)
+        _optional = State(initialValue: b.isOptional)
+        _note = State(initialValue: b.shoppingNote)
+    }
 
     private var existing: EditorIngredient? {
         viewModel.editSections.first { $0.id == sectionId }?.ingredients.first { $0.id == ingredientId }
@@ -206,34 +232,29 @@ private struct IngredientSheet: View {
                 }
             }
         }
-        Color.clear.onAppear {
-            guard !seeded else { return }
-            seeded = true
-            let b = existing ?? EditorIngredient()
-            base = b
-            name = b.name
-            qty = b.quantityValue.map(plain) ?? ""
-            maxQty = b.quantityValueMax.map(plain) ?? ""
-            unit = b.quantityUnit
-            freeText = b.quantityValue == nil ? b.quantityDisplay : ""
-            group = b.groupLabel
-            optional = b.isOptional
-            note = b.shoppingNote
-        }
     }
 }
 
 // MARK: - Step
 
 private struct StepSheet: View {
-    @Bindable var viewModel: RecipeDetailViewModel
+    let viewModel: RecipeDetailViewModel
     let sectionId: String
     let stepId: String?
     let dismiss: () -> Void
 
-    @State private var instruction = ""
-    @State private var ids: Set<String> = []
-    @State private var seeded = false
+    @State private var instruction: String
+    @State private var ids: Set<String>
+
+    init(viewModel: RecipeDetailViewModel, sectionId: String, stepId: String?, dismiss: @escaping () -> Void) {
+        self.viewModel = viewModel
+        self.sectionId = sectionId
+        self.stepId = stepId
+        self.dismiss = dismiss
+        let e = viewModel.editSections.first { $0.id == sectionId }?.steps.first { $0.id == stepId }
+        _instruction = State(initialValue: e?.instruction ?? "")
+        _ids = State(initialValue: Set(e?.ingredientIds ?? []))
+    }
 
     private var existing: EditorStep? {
         viewModel.editSections.first { $0.id == sectionId }?.steps.first { $0.id == stepId }
@@ -286,12 +307,6 @@ private struct StepSheet: View {
                     Label("Delete step", systemImage: "trash")
                 }
             }
-        }
-        Color.clear.onAppear {
-            guard !seeded else { return }
-            seeded = true
-            instruction = existing?.instruction ?? ""
-            ids = Set(existing?.ingredientIds ?? [])
         }
     }
 }

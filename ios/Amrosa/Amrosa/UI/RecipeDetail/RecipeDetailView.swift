@@ -39,16 +39,12 @@ struct RecipeDetailView: View {
     private var coreView: some View {
         Group {
             if let vm = viewModel {
-                if vm.isEditMode {
-                    RecipeEditContent(viewModel: vm)
-                } else {
-                    RecipeDetailContent(
-                        viewModel: vm,
-                        onOpenVariant: { openVariant = $0 },
-                        onAddVariant: { newVariantName = ""; showAddVariant = true },
-                        onCookFromSection: { cookFromSectionId = $0; showCookingMode = true }
-                    )
-                }
+                RecipeDetailContent(
+                    viewModel: vm,
+                    onOpenVariant: { openVariant = $0 },
+                    onAddVariant: { newVariantName = ""; showAddVariant = true },
+                    onCookFromSection: { cookFromSectionId = $0; showCookingMode = true }
+                )
             } else {
                 ProgressView()
             }
@@ -289,6 +285,11 @@ private struct RecipeDetailContent: View {
     var body: some View {
         ScrollViewReader { proxy in
         ScrollView {
+            // F16: in edit mode the SAME scroll surface renders the editable draft, so the
+            // reader's scroll position is preserved when toggling Edit on/off.
+            if viewModel.isEditMode {
+                RecipeEditContent(viewModel: viewModel)
+            } else {
             LazyVStack(alignment: .leading, spacing: 0) {
 
                 // ── Variation chips (F10): Original · <names> · ＋ Variation ──
@@ -549,6 +550,7 @@ private struct RecipeDetailContent: View {
 
                 Spacer(minLength: 32)
             }
+            } // end read-only branch
         }
         } // ScrollViewReader
     }
