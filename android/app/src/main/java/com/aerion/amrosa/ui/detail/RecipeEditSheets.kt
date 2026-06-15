@@ -163,6 +163,7 @@ private fun SectionSheet(target: EditTarget.Section, draft: EditDraft, vm: Recip
 }
 
 // ── Ingredient ──
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun IngredientSheet(target: EditTarget.Ingredient, draft: EditDraft, vm: RecipeDetailViewModel, onDismiss: () -> Unit) {
     val section = draft.sections.find { it.id == target.sectionId }
@@ -178,6 +179,14 @@ private fun IngredientSheet(target: EditTarget.Ingredient, draft: EditDraft, vm:
     var group by remember(target) { mutableStateOf(base.groupLabel) }
     var optional by remember(target) { mutableStateOf(base.isOptional) }
     var note by remember(target) { mutableStateOf(base.shoppingNote) }
+
+    // Substitute linking — other ingredients this one can stand in for.
+    val others = draft.sections.flatMap { it.ingredients }
+        .filter { it.id != base.id && it.name.isNotBlank() }
+    val initialSubTarget = existing?.substituteGroupId?.let { grp ->
+        others.firstOrNull { it.substituteGroupId == grp }?.id
+    }
+    var subTargetId by remember(target) { mutableStateOf(initialSubTarget) }
 
     fun build(): EditorIngredient {
         val v = qty.toDoubleOrNull()
@@ -224,8 +233,38 @@ private fun IngredientSheet(target: EditTarget.Ingredient, draft: EditDraft, vm:
     OutlinedTextField(note, { note = it; push() }, label = { Text("Shopping note (e.g. Amul)") },
         modifier = Modifier.fillMaxWidth(), singleLine = true)
 
+    // ── Substitute linking — mark this as an alternative of another ingredient (they share a
+    // group and offer a swap chip on the detail view). For a new ingredient the link is on Add. ──
+    if (others.isNotEmpty()) {
+        var subExpanded by remember(target) { mutableStateOf(false) }
+        ExposedDropdownMenuBox(expanded = subExpanded, onExpandedChange = { subExpanded = it }) {
+            OutlinedTextField(
+                value = subTargetId?.let { id -> others.firstOrNull { it.id == id }?.name } ?: "None",
+                onValueChange = {}, readOnly = true, label = { Text("Substitute for") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(subExpanded) },
+                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+            )
+            ExposedDropdownMenu(subExpanded, { subExpanded = false }) {
+                DropdownMenuItem(text = { Text("None") }, onClick = {
+                    subTargetId = null; subExpanded = false
+                    if (existing != null) vm.linkSubstitute(existing.id, null)
+                })
+                others.forEach { other ->
+                    DropdownMenuItem(text = { Text(other.name) }, onClick = {
+                        subTargetId = other.id; subExpanded = false
+                        if (existing != null) vm.linkSubstitute(existing.id, other.id)
+                    })
+                }
+            }
+        }
+    }
+
     if (existing == null) {
-        Button(onClick = { vm.addIngredient(target.sectionId, build()); onDismiss() },
+        Button(onClick = {
+            vm.addIngredient(target.sectionId, build())
+            subTargetId?.let { vm.linkSubstitute(base.id, it) }
+            onDismiss()
+        },
             modifier = Modifier.fillMaxWidth(), enabled = name.isNotBlank()) {
             Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add ingredient")
         }

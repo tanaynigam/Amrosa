@@ -17,5 +17,15 @@ class UserPreferences(context: Context) {
         prefs.edit().putStringSet(KEY_CUISINES, cuisines.map { it.lowercase() }.toSet()).apply()
     }
 
-    private companion object { const val KEY_CUISINES = "cuisine_prefs" }
+    /** Whether optional ingredients start included (their chip pre-selected) on a recipe. Default true. */
+    fun includeOptionalsByDefault(): Boolean = prefs.getBoolean(KEY_OPT_DEFAULT, true)
+
+    fun setIncludeOptionalsByDefault(value: Boolean) {
+        prefs.edit().putBoolean(KEY_OPT_DEFAULT, value).apply()
+    }
+
+    private companion object {
+        const val KEY_CUISINES = "cuisine_prefs"
+        const val KEY_OPT_DEFAULT = "include_optionals_default"
+    }
 }

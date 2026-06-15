@@ -438,11 +438,17 @@ the pinned top bar; Cancel is the nav X.
   each list. **Notes & Comments are hidden in edit** (they sit below the fold, so hiding them doesn't shift
   the visible content); the **Add-section + Delete-recipe footer sits right after the steps** (where Notes
   would be). Top-bar view actions (Share/Cart/Cooking) are replaced by ＋/Save/Cancel.
-- **Optional & substitute ingredients (view)** — optionals stay **inline** in their natural spot with a
-  leading **include/exclude checkbox** (default included; `enabledOptionals` defaults to all optional ids)
-  and a "· optional" tag; unchecking greys the row and drops it from scaling/cooking. Substitute groups
-  collapse to the selected option in the list, with **swap chips inline under that row** (`onSelectSubstitute`
-  → `selectSubstitute`); the old separate "Options" section + `SubstituteSelector` were removed.
+- **Optional ingredients (view)** — each section renders a **chip row at its start** (`OptionalChipsRow`),
+  one chip per optional ingredient; selecting a chip drops the ingredient into the list (it shows with a
+  "· optional" tag), unselecting hides it (`visibleIngredients` filters optionals by `enabledOptionals`).
+  The default selected set comes from **`UserPreferences.includeOptionalsByDefault()`** (default true), a
+  toggle in the **Account → Ingredients** section. The view branch iterates `recipe.sections` so the chip
+  row shows even when every optional is currently hidden.
+- **Substitute ingredients** — view: a group collapses to the selected option with **swap chips inline
+  under that row** (`onSelectSubstitute` → `selectSubstitute`); the old separate "Options" section +
+  `SubstituteSelector` were removed. Edit: the ingredient sheet has a **"Substitute for" picker** of the
+  other ingredients → `RecipeDetailViewModel.linkSubstitute(ingredientId, targetId?)` (shares/creates a
+  `substituteGroupId`; null unlinks), so substitutes can be created on new or existing ingredients.
 - **Empty sections** — in edit mode every section renders its header + a "＋ Add ingredient" row and a
   "＋ Add step" row (even when empty), so a freshly added section can be filled in place. In **view mode**
   a section with no ingredients shows no ingredient sub-header, and a section with no steps shows no step

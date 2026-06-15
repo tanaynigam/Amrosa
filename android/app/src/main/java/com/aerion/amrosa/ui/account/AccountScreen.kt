@@ -274,6 +274,34 @@ fun AccountScreen(
                 HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
             }
 
+            // ── Ingredient display preference ─────────────────────────────────
+            AccountSectionHeader("Ingredients")
+            var includeOptionals by remember { mutableStateOf(app.container.userPreferences.includeOptionalsByDefault()) }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Include optional ingredients by default",
+                        style = MaterialTheme.typography.bodyLarge)
+                    Text("When on, a recipe's optional ingredients start included; turn off to opt in per recipe.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = includeOptionals,
+                    onCheckedChange = {
+                        includeOptionals = it
+                        app.container.userPreferences.setIncludeOptionalsByDefault(it)
+                    }
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
             // ── Sync & Storage ────────────────────────────────────────────────
             AccountSectionHeader("Sync & Storage")
             AccountRow("Recipes on this device", "${state.recipeCount}")

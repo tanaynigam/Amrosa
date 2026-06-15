@@ -3,6 +3,7 @@ package com.aerion.amrosa.ui.detail
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.aerion.amrosa.data.UserPreferences
 import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.entity.*
 import com.aerion.amrosa.data.remote.RecipeSyncService
@@ -107,7 +108,8 @@ data class RecipeDetailUiState(
     val visibleIngredients: List<Ingredient> get() {
         val recipe = recipe ?: return emptyList()
         return recipe.ingredients.filter { ing ->
-            // Optionals always stay in the list (the row carries an include/exclude checkbox).
+            // Optional ingredients show only when their section-top chip is selected.
+            if (ing.isOptional && ing.id !in enabledOptionals) return@filter false
             // Substitute groups collapse to the selected option (alternatives are offered inline).
             if (ing.substituteGroupId != null) {
                 val selectedId = selectedSubstitutes[ing.substituteGroupId]
@@ -168,6 +170,7 @@ class RecipeDetailViewModel(
     private val syncService: RecipeSyncService,
     private val recipeId: String,
     private val gson: Gson,
+    private val userPreferences: UserPreferences,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RecipeDetailUiState())
@@ -221,11 +224,11 @@ class RecipeDetailViewModel(
                 ?.mapValues { (_, ings) -> ings.first().id }
                 ?: emptyMap()
 
-            // Optional ingredients are INCLUDED by default (and stay in the list either way);
-            // the checkbox just toggles whether they count toward scaling/cooking/shopping.
-            val defaultOptionals = recipe?.ingredients
-                ?.filter { it.isOptional }?.map { it.id }?.toSet()
-                ?: emptySet()
+            // Optional ingredients: their section-top chip starts selected (included) when the
+            // user's "include optionals by default" preference is on (default true).
+            val defaultOptionals = if (userPreferences.includeOptionalsByDefault())
+                recipe?.ingredients?.filter { it.isOptional }?.map { it.id }?.toSet() ?: emptySet()
+            else emptySet()
 
             val anchorQty = recipe?.scaleIngredientId?.let { anchorId ->
                 recipe.ingredients.find { it.id == anchorId }?.quantityValue
@@ -655,6 +658,33 @@ class RecipeDetailViewModel(
     fun moveStepUp(sectionId: String, id: String) = transformSection(sectionId) { it.copy(steps = it.steps.moved(id, { s -> s.id }, -1)) }
     fun moveStepDown(sectionId: String, id: String) = transformSection(sectionId) { it.copy(steps = it.steps.moved(id, { s -> s.id }, +1)) }
 
+    /**
+     * Link [ingredientId] as a substitute alternative of [targetId] (they share a
+     * substituteGroupId, creating one if needed). [targetId] == null unlinks the ingredient
+     * from its group. Operates across all sections by id.
+     */
+    fun linkSubstitute(ingredientId: String, targetId: String?) = updateDraft { d ->
+        if (targetId == null) {
+            d.copy(sections = d.sections.map { s ->
+                s.copy(ingredients = s.ingredients.map {
+                    if (it.id == ingredientId) it.copy(substituteGroupId = null) else it
+                })
+            })
+        } else {
+            val target = d.sections.flatMap { it.ingredients }.find { it.id == targetId }
+            val groupId = target?.substituteGroupId ?: "subgrp-${UUID.randomUUID()}"
+            d.copy(sections = d.sections.map { s ->
+                s.copy(ingredients = s.ingredients.map { ing ->
+                    when (ing.id) {
+                        ingredientId -> ing.copy(substituteGroupId = groupId)
+                        targetId -> if (ing.substituteGroupId == null) ing.copy(substituteGroupId = groupId) else ing
+                        else -> ing
+                    }
+                })
+            })
+        }
+    }
+
     /** #4 — set which ingredients a step uses (drives the cooking-mode card). */
     fun toggleStepIngredient(sectionId: String, stepId: String, ingredientId: String) =
         transformSection(sectionId) { s ->
@@ -863,11 +893,12 @@ class RecipeDetailViewModel(
             syncService: RecipeSyncService,
             recipeId: String,
             gson: Gson,
+            userPreferences: UserPreferences,
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    RecipeDetailViewModel(repository, authRepository, sharedRecipeService, socialRepository, syncService, recipeId, gson) as T
+                    RecipeDetailViewModel(repository, authRepository, sharedRecipeService, socialRepository, syncService, recipeId, gson, userPreferences) as T
             }
     }
 }

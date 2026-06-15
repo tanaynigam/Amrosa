@@ -60,6 +60,7 @@ fun RecipeDetailScreen(
             syncService = app.container.syncService,
             recipeId = recipeId,
             gson = app.container.gson,
+            userPreferences = app.container.userPreferences,
         )
     )
     val state by viewModel.uiState.collectAsState()
@@ -675,8 +676,7 @@ fun RecipeDetailScreen(
                 }
             }
 
-            // Reusable editable ingredient row. In view mode it also renders the inline
-            // include/exclude checkbox (optionals) and substitute-swap chips.
+            // Reusable editable ingredient row. In view mode it also renders substitute-swap chips.
             fun LazyListScope.ingredientRowItems(ings: List<Ingredient>, fallbackSectionId: String?) {
                 itemsIndexed(ings, key = { _, it -> it.id }) { idx, ing ->
                     val subOptions = if (!editing && ing.substituteGroupId != null)
@@ -692,8 +692,6 @@ fun RecipeDetailScreen(
                             ingredient = ing,
                             scaledQty = QuantityScaler.scale(ing, effScale, effUnit),
                             isOptional = ing.isOptional,
-                            isOptionalEnabled = ing.id in state.enabledOptionals,
-                            onToggleOptional = { viewModel.toggleOptional(ing.id) },
                             editing = editing,
                             substituteOptions = subOptions,
                             onSelectSubstitute = { id ->
@@ -713,6 +711,15 @@ fun RecipeDetailScreen(
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
             }
+            // View-mode: one chip per optional ingredient in a section; selecting it drops the
+            // ingredient into the list, unselecting hides it.
+            fun LazyListScope.optionalChips(optionals: List<Ingredient>) = item(key = "opt-chips-${optionals.first().sectionId}") {
+                OptionalChipsRow(
+                    optionals = optionals,
+                    enabled = state.enabledOptionals,
+                    onToggle = { viewModel.toggleOptional(it) },
+                )
+            }
 
             if (editing) {
                 // Edit mode: render EVERY draft section (incl. empty) so each gets a header +
@@ -730,17 +737,30 @@ fun RecipeDetailScreen(
                     }
                 }
             } else {
-                // View mode: blocks already exclude empty sections (no header shown for them).
-                // Reserve the "＋ Add ingredient" row's height after each block so toggling edit
-                // doesn't change list height.
-                ingredientBlocks.forEach { (sectionName, groups) ->
-                    val blockSectionId = groups.flatMap { it.second }.firstOrNull()?.sectionId
-                    if (sectionName != null) ingredientSubHeader(sectionName)
-                    groups.forEach { (label, ings) ->
+                // View mode: iterate sections so the optional chip row shows even when every
+                // optional in a section is currently hidden. Reserve the add-row height too.
+                val multiSection = recipe.sections.size > 1
+                val knownIds = recipe.sections.map { it.id }.toSet()
+                recipe.sections.sortedBy { it.orderIndex }.forEach { section ->
+                    val secVisible = state.visibleIngredients.filter { it.sectionId == section.id }
+                    val secOptionals = recipe.ingredients.filter { it.sectionId == section.id && it.isOptional }
+                    if (secVisible.isEmpty() && secOptionals.isEmpty()) return@forEach
+                    if (multiSection) ingredientSubHeader(section.name)
+                    if (secOptionals.isNotEmpty()) optionalChips(secOptionals)
+                    secVisible.groupBy { it.groupLabel ?: "" }.forEach { (label, ings) ->
                         if (label.isNotBlank()) groupLabel(label)
-                        ingredientRowItems(ings, blockSectionId)
+                        ingredientRowItems(ings, section.id)
                     }
-                    item(key = "add-ing-reserve-$blockSectionId") { Spacer(Modifier.height(AddRowHeight)) }
+                    item(key = "add-ing-reserve-${section.id}") { Spacer(Modifier.height(AddRowHeight)) }
+                }
+                // Section-less / unknown-section ingredients (rare) — trailing "Other" block.
+                val orphan = state.visibleIngredients.filter { it.sectionId == null || it.sectionId !in knownIds }
+                if (orphan.isNotEmpty()) {
+                    if (multiSection) ingredientSubHeader("Other")
+                    orphan.groupBy { it.groupLabel ?: "" }.forEach { (label, ings) ->
+                        if (label.isNotBlank()) groupLabel(label)
+                        ingredientRowItems(ings, null)
+                    }
                 }
             }
 
@@ -1603,47 +1623,59 @@ private fun VisibilityOption(
     }
 }
 
+/** Section-start chips for a section's optional ingredients — selecting drops the ingredient
+ *  into the list, unselecting hides it. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun OptionalChipsRow(
+    optionals: List<Ingredient>,
+    enabled: Set<String>,
+    onToggle: (String) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text("Optional — tap to include", style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            optionals.forEach { opt ->
+                FilterChip(
+                    selected = opt.id in enabled,
+                    onClick = { onToggle(opt.id) },
+                    label = { Text(opt.name, style = MaterialTheme.typography.labelSmall) },
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun IngredientRow(
     ingredient: Ingredient,
     scaledQty: String,
     isOptional: Boolean,
-    isOptionalEnabled: Boolean,
-    onToggleOptional: () -> Unit,
     editing: Boolean = false,
     substituteOptions: List<Ingredient> = emptyList(),
     onSelectSubstitute: (String) -> Unit = {},
 ) {
-    // In view mode an optional ingredient carries an inline include/exclude checkbox, and a
-    // substitute group shows swap chips under the row. In edit mode the row is plain (the whole
-    // row taps through to the edit sheet via the wrapping Modifier.editable).
-    val excluded = isOptional && !isOptionalEnabled
+    // Bullet line. Optionals (already filtered to the included ones) just carry a "· optional"
+    // tag; a substitute group shows swap chips under the row. In edit mode the row is plain and
+    // the whole row taps through to the edit sheet via the wrapping Modifier.editable.
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (isOptional && !editing) {
-                Checkbox(
-                    checked = isOptionalEnabled,
-                    onCheckedChange = { onToggleOptional() },
-                    modifier = Modifier.size(36.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-            } else {
-                Text(
-                    "•",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.padding(start = 4.dp, end = 12.dp)
-                )
-            }
+            Text(
+                "•",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(start = 4.dp, end = 12.dp)
+            )
             Text(
                 text = buildString {
                     append(ingredient.name); append("  —  "); append(scaledQty)
                     if (isOptional) append("   ·  optional")
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (excluded) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
         // Substitute swap chips — only when this row stands for a group with >1 option.
