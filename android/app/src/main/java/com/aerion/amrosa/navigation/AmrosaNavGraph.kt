@@ -152,6 +152,9 @@ private fun MainAppScaffold() {
                             val n = Uri.encode(r.authorName.orEmpty())
                             navController.navigate("profileRecipe/${r.recipeId}?authorUid=$a&authorName=$n")
                         }
+                    },
+                    onProfileClick = { uid, name ->
+                        navController.navigate("profile/$uid?name=${Uri.encode(name)}")
                     }
                 )
             }

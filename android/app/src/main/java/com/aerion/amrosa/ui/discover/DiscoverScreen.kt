@@ -1,5 +1,6 @@
 package com.aerion.amrosa.ui.discover
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,7 +27,8 @@ import com.aerion.amrosa.ui.components.CompactSearchField
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiscoverScreen(
-    onRecipeClick: (DiscoverRecipe) -> Unit = {}
+    onRecipeClick: (DiscoverRecipe) -> Unit = {},
+    onProfileClick: (uid: String, name: String) -> Unit = { _, _ -> },
 ) {
     val app = LocalContext.current.applicationContext as AmrosaApplication
     val vm: DiscoverViewModel = viewModel(
@@ -64,27 +67,45 @@ fun DiscoverScreen(
             CompactSearchField(
                 value = state.searchQuery,
                 onValueChange = vm::onSearchChange,
-                placeholder = "Search recipes — yours, co-chefs, public",
+                placeholder = "Search recipes or people",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
             )
 
             if (state.searchQuery.isNotBlank()) {
-                // ── Search results ──────────────────────────────────────────
+                // ── Search results (people + recipes) ───────────────────────
+                val hasUsers = state.userResults.isNotEmpty()
+                val hasRecipes = state.searchResults.isNotEmpty()
                 when {
-                    state.isSearching && state.searchResults.isEmpty() ->
+                    state.isSearching && !hasUsers && !hasRecipes ->
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator()
                         }
-                    state.searchResults.isEmpty() ->
+                    !hasUsers && !hasRecipes ->
                         Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                            Text("No recipes match \"${state.searchQuery.trim()}\"",
+                            Text("No matches for \"${state.searchQuery.trim()}\"",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                         }
                     else -> LazyColumn(Modifier.fillMaxSize()) {
-                        items(state.searchResults, key = { it.recipeId }) { r ->
-                            SearchResultRow(r, onClick = { onRecipeClick(r) })
-                            HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                        if (hasUsers) {
+                            item(key = "people-hdr") { SearchSectionLabel("People") }
+                            items(state.userResults, key = { "u-${it.uid}" }) { u ->
+                                UserResultRow(
+                                    user = u,
+                                    status = state.followStatuses[u.uid] ?: "none",
+                                    isLoading = state.pendingFollow == u.uid,
+                                    onFollow = { vm.sendFollowRequest(u) },
+                                    onClick = { onProfileClick(u.uid, u.displayName) },
+                                )
+                                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                            }
+                        }
+                        if (hasRecipes) {
+                            item(key = "recipes-hdr") { SearchSectionLabel("Recipes") }
+                            items(state.searchResults, key = { it.recipeId }) { r ->
+                                SearchResultRow(r, onClick = { onRecipeClick(r) })
+                                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                            }
                         }
                     }
                 }
@@ -126,6 +147,65 @@ fun DiscoverScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchSectionLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp)
+    )
+}
+
+/** A person from the People search: tap → their profile; button → send co-chef request. */
+@Composable
+private fun UserResultRow(
+    user: com.aerion.amrosa.domain.model.UserProfile,
+    status: String,
+    isLoading: Boolean,
+    onFollow: () -> Unit,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(36.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(MaterialTheme.colorScheme.secondaryContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(user.displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSecondaryContainer)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(user.displayName, style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium, maxLines = 1)
+            user.email?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        when {
+            isLoading -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            status == "accepted" -> AssistChip(onClick = onClick,
+                leadingIcon = { Icon(Icons.Default.People, null, Modifier.size(16.dp)) },
+                label = { Text("Co-Chef") })
+            status == "pending" -> AssistChip(onClick = {}, enabled = false,
+                label = { Text("Requested") })
+            else -> FilledTonalButton(onClick = onFollow, contentPadding = PaddingValues(horizontal = 14.dp)) {
+                Icon(Icons.Default.PersonAdd, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Add")
             }
         }
     }

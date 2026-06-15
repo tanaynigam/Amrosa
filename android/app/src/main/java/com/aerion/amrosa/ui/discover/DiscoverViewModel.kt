@@ -10,6 +10,7 @@ import com.aerion.amrosa.data.remote.SocialRepository
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.domain.model.DiscoverRecipe
 import com.aerion.amrosa.domain.model.RecipeSource
+import com.aerion.amrosa.domain.model.UserProfile
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -31,6 +32,10 @@ data class DiscoverUiState(
     val searchQuery: String = "",
     val searchResults: List<DiscoverRecipe> = emptyList(),
     val isSearching: Boolean = false,
+    // People search (name / email) — surfaced alongside recipe results.
+    val userResults: List<UserProfile> = emptyList(),
+    val followStatuses: Map<String, String> = emptyMap(),  // uid → none|pending|accepted
+    val pendingFollow: String? = null,                     // uid currently being requested
 )
 
 class DiscoverViewModel(
@@ -153,7 +158,7 @@ class DiscoverViewModel(
         searchJob?.cancel()
         val q = raw.trim()
         if (q.length < 2) {
-            _uiState.update { it.copy(searchResults = emptyList(), isSearching = false) }
+            _uiState.update { it.copy(searchResults = emptyList(), userResults = emptyList(), isSearching = false) }
             return
         }
         searchJob = viewModelScope.launch {
@@ -166,18 +171,34 @@ class DiscoverViewModel(
             val excluded = ownIds + friends.map { it.recipeId }
             val public = runCatching { sharedRecipeService.searchPublicRecipes(q) }.getOrDefault(emptyList())
                 .filter { it.recipeId !in excluded && it.authorUid != myUid }
+            // People search (name / email) + their follow status.
+            val users = runCatching { socialRepository.searchUsers(q) }.getOrDefault(emptyList())
+            val statuses = users.associate { it.uid to runCatching { socialRepository.getFollowStatus(it.uid) }.getOrDefault("none") }
             _uiState.update {
                 it.copy(
                     searchResults = (own + friends + public).distinctBy { r -> r.recipeId },
+                    userResults = users,
+                    followStatuses = statuses,
                     isSearching = false
                 )
             }
         }
     }
 
+    /** Send a co-chef request to a user from the People search results. */
+    fun sendFollowRequest(user: UserProfile) {
+        _uiState.update { it.copy(pendingFollow = user.uid) }
+        viewModelScope.launch {
+            runCatching { socialRepository.sendFollowRequest(user.uid, user.displayName) }
+            _uiState.update {
+                it.copy(pendingFollow = null, followStatuses = it.followStatuses + (user.uid to "pending"))
+            }
+        }
+    }
+
     fun clearSearch() {
         searchJob?.cancel()
-        _uiState.update { it.copy(searchQuery = "", searchResults = emptyList(), isSearching = false) }
+        _uiState.update { it.copy(searchQuery = "", searchResults = emptyList(), userResults = emptyList(), isSearching = false) }
     }
 
     companion object {

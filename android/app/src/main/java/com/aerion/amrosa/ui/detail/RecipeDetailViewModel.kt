@@ -254,6 +254,18 @@ class RecipeDetailViewModel(
                 recipe?.ingredients?.filter { it.isOptional }?.map { it.id }?.toSet() ?: emptySet()
             else emptySet()
 
+            // Restore the user's last per-recipe selections, validated against the current recipe
+            // (ingredients may have changed since they were saved).
+            val ingById = recipe?.ingredients?.associateBy { it.id } ?: emptyMap()
+            val savedSubs = userPreferences.recipeSubstitutes(recipeId).filter { (grp, id) ->
+                ingById[id]?.substituteGroupId == grp
+            }
+            val initialSubs = defaultSubs + savedSubs   // saved choices win per group
+            val optionalIds = recipe?.ingredients?.filter { it.isOptional }?.map { it.id }?.toSet() ?: emptySet()
+            val initialOptionals = userPreferences.recipeEnabledOptionals(recipeId)
+                ?.filter { it in optionalIds }?.toSet()
+                ?: defaultOptionals
+
             val anchorQty = recipe?.scaleIngredientId?.let { anchorId ->
                 recipe.ingredients.find { it.id == anchorId }?.quantityValue
             }
@@ -287,9 +299,9 @@ class RecipeDetailViewModel(
                     scaleAnchorQty = if (preserveSelections)
                         (prev.scaleAnchorQty ?: anchorQty) else anchorQty,
                     selectedSubstitutes = if (preserveSelections && prev.selectedSubstitutes.isNotEmpty())
-                        prev.selectedSubstitutes else defaultSubs,
+                        prev.selectedSubstitutes else initialSubs,
                     enabledOptionals = if (preserveSelections && prev.enabledOptionals.isNotEmpty())
-                        prev.enabledOptionals else defaultOptionals,
+                        prev.enabledOptionals else initialOptionals,
                     isLoading = false,
                     isOwner = isOwner,
                     variants = variantRefs,
@@ -424,6 +436,8 @@ class RecipeDetailViewModel(
 
     fun selectSubstitute(groupId: String, ingredientId: String) {
         _uiState.update { it.copy(selectedSubstitutes = it.selectedSubstitutes + (groupId to ingredientId)) }
+        // Remember this choice for next time the recipe is opened.
+        userPreferences.setRecipeSubstitutes(recipeId, _uiState.value.selectedSubstitutes)
     }
 
     fun toggleOptional(ingredientId: String) {
@@ -432,6 +446,7 @@ class RecipeDetailViewModel(
                 state.enabledOptionals - ingredientId else state.enabledOptionals + ingredientId
             state.copy(enabledOptionals = updated)
         }
+        userPreferences.setRecipeEnabledOptionals(recipeId, _uiState.value.enabledOptionals)
     }
 
     // ── Notes ─────────────────────────────────────────────────────────────────
