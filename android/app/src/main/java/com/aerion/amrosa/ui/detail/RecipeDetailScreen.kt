@@ -511,6 +511,7 @@ fun RecipeDetailScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 48.dp)   // constant height so toggling edit doesn't shift scroll
                         .padding(horizontal = 16.dp, vertical = 4.dp)
                         .editable(editing, 1) { editTarget = EditTarget.Details },
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -617,14 +618,15 @@ fun RecipeDetailScreen(
                 .filter { it.substituteGroupId != null }
                 .groupBy { it.substituteGroupId!! }
 
-            if (substituteGroups.isNotEmpty() && !editing) {
+            if (substituteGroups.isNotEmpty()) {
                 item { SectionHeader("Options") }
                 substituteGroups.forEach { (groupId, options) ->
                     item {
+                        // Kept visible (read-only) in edit so the layout is identical to view.
                         SubstituteSelector(
                             options = options,
                             selectedId = state.selectedSubstitutes[groupId] ?: options.first().id,
-                            onSelect = { viewModel.selectSubstitute(groupId, it) }
+                            onSelect = { if (!editing) viewModel.selectSubstitute(groupId, it) }
                         )
                     }
                 }
@@ -644,11 +646,24 @@ fun RecipeDetailScreen(
                 ) {
                     Text("Ingredients", style = MaterialTheme.typography.headlineMedium)
 
-                    // Unit toggle — only shown when at least one ingredient has conversions; hidden while editing
                     val hasConversions = recipe.ingredients.any {
                         it.quantityValueMetric != null || it.quantityValueImperial != null
                     }
-                    if (hasConversions && !editing) {
+                    if (editing) {
+                        // Same slot as the unit toggle: bulk "Update unit conversions" (re-asks Gemini).
+                        AssistChip(
+                            onClick = { if (!state.isConverting) viewModel.updateConversions() },
+                            enabled = !state.isConverting,
+                            leadingIcon = {
+                                if (state.isConverting)
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                else
+                                    Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = { Text("Update conversions", style = MaterialTheme.typography.labelSmall) },
+                        )
+                    } else if (hasConversions) {
+                        // Unit toggle — only when at least one ingredient has conversions.
                         SingleChoiceSegmentedButtonRow {
                             UnitMode.entries.forEachIndexed { index, mode ->
                                 SegmentedButton(
@@ -823,12 +838,12 @@ fun RecipeDetailScreen(
                 item(key = "edit-bottom-spacer") { Spacer(Modifier.height(80.dp)) }
             }
 
-            if (!editing) item {
+            item {
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             }
 
-            // ── Notes ───────────────────────────────────────────────
-            if (!editing) item {
+            // ── Notes (kept visible, read-only, while editing) ───────────────
+            item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -837,8 +852,10 @@ fun RecipeDetailScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Notes", style = MaterialTheme.typography.headlineMedium)
-                    IconButton(onClick = { showNoteInput = !showNoteInput }) {
-                        Icon(Icons.Default.AddComment, contentDescription = "Add note")
+                    if (!editing) {
+                        IconButton(onClick = { showNoteInput = !showNoteInput }) {
+                            Icon(Icons.Default.AddComment, contentDescription = "Add note")
+                        }
                     }
                 }
             }
@@ -866,11 +883,11 @@ fun RecipeDetailScreen(
                 }
             }
 
-            if (!editing) items(state.notes, key = { it.id }) { note ->
-                NoteRow(note = note, onDelete = { viewModel.deleteNote(note.id) })
+            items(state.notes, key = { it.id }) { note ->
+                NoteRow(note = note, onDelete = if (editing) null else { -> viewModel.deleteNote(note.id) })
             }
 
-            if (state.notes.isEmpty() && !showNoteInput && !editing) {
+            if (state.notes.isEmpty() && !showNoteInput) {
                 item {
                     Text(
                         "No notes yet. Tap + to add one.",
@@ -881,8 +898,8 @@ fun RecipeDetailScreen(
                 }
             }
 
-            // ── Comments (shown when recipe is shared — Co-Chefs or Public) ──────────────
-            if (state.isPublished && !editing) {
+            // ── Comments (shown when recipe is shared; read-only while editing) ──────────
+            if (state.isPublished) {
                 item {
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     Row(
@@ -905,8 +922,8 @@ fun RecipeDetailScreen(
                     }
                 }
 
-                // Comment input
-                item {
+                // Comment input — hidden while editing (read-only)
+                if (!editing) item {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -953,7 +970,7 @@ fun RecipeDetailScreen(
                         .container.authRepository.uid
                     CommentRow(
                         comment = comment,
-                        canDelete = currentUid == comment.authorId || state.isOwner,
+                        canDelete = !editing && (currentUid == comment.authorId || state.isOwner),
                         onDelete = { viewModel.deleteComment(comment.id) }
                     )
                 }
@@ -1774,7 +1791,7 @@ private fun CommentRow(
 }
 
 @Composable
-private fun NoteRow(note: RecipeNote, onDelete: () -> Unit) {
+private fun NoteRow(note: RecipeNote, onDelete: (() -> Unit)?) {
     val dateStr = remember(note.createdAt) {
         SimpleDateFormat("MMM d, yyyy  h:mm a", Locale.getDefault()).format(Date(note.createdAt))
     }
@@ -1796,10 +1813,12 @@ private fun NoteRow(note: RecipeNote, onDelete: () -> Unit) {
                 Text(dateStr, style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.DeleteOutline, contentDescription = "Delete note",
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (onDelete != null) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.DeleteOutline, contentDescription = "Delete note",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }
