@@ -6,9 +6,10 @@ import Foundation
 
 extension RecipeDetailViewModel {
 
-    /// Effective scale + unit for quantity display (1×/original while editing).
-    private var effScale: Double { isEditMode ? 1.0 : scaleFactor }
-    private var effUnit: UnitMode { isEditMode ? .original : unitMode }
+    /// Effective scale + unit for quantity display. Identical in both modes so flipping into edit
+    /// changes NOTHING on screen except the jiggle/outline affordance.
+    private var effScale: Double { scaleFactor }
+    private var effUnit: UnitMode { unitMode }
 
     // ── Header metadata (draft in edit mode, recipe otherwise) ──
 
@@ -36,8 +37,15 @@ extension RecipeDetailViewModel {
 
     // ── Sections ──
 
+    /// A draft that's just one nameless section behaves like a "no sections" recipe (steps render
+    /// flat, no section header) so the view↔edit layout matches exactly for simple recipes.
+    private var editIsSingleUnnamed: Bool {
+        isEditMode && editSections.count == 1 && editSections[0].name.trimmed.isEmpty
+    }
+
     var displaySections: [DisplaySection] {
         if isEditMode {
+            if editIsSingleUnnamed { return [] }
             return editSections.map { DisplaySection(id: $0.id, name: $0.name) }
         }
         return sortedSections.map { DisplaySection(id: $0.id, name: $0.name) }
@@ -47,16 +55,26 @@ extension RecipeDetailViewModel {
         isEditMode ? editSections.count > 1 : sortedSections.count > 1
     }
 
+    /// Section id to target when editing a step rendered in the flat (nil-section) path.
+    var flatStepsSectionId: String? { editIsSingleUnnamed ? editSections[0].id : nil }
+
     // ── Ingredient blocks ──
 
     private func displayEditIngredient(_ ing: EditorIngredient) -> DisplayIngredient {
-        let scaled = QuantityScaler.scale(
-            quantityValue: ing.quantityValue,
-            quantityValueMax: ing.quantityValueMax,
-            quantityUnit: ing.quantityUnit.isEmpty ? nil : ing.quantityUnit,
-            quantityDisplay: ing.quantityDisplay.isEmpty ? nil : ing.quantityDisplay,
-            scale: 1.0
-        )
+        // Unit-aware + scaled exactly like the read-only rows, so entering edit mode is seamless.
+        let scaled: String
+        switch effUnit {
+        case .metric where ing.quantityValueMetric != nil:
+            scaled = QuantityScaler.scale(quantityValue: ing.quantityValueMetric, quantityValueMax: ing.quantityValueMaxMetric,
+                                          quantityUnit: ing.quantityUnitMetric, quantityDisplay: ing.quantityDisplayMetric, scale: effScale)
+        case .imperial where ing.quantityValueImperial != nil:
+            scaled = QuantityScaler.scale(quantityValue: ing.quantityValueImperial, quantityValueMax: ing.quantityValueMaxImperial,
+                                          quantityUnit: ing.quantityUnitImperial, quantityDisplay: ing.quantityDisplayImperial, scale: effScale)
+        default:
+            scaled = QuantityScaler.scale(quantityValue: ing.quantityValue, quantityValueMax: ing.quantityValueMax,
+                                          quantityUnit: ing.quantityUnit.isEmpty ? nil : ing.quantityUnit,
+                                          quantityDisplay: ing.quantityDisplay.isEmpty ? nil : ing.quantityDisplay, scale: effScale)
+        }
         return DisplayIngredient(
             id: ing.id, sectionId: nil, name: ing.name,
             scaledQuantity: scaled, isOptional: ing.isOptional, isOptionalEnabled: false,
@@ -92,15 +110,16 @@ extension RecipeDetailViewModel {
         return result
     }
 
-    /// Ingredient blocks for the body. Edit mode lists EVERY draft section (incl. empty) so each
-    /// gets a header + a "＋ Add ingredient" affordance; view mode reuses the filtered blocks.
+    /// Ingredient blocks for the body. Mirrors the read-only grouping in BOTH modes (empty sections
+    /// hidden, sub-header only when multi-section) so flipping into edit doesn't reflow the layout.
     var displayIngredientBlocks: [DisplayIngredientBlock] {
         if isEditMode {
-            let multi = editSections.count > 1
-            return editSections.map { sec in
-                DisplayIngredientBlock(id: sec.id, sectionId: sec.id,
-                    title: multi ? (sec.name.isEmpty ? "Section" : sec.name) : nil,
-                    groups: groupEdit(sec.ingredients))
+            let multi = !editIsSingleUnnamed && editSections.count > 1
+            return editSections.compactMap { sec in
+                let groups = groupEdit(sec.ingredients)
+                guard !groups.isEmpty else { return nil }
+                return DisplayIngredientBlock(id: sec.id, sectionId: sec.id,
+                    title: multi ? (sec.name.isEmpty ? "Section" : sec.name) : nil, groups: groups)
             }
         }
         return ingredientSectionBlocks.map { block in
@@ -119,7 +138,10 @@ extension RecipeDetailViewModel {
 
     func displaySteps(forSectionId sectionId: String?) -> [DisplayStep] {
         if isEditMode {
-            let steps = editSections.first { $0.id == sectionId }?.steps ?? []
+            // Single nameless section renders its steps under the flat (nil-section) path so the
+            // layout matches a no-sections recipe in view mode.
+            let lookupId = (editIsSingleUnnamed && sectionId == nil) ? editSections[0].id : sectionId
+            let steps = editSections.first { $0.id == lookupId }?.steps ?? []
             let all = allDraftIngredients
             return steps.enumerated().map { idx, st in
                 DisplayStep(id: st.id, number: idx + 1, instruction: st.instruction,

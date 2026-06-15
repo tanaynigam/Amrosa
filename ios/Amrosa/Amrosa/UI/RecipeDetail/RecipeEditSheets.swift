@@ -164,6 +164,7 @@ private struct IngredientSheet: View {
     @State private var optional: Bool
     @State private var note: String
     @State private var base: EditorIngredient
+    @State private var sectionPick: String
 
     init(viewModel: RecipeDetailViewModel, sectionId: String, ingredientId: String?, dismiss: @escaping () -> Void) {
         self.viewModel = viewModel
@@ -173,6 +174,7 @@ private struct IngredientSheet: View {
         let b = viewModel.editSections.first { $0.id == sectionId }?
             .ingredients.first { $0.id == ingredientId } ?? EditorIngredient()
         _base = State(initialValue: b)
+        _sectionPick = State(initialValue: sectionId)
         _name = State(initialValue: b.name)
         _qty = State(initialValue: b.quantityValue.map(plain) ?? "")
         _maxQty = State(initialValue: b.quantityValueMax.map(plain) ?? "")
@@ -220,9 +222,18 @@ private struct IngredientSheet: View {
             Toggle("Optional", isOn: $optional).onChange(of: optional) { _, _ in push() }
             TextField("Shopping note (e.g. Amul)", text: $note).onChange(of: note) { _, _ in push() }
         }
+        if existing == nil, viewModel.editSections.count > 1 {
+            Section("Add to section") {
+                Picker("Section", selection: $sectionPick) {
+                    ForEach(Array(viewModel.editSections.enumerated()), id: \.element.id) { idx, sec in
+                        Text(sec.name.trimmed.isEmpty ? "Section \(idx + 1)" : sec.name).tag(sec.id)
+                    }
+                }
+            }
+        }
         Section {
             if existing == nil {
-                Button { viewModel.addIngredient(to: sectionId, build()); dismiss() } label: {
+                Button { viewModel.addIngredient(to: sectionPick, build()); dismiss() } label: {
                     Label("Add ingredient", systemImage: "plus")
                 }
                 .disabled(name.trimmed.isEmpty)
@@ -245,6 +256,7 @@ private struct StepSheet: View {
 
     @State private var instruction: String
     @State private var ids: Set<String>
+    @State private var sectionPick: String
 
     init(viewModel: RecipeDetailViewModel, sectionId: String, stepId: String?, dismiss: @escaping () -> Void) {
         self.viewModel = viewModel
@@ -254,6 +266,7 @@ private struct StepSheet: View {
         let e = viewModel.editSections.first { $0.id == sectionId }?.steps.first { $0.id == stepId }
         _instruction = State(initialValue: e?.instruction ?? "")
         _ids = State(initialValue: Set(e?.ingredientIds ?? []))
+        _sectionPick = State(initialValue: sectionId)
     }
 
     private var existing: EditorStep? {
@@ -293,10 +306,19 @@ private struct StepSheet: View {
                 }
             }
         }
+        if existing == nil, viewModel.editSections.count > 1 {
+            Section("Add to section") {
+                Picker("Section", selection: $sectionPick) {
+                    ForEach(Array(viewModel.editSections.enumerated()), id: \.element.id) { idx, sec in
+                        Text(sec.name.trimmed.isEmpty ? "Section \(idx + 1)" : sec.name).tag(sec.id)
+                    }
+                }
+            }
+        }
         Section {
             if existing == nil {
                 Button {
-                    viewModel.addStep(to: sectionId, EditorStep(instruction: instruction, ingredientIds: Array(ids)))
+                    viewModel.addStep(to: sectionPick, EditorStep(instruction: instruction, ingredientIds: Array(ids)))
                     dismiss()
                 } label: {
                     Label("Add step", systemImage: "plus")

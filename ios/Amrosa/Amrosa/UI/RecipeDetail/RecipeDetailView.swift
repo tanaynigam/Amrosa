@@ -24,9 +24,25 @@ struct RecipeDetailView: View {
     @State private var cookFromSectionId: String? = nil
     // Shopping list (F11)
     @State private var showShoppingList = false
+    // F16 edit-mode delete confirm (triggered from the edit toolbar menu)
+    @State private var showDeleteConfirm = false
 
     var body: some View {
         navAndSheets
+            .confirmationDialog("Delete this recipe?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) { viewModel?.deleteRecipe() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently deletes the recipe\(viewModel?.recipe.parentRecipeId == nil ? " and its variations" : "").")
+            }
+            .alert("Unit conversions", isPresented: Binding(
+                get: { viewModel?.conversionMessage != nil },
+                set: { if !$0 { viewModel?.conversionMessage = nil } })
+            ) {
+                Button("OK", role: .cancel) { viewModel?.conversionMessage = nil }
+            } message: {
+                Text(viewModel?.conversionMessage ?? "")
+            }
             .onAppear { onAppearSetup() }
             .onChange(of: viewModel?.recipeDeleted) { _, deleted in
                 if deleted == true { dismiss() }
@@ -174,17 +190,22 @@ struct RecipeDetailView: View {
                 Button("Cancel") { viewModel?.cancelEdit() }
             }
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                // ＋ add menu — targets the last section (matches Android).
+                // All edit actions live in the toolbar so the body never reflows (scroll preserved).
                 Menu {
-                    Button { viewModel?.editTarget = .section(sectionId: nil) } label: { Label("Section", systemImage: "square.stack") }
-                    if let last = viewModel?.editSections.last?.id {
-                        Button { viewModel?.editTarget = .ingredient(sectionId: last, ingredientId: nil) } label: { Label("Ingredient", systemImage: "leaf") }
-                        Button { viewModel?.editTarget = .step(sectionId: last, stepId: nil) } label: { Label("Step", systemImage: "list.number") }
+                    Button { viewModel?.editTarget = .details } label: { Label("Recipe details", systemImage: "info.circle") }
+                    let firstSection = viewModel?.editSections.first?.id
+                    if let sid = firstSection {
+                        Button { viewModel?.editTarget = .ingredient(sectionId: sid, ingredientId: nil) } label: { Label("Add ingredient", systemImage: "leaf") }
+                        Button { viewModel?.editTarget = .step(sectionId: sid, stepId: nil) } label: { Label("Add step", systemImage: "list.number") }
                     }
+                    Button { viewModel?.editTarget = .section(sectionId: nil) } label: { Label("Add section", systemImage: "square.stack") }
+                    Divider()
+                    Button { viewModel?.updateConversions() } label: { Label("Update unit conversions", systemImage: "arrow.triangle.2.circlepath") }
+                    Button(role: .destructive) { showDeleteConfirm = true } label: { Label("Delete recipe", systemImage: "trash") }
                 } label: {
-                    Image(systemName: "plus")
+                    Image(systemName: "ellipsis.circle")
                 }
-                if viewModel?.isSavingEdit == true {
+                if viewModel?.isSavingEdit == true || viewModel?.isConverting == true {
                     ProgressView()
                 } else {
                     Button { viewModel?.saveEdit() } label: { Image(systemName: "checkmark") }
@@ -281,23 +302,24 @@ private struct RecipeDetailContent: View {
     var onOpenVariant: (RecipeModel) -> Void = { _ in }
     var onAddVariant: () -> Void = {}
     var onCookFromSection: (String) -> Void = { _ in }
-    @State private var showDeleteConfirm = false
 
     var body: some View {
+        // F16: edit mode renders the IDENTICAL body — only `.editable` (outline + jiggle + tap)
+        // is flipped on editable rows, and quantities use the same scale/unit — so toggling Edit
+        // changes nothing on screen and the scroll position is preserved. Add / convert / delete
+        // actions live in the toolbar (no body chrome that would reflow the layout).
         let editing = viewModel.isEditMode
         ScrollViewReader { proxy in
         ScrollView {
-            // F16: the SAME scroll surface renders both view + edit (rows just gain a jiggle +
-            // tap affordance via `.editable`), so toggling Edit preserves scroll position.
             LazyVStack(alignment: .leading, spacing: 0) {
 
-                // ── Variation chips (F10) — view mode only ──
-                if !editing, viewModel.variants.count > 1 || viewModel.canAddVariant {
+                // ── Variation chips (F10) ──
+                if viewModel.variants.count > 1 || viewModel.canAddVariant {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(viewModel.variants) { v in
                                 Button {
-                                    if !v.isCurrent, let model = viewModel.recipeModel(id: v.id) { onOpenVariant(model) }
+                                    if !editing, !v.isCurrent, let model = viewModel.recipeModel(id: v.id) { onOpenVariant(model) }
                                 } label: {
                                     Text(v.label)
                                         .font(.caption).fontWeight(.medium)
@@ -308,7 +330,7 @@ private struct RecipeDetailContent: View {
                                 }
                                 .buttonStyle(.plain)
                             }
-                            if viewModel.canAddVariant {
+                            if viewModel.canAddVariant && !editing {
                                 Button(action: onAddVariant) {
                                     Label("Variation", systemImage: "plus")
                                         .font(.caption).fontWeight(.medium)
@@ -323,67 +345,35 @@ private struct RecipeDetailContent: View {
                     }
                 }
 
-                // ── Header ──
-                if editing {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(viewModel.displayTitle.isEmpty ? "Untitled recipe" : viewModel.displayTitle)
-                            .font(.title2).fontWeight(.bold)
-                        if let desc = viewModel.displayDescription {
-                            Text(desc).font(.body).foregroundStyle(.secondary)
-                        }
-                        HStack(spacing: 12) {
-                            if let p = viewModel.displayPrepText { Text(p).font(.footnote).foregroundStyle(.secondary) }
-                            if let c = viewModel.displayCookText { Text(c).font(.footnote).foregroundStyle(.secondary) }
-                            Text(viewModel.displayEditYield).font(.footnote).foregroundStyle(.secondary)
-                        }
-                        if let tags = viewModel.displayTags {
-                            Text(tags).font(.caption).foregroundStyle(.tertiary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .editable(active: true, phase: 0) { viewModel.editTarget = .details }
-                    .padding(.horizontal, 16).padding(.top, 12)
-
-                    // Update unit conversions (edit only)
-                    Button { viewModel.updateConversions() } label: {
-                        HStack {
-                            if viewModel.isConverting { ProgressView().scaleEffect(0.8) }
-                            Label("Update unit conversions", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                        .font(.subheadline)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(viewModel.isConverting)
-                    .padding(.horizontal, 16).padding(.top, 10)
-                    if let msg = viewModel.conversionMessage {
-                        Text(msg).font(.caption).foregroundStyle(.secondary)
-                            .padding(.horizontal, 16).padding(.top, 4)
-                    }
-                } else {
-                    if let desc = viewModel.displayDescription {
-                        Text(desc).font(.body).foregroundStyle(.secondary)
-                            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
-                    }
-                    if viewModel.isOwner {
-                        VisibilityChip(viewModel: viewModel)
-                            .padding(.horizontal, 16).padding(.top, 8)
-                    }
-                    HStack(alignment: .center) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            if let p = viewModel.displayPrepText { Text(p).font(.footnote).foregroundStyle(.secondary) }
-                            if let c = viewModel.displayCookText { Text(c).font(.footnote).foregroundStyle(.secondary) }
-                        }
-                        Spacer()
-                        YieldAdjuster(viewModel: viewModel)
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 10)
+                // ── Header: description (tap → Details while editing) ──
+                if let desc = viewModel.displayDescription {
+                    Text(desc)
+                        .font(.body).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
+                        .editable(active: editing, phase: 0) { viewModel.editTarget = .details }
                 }
+                if viewModel.isOwner {
+                    // Kept in both modes (not an editable field) so the layout never reflows.
+                    VisibilityChip(viewModel: viewModel)
+                        .padding(.horizontal, 16).padding(.top, 8)
+                }
+
+                // ── Time + Yield row (unchanged in both modes) ──
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let p = viewModel.displayPrepText { Text(p).font(.footnote).foregroundStyle(.secondary) }
+                        if let c = viewModel.displayCookText { Text(c).font(.footnote).foregroundStyle(.secondary) }
+                    }
+                    Spacer()
+                    YieldAdjuster(viewModel: viewModel)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
 
                 Divider().padding(.horizontal, 16)
 
-                // ── Section jump chips (view only) ──
-                if !editing, viewModel.displaySections.count > 1 {
+                // ── Section jump chips ──
+                if viewModel.displaySections.count > 1 {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(viewModel.displaySections) { section in
@@ -400,8 +390,8 @@ private struct RecipeDetailContent: View {
                     }
                 }
 
-                // ── Sources (view only; edited via the Details sheet) ──
-                if !editing, !viewModel.recipe.sourceUrls.isEmpty {
+                // ── Sources ──
+                if !viewModel.recipe.sourceUrls.isEmpty {
                     SectionHeader("Sources")
                     ForEach(viewModel.recipe.sourceUrls, id: \.self) { url in
                         if let link = URL(string: url) {
@@ -412,27 +402,25 @@ private struct RecipeDetailContent: View {
                     Divider().padding(.horizontal, 16).padding(.vertical, 8)
                 }
 
-                // ── Substitute selectors (view only) ──
-                if !editing {
-                    let subGroups = viewModel.substituteGroups
-                    if !subGroups.isEmpty {
-                        SectionHeader("Options")
-                        ForEach(subGroups, id: \.groupId) { group in
-                            SubstituteSelector(
-                                options: group.options,
-                                selectedId: viewModel.selectedSubstitutes[group.groupId] ?? group.options.first?.id ?? "",
-                                viewModel: viewModel, groupId: group.groupId
-                            )
-                        }
-                        Divider().padding(.horizontal, 16).padding(.vertical, 8)
+                // ── Substitute selectors ("Options") — view interactions only ──
+                let subGroups = viewModel.substituteGroups
+                if !subGroups.isEmpty {
+                    SectionHeader("Options")
+                    ForEach(subGroups, id: \.groupId) { group in
+                        SubstituteSelector(
+                            options: group.options,
+                            selectedId: viewModel.selectedSubstitutes[group.groupId] ?? group.options.first?.id ?? "",
+                            viewModel: viewModel, groupId: group.groupId
+                        )
                     }
+                    Divider().padding(.horizontal, 16).padding(.vertical, 8)
                 }
 
                 // ── Ingredients ──
                 HStack {
                     Text("Ingredients").font(.title2).fontWeight(.semibold)
                     Spacer()
-                    if !editing, viewModel.hasConversionData {
+                    if viewModel.hasConversionData {
                         Picker("Units", selection: Binding(get: { viewModel.unitMode }, set: { viewModel.unitMode = $0 })) {
                             ForEach(UnitMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                         }
@@ -446,6 +434,9 @@ private struct RecipeDetailContent: View {
                         Text(title.uppercased())
                             .font(.caption).fontWeight(.semibold).foregroundStyle(.secondary)
                             .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 2)
+                            .editable(active: editing, phase: 0) {
+                                if let sid = block.sectionId { viewModel.editTarget = .section(sectionId: sid) }
+                            }
                     }
                     ForEach(block.groups) { group in
                         if !group.label.isEmpty {
@@ -461,11 +452,6 @@ private struct RecipeDetailContent: View {
                                 }
                         }
                     }
-                    if editing, let sid = block.sectionId {
-                        GhostAddRow(title: "Add ingredient") {
-                            viewModel.editTarget = .ingredient(sectionId: sid, ingredientId: nil)
-                        }
-                    }
                 }
 
                 Divider().padding(.horizontal, 16).padding(.vertical, 8)
@@ -475,9 +461,9 @@ private struct RecipeDetailContent: View {
 
                 ForEach(viewModel.displaySections) { section in
                     let steps = viewModel.displaySteps(forSectionId: section.id)
-                    if editing || !steps.isEmpty {
+                    if !steps.isEmpty {
                         HStack {
-                            Text(section.name.isEmpty ? (editing ? "Section" : "") : section.name)
+                            Text(section.name)
                                 .font(.title3).fontWeight(.semibold)
                             Spacer()
                             if !editing {
@@ -487,9 +473,8 @@ private struct RecipeDetailContent: View {
                                 .buttonStyle(.plain).foregroundStyle(Color.accentColor)
                             }
                         }
-                        .padding(.horizontal, editing ? 12 : 16).padding(.vertical, 6)
+                        .padding(.horizontal, 16).padding(.vertical, 6)
                         .editable(active: editing, phase: 0) { viewModel.editTarget = .section(sectionId: section.id) }
-                        .padding(.horizontal, editing ? 4 : 0)
                         .id(section.id)
                     }
                     ForEach(steps) { step in
@@ -498,101 +483,62 @@ private struct RecipeDetailContent: View {
                                 viewModel.editTarget = .step(sectionId: section.id, stepId: step.id)
                             }
                     }
-                    if editing {
-                        GhostAddRow(title: "Add step") {
-                            viewModel.editTarget = .step(sectionId: section.id, stepId: nil)
-                        }
-                    }
                 }
 
-                // Unsectioned steps (view mode only — drafts always wrap into a section)
-                if !editing {
-                    let unsectioned = viewModel.displaySteps(forSectionId: nil)
-                    ForEach(unsectioned) { step in StepRow(step: step) }
+                // Flat (no-section) steps — both modes
+                let flatSteps = viewModel.displaySteps(forSectionId: nil)
+                ForEach(flatSteps) { step in
+                    StepRow(step: step)
+                        .editable(active: editing, phase: step.number) {
+                            viewModel.editTarget = .step(sectionId: viewModel.flatStepsSectionId ?? "", stepId: step.id)
+                        }
                 }
 
                 Divider().padding(.horizontal, 16).padding(.vertical, 8)
 
-                if editing {
-                    // ── Edit footer: add section + delete ──
-                    GhostAddRow(title: "Add section") { viewModel.editTarget = .section(sectionId: nil) }
-                    Button(role: .destructive) { showDeleteConfirm = true } label: {
-                        if viewModel.isDeleting { ProgressView() }
-                        else { Label("Delete recipe", systemImage: "trash").frame(maxWidth: .infinity) }
+                // ── Notes ──
+                HStack {
+                    Text("Notes").font(.title2).fontWeight(.semibold)
+                    Spacer()
+                    Button { viewModel.newNoteText = viewModel.newNoteText.isEmpty ? " " : "" } label: {
+                        Image(systemName: "plus.bubble")
                     }
-                    .buttonStyle(.bordered).tint(.red)
-                    .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 32)
-                } else {
-                    // ── Notes ──
-                    HStack {
-                        Text("Notes").font(.title2).fontWeight(.semibold)
-                        Spacer()
-                        Button { viewModel.newNoteText = viewModel.newNoteText.isEmpty ? " " : "" } label: {
-                            Image(systemName: "plus.bubble")
+                    .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                }
+                .padding(.horizontal, 16).padding(.bottom, 4)
+
+                if !viewModel.newNoteText.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Add a note, tweak, or observation…", text: Binding(
+                            get: { viewModel.newNoteText.trimmingCharacters(in: .whitespaces) == "" ? "" : viewModel.newNoteText },
+                            set: { viewModel.newNoteText = $0 }
+                        ), axis: .vertical)
+                        .textFieldStyle(.roundedBorder).lineLimit(3...6)
+                        if !viewModel.newNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Button("Save Note") { viewModel.addNote() }
+                                .buttonStyle(.borderedProminent).font(.subheadline)
                         }
-                        .buttonStyle(.plain).foregroundStyle(Color.accentColor)
                     }
-                    .padding(.horizontal, 16).padding(.bottom, 4)
+                    .padding(.horizontal, 16).padding(.bottom, 8)
+                }
 
-                    if !viewModel.newNoteText.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            TextField("Add a note, tweak, or observation…", text: Binding(
-                                get: { viewModel.newNoteText.trimmingCharacters(in: .whitespaces) == "" ? "" : viewModel.newNoteText },
-                                set: { viewModel.newNoteText = $0 }
-                            ), axis: .vertical)
-                            .textFieldStyle(.roundedBorder).lineLimit(3...6)
-                            if !viewModel.newNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Button("Save Note") { viewModel.addNote() }
-                                    .buttonStyle(.borderedProminent).font(.subheadline)
-                            }
-                        }
-                        .padding(.horizontal, 16).padding(.bottom, 8)
-                    }
+                ForEach(viewModel.sortedNotes) { note in
+                    NoteRow(note: note, viewModel: viewModel)
+                }
+                if viewModel.sortedNotes.isEmpty && viewModel.newNoteText.isEmpty {
+                    Text("No notes yet. Tap + to add one.")
+                        .font(.body).foregroundStyle(.secondary)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                }
 
-                    ForEach(viewModel.sortedNotes) { note in
-                        NoteRow(note: note, viewModel: viewModel)
-                    }
-                    if viewModel.sortedNotes.isEmpty && viewModel.newNoteText.isEmpty {
-                        Text("No notes yet. Tap + to add one.")
-                            .font(.body).foregroundStyle(.secondary)
-                            .padding(.horizontal, 16).padding(.vertical, 8)
-                    }
-
-                    if viewModel.isPublished {
-                        CommentsSection(viewModel: viewModel)
-                    }
+                if viewModel.isPublished {
+                    CommentsSection(viewModel: viewModel)
                 }
 
                 Spacer(minLength: 32)
             }
         }
         } // ScrollViewReader
-        .confirmationDialog("Delete this recipe?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) { viewModel.deleteRecipe() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This permanently deletes the recipe\(viewModel.recipe.parentRecipeId == nil ? " and its variations" : "").")
-        }
-    }
-}
-
-// MARK: - Ghost add row (edit mode only)
-
-private struct GhostAddRow: View {
-    let title: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: "plus")
-                .font(.subheadline).foregroundStyle(Color.accentColor)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14).padding(.vertical, 8)
-                .overlay(RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.accentColor.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [4])))
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 16).padding(.top, 4)
     }
 }
 
