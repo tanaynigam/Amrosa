@@ -831,12 +831,30 @@ fun RecipeDetailScreen(
                 }
             }
 
-            item {
+            // ── Edit-only footer: Add section + Delete recipe (replaces Notes while editing) ──
+            if (editing) {
+                item(key = "add-section") {
+                    GhostAddRow("Add section") { editTarget = EditTarget.Section(null) }
+                }
+                item(key = "delete-recipe") {
+                    OutlinedButton(
+                        onClick = { showDeleteDialog = true },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) {
+                        Icon(Icons.Default.DeleteForever, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp)); Text("Delete recipe")
+                    }
+                }
+                item(key = "edit-bottom-spacer") { Spacer(Modifier.height(80.dp)) }
+            }
+
+            if (!editing) item {
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             }
 
-            // ── Notes (kept visible, read-only, while editing) ───────────────
-            item {
+            // ── Notes (hidden while editing — replaced by the edit footer above) ───────────────
+            if (!editing) item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -845,10 +863,8 @@ fun RecipeDetailScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Notes", style = MaterialTheme.typography.headlineMedium)
-                    if (!editing) {
-                        IconButton(onClick = { showNoteInput = !showNoteInput }) {
-                            Icon(Icons.Default.AddComment, contentDescription = "Add note")
-                        }
+                    IconButton(onClick = { showNoteInput = !showNoteInput }) {
+                        Icon(Icons.Default.AddComment, contentDescription = "Add note")
                     }
                 }
             }
@@ -876,11 +892,11 @@ fun RecipeDetailScreen(
                 }
             }
 
-            items(state.notes, key = { it.id }) { note ->
-                NoteRow(note = note, onDelete = if (editing) null else { -> viewModel.deleteNote(note.id) })
+            if (!editing) items(state.notes, key = { it.id }) { note ->
+                NoteRow(note = note, onDelete = { viewModel.deleteNote(note.id) })
             }
 
-            if (state.notes.isEmpty() && !showNoteInput) {
+            if (state.notes.isEmpty() && !showNoteInput && !editing) {
                 item {
                     Text(
                         "No notes yet. Tap + to add one.",
@@ -891,8 +907,8 @@ fun RecipeDetailScreen(
                 }
             }
 
-            // ── Comments (shown when recipe is shared; read-only while editing) ──────────
-            if (state.isPublished) {
+            // ── Comments (shown when recipe is shared; hidden while editing) ──────────
+            if (state.isPublished && !editing) {
                 item {
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     Row(
@@ -969,24 +985,6 @@ fun RecipeDetailScreen(
                 }
 
                 item { Spacer(Modifier.height(16.dp)) }
-            }
-
-            // ── Edit-only footer — at the very bottom so it never shifts content above ──
-            if (editing) {
-                item(key = "add-section") {
-                    GhostAddRow("Add section") { editTarget = EditTarget.Section(null) }
-                }
-                item(key = "delete-recipe") {
-                    OutlinedButton(
-                        onClick = { showDeleteDialog = true },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                    ) {
-                        Icon(Icons.Default.DeleteForever, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp)); Text("Delete recipe")
-                    }
-                }
-                item(key = "edit-bottom-spacer") { Spacer(Modifier.height(80.dp)) }
             }
         }
 
