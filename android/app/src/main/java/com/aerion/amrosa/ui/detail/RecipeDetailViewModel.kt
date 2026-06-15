@@ -160,6 +160,30 @@ data class RecipeDetailUiState(
         }
         return ing.name
     }
+
+    /**
+     * Step refs resolved for display. A ref to *any* member of a substitute group resolves to
+     * the currently-selected member (so switching the substitute keeps the step's ingredient
+     * visible), collapsed to one entry per group. Optional refs whose ingredient is excluded are
+     * dropped. Returns (ingredientToShow, the ref's quantity override) pairs.
+     */
+    fun visibleStepRefs(refs: List<StepIngredientRef>): List<Pair<Ingredient, String?>> {
+        val recipe = recipe ?: return emptyList()
+        val seenGroups = HashSet<String>()
+        val out = ArrayList<Pair<Ingredient, String?>>()
+        for (ref in refs) {
+            val ing = recipe.ingredients.find { it.id == ref.ingredientId } ?: continue
+            val resolved = if (ing.substituteGroupId != null) {
+                if (!seenGroups.add(ing.substituteGroupId)) continue   // one row per group
+                val selectedId = selectedSubstitutes[ing.substituteGroupId]
+                    ?: recipe.ingredients.firstOrNull { it.substituteGroupId == ing.substituteGroupId }?.id
+                recipe.ingredients.find { it.id == selectedId } ?: ing
+            } else ing
+            if (resolved.isOptional && resolved.id !in enabledOptionals) continue
+            out += resolved to ref.quantityDisplay
+        }
+        return out
+    }
 }
 
 class RecipeDetailViewModel(

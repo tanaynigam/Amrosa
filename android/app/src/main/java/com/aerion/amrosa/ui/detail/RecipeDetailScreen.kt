@@ -1489,15 +1489,10 @@ internal fun CookingModeScreen(
                     style = MaterialTheme.typography.bodyLarge
                 )
 
-                // Inline ingredient refs for this step (augmented with collective-reference fallback)
+                // Inline ingredient refs for this step (augmented with collective-reference fallback,
+                // substitute groups resolved to the selected member, optionals filtered).
                 (step?.let { refsByStep[it.id] })?.let { refs ->
-                    val visible = refs.filter { ref ->
-                        val ing = recipe.ingredients.find { it.id == ref.ingredientId }
-                        ing != null && (
-                            ing.substituteGroupId == null ||
-                            state.selectedSubstitutes[ing.substituteGroupId] == ing.id
-                        ) && (!ing.isOptional || ing.id in state.enabledOptionals)
-                    }
+                    val visible = state.visibleStepRefs(refs)
                     if (visible.isNotEmpty()) {
                         Spacer(Modifier.height(20.dp))
                         Card(
@@ -1505,28 +1500,22 @@ internal fun CookingModeScreen(
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Column(modifier = Modifier.padding(8.dp)) {
-                                visible.forEach { ref ->
-                                    val ing = recipe.ingredients.find { it.id == ref.ingredientId }
-                                    val name = state.resolvedIngredientName(ref.ingredientId)
-                                    // Honour the unit toggle: scale the full ingredient amount in the
-                                    // chosen unit; fall back to the step's ref display when unknown.
-                                    val qty = if (ing != null)
-                                        QuantityScaler.scale(ing, state.scaleFactor, selectedUnit)
-                                    else
-                                        QuantityScaler.scale(null, null, ref.quantityDisplay, state.scaleFactor)
+                                visible.forEach { (ing, _) ->
+                                    // Honour the unit toggle: scale the full ingredient amount in the chosen unit.
+                                    val qty = QuantityScaler.scale(ing, state.scaleFactor, selectedUnit)
                                     // Tick off ingredients as they're added (session-only; clears on recipe exit).
-                                    val checked = ref.ingredientId in checkedIngredients
+                                    val checked = ing.id in checkedIngredients
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Checkbox(
                                             checked = checked,
-                                            onCheckedChange = { onToggleIngredient(ref.ingredientId) }
+                                            onCheckedChange = { onToggleIngredient(ing.id) }
                                         )
                                         Spacer(Modifier.width(4.dp))
                                         Text(
-                                            "$name — $qty",
+                                            "${ing.name} — $qty",
                                             style = MaterialTheme.typography.bodyMedium.copy(
                                                 textDecoration = if (checked) TextDecoration.LineThrough else null
                                             ),
@@ -1624,19 +1613,24 @@ private fun VisibilityOption(
 }
 
 /** Section-start chips for a section's optional ingredients — selecting drops the ingredient
- *  into the list, unselecting hides it. */
-@OptIn(ExperimentalLayoutApi::class)
+ *  into the list, unselecting hides it. Single horizontally-scrollable row. */
 @Composable
 private fun OptionalChipsRow(
     optionals: List<Ingredient>,
     enabled: Set<String>,
     onToggle: (String) -> Unit,
 ) {
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Text("Optional — tap to include", style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp))
         Spacer(Modifier.height(4.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             optionals.forEach { opt ->
                 FilterChip(
                     selected = opt.id in enabled,
@@ -1703,13 +1697,9 @@ private fun StepRow(
     recipe: Recipe,
     state: RecipeDetailUiState
 ) {
-    val visibleRefs = step.ingredientRefs.filter { ref ->
-        val ing = recipe.ingredients.find { it.id == ref.ingredientId } ?: return@filter false
-        if (ing.substituteGroupId != null && state.selectedSubstitutes[ing.substituteGroupId] != ing.id)
-            return@filter false
-        if (ing.isOptional && ing.id !in state.enabledOptionals) return@filter false
-        true
-    }
+    // Resolve substitute refs to the selected member (so a step keeps its ingredient when you
+    // switch substitutes) + drop excluded optionals.
+    val visibleRefs = state.visibleStepRefs(step.ingredientRefs)
 
     Column(
         modifier = Modifier
@@ -1746,15 +1736,13 @@ private fun StepRow(
                     )
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
-                visibleRefs.forEach { ref ->
-                    val ing = recipe.ingredients.find { it.id == ref.ingredientId }
-                    val name = state.resolvedIngredientName(ref.ingredientId)
+                visibleRefs.forEach { (ing, refQty) ->
                     val qty = QuantityScaler.scale(
-                        ing?.quantityValue, ing?.quantityUnit,
-                        ref.quantityDisplay, state.scaleFactor
+                        ing.quantityValue, ing.quantityValueMax, ing.quantityUnit,
+                        refQty, state.scaleFactor
                     )
                     Text(
-                        "· $name — $qty",
+                        "· ${ing.name} — $qty",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 1.dp)
