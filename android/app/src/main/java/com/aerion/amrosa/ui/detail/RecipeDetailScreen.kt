@@ -618,27 +618,8 @@ fun RecipeDetailScreen(
                 }
             }
 
-            // ── Substitute selectors ────────────────────────────────
-            val substituteGroups = recipe.ingredients
-                .filter { it.substituteGroupId != null }
-                .groupBy { it.substituteGroupId!! }
-
-            if (substituteGroups.isNotEmpty()) {
-                item { SectionHeader("Options") }
-                substituteGroups.forEach { (groupId, options) ->
-                    item {
-                        // Kept visible (read-only) in edit so the layout is identical to view.
-                        SubstituteSelector(
-                            options = options,
-                            selectedId = state.selectedSubstitutes[groupId] ?: options.first().id,
-                            onSelect = { if (!editing) viewModel.selectSubstitute(groupId, it) }
-                        )
-                    }
-                }
-                item {
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                }
-            }
+            // Substitute choices are now offered inline on the ingredient row (no separate
+            // "Options" section); optional ingredients carry an inline include/exclude checkbox.
 
             // ── Ingredient checklist ────────────────────────────────
             item {
@@ -694,9 +675,14 @@ fun RecipeDetailScreen(
                 }
             }
 
-            // Reusable editable ingredient row.
+            // Reusable editable ingredient row. In view mode it also renders the inline
+            // include/exclude checkbox (optionals) and substitute-swap chips.
             fun LazyListScope.ingredientRowItems(ings: List<Ingredient>, fallbackSectionId: String?) {
                 itemsIndexed(ings, key = { _, it -> it.id }) { idx, ing ->
+                    val subOptions = if (!editing && ing.substituteGroupId != null)
+                        recipe.ingredients.filter { it.substituteGroupId == ing.substituteGroupId }
+                            .sortedBy { it.orderIndex }
+                    else emptyList()
                     Box(
                         Modifier.editable(editing, idx) {
                             editTarget = EditTarget.Ingredient(ing.sectionId ?: fallbackSectionId ?: "", ing.id)
@@ -709,6 +695,10 @@ fun RecipeDetailScreen(
                             isOptionalEnabled = ing.id in state.enabledOptionals,
                             onToggleOptional = { viewModel.toggleOptional(ing.id) },
                             editing = editing,
+                            substituteOptions = subOptions,
+                            onSelectSubstitute = { id ->
+                                ing.substituteGroupId?.let { viewModel.selectSubstitute(it, id) }
+                            },
                         )
                     }
                 }
@@ -1613,30 +1603,7 @@ private fun VisibilityOption(
     }
 }
 
-@Composable
-private fun SubstituteSelector(
-    options: List<Ingredient>,
-    selectedId: String,
-    onSelect: (String) -> Unit
-) {
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Text(
-            "Choose: ${options.joinToString(" or ") { it.name }}",
-            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
-        )
-        Spacer(Modifier.height(4.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            options.forEach { ing ->
-                FilterChip(
-                    selected = ing.id == selectedId,
-                    onClick = { onSelect(ing.id) },
-                    label = { Text(ing.name, style = MaterialTheme.typography.labelMedium) }
-                )
-            }
-        }
-    }
-}
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun IngredientRow(
     ingredient: Ingredient,
@@ -1645,37 +1612,55 @@ private fun IngredientRow(
     isOptionalEnabled: Boolean,
     onToggleOptional: () -> Unit,
     editing: Boolean = false,
+    substituteOptions: List<Ingredient> = emptyList(),
+    onSelectSubstitute: (String) -> Unit = {},
 ) {
-    // Display-only row. The checkable list lives on the Shopping List screen now;
-    // optional ingredients keep their enable/disable switch (it affects scaling). In edit
-    // mode the switch is suppressed so the whole row taps through to the edit sheet.
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (isOptional && !editing) {
-            Switch(
-                checked = isOptionalEnabled,
-                onCheckedChange = { onToggleOptional() },
-                modifier = Modifier.size(36.dp)
-            )
-            Spacer(Modifier.width(8.dp))
-        } else {
+    // In view mode an optional ingredient carries an inline include/exclude checkbox, and a
+    // substitute group shows swap chips under the row. In edit mode the row is plain (the whole
+    // row taps through to the edit sheet via the wrapping Modifier.editable).
+    val excluded = isOptional && !isOptionalEnabled
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (isOptional && !editing) {
+                Checkbox(
+                    checked = isOptionalEnabled,
+                    onCheckedChange = { onToggleOptional() },
+                    modifier = Modifier.size(36.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+            } else {
+                Text(
+                    "•",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.padding(start = 4.dp, end = 12.dp)
+                )
+            }
             Text(
-                "•",
+                text = buildString {
+                    append(ingredient.name); append("  —  "); append(scaledQty)
+                    if (isOptional) append("   ·  optional")
+                },
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.padding(start = 4.dp, end = 12.dp)
+                color = if (excluded) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.onSurface
             )
         }
-        Text(
-            text = "${ingredient.name}  —  $scaledQty",
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (isOptional && !isOptionalEnabled) MaterialTheme.colorScheme.onSurfaceVariant
-            else MaterialTheme.colorScheme.onSurface
-        )
+        // Substitute swap chips — only when this row stands for a group with >1 option.
+        if (substituteOptions.size > 1) {
+            FlowRow(
+                modifier = Modifier.padding(start = 16.dp, top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                substituteOptions.forEach { opt ->
+                    FilterChip(
+                        selected = opt.id == ingredient.id,
+                        onClick = { onSelectSubstitute(opt.id) },
+                        label = { Text(opt.name, style = MaterialTheme.typography.labelSmall) },
+                    )
+                }
+            }
+        }
     }
 }
 

@@ -107,7 +107,8 @@ data class RecipeDetailUiState(
     val visibleIngredients: List<Ingredient> get() {
         val recipe = recipe ?: return emptyList()
         return recipe.ingredients.filter { ing ->
-            if (ing.isOptional && ing.id !in enabledOptionals) return@filter false
+            // Optionals always stay in the list (the row carries an include/exclude checkbox).
+            // Substitute groups collapse to the selected option (alternatives are offered inline).
             if (ing.substituteGroupId != null) {
                 val selectedId = selectedSubstitutes[ing.substituteGroupId]
                     ?: recipe.ingredients.firstOrNull { it.substituteGroupId == ing.substituteGroupId }?.id
@@ -220,6 +221,12 @@ class RecipeDetailViewModel(
                 ?.mapValues { (_, ings) -> ings.first().id }
                 ?: emptyMap()
 
+            // Optional ingredients are INCLUDED by default (and stay in the list either way);
+            // the checkbox just toggles whether they count toward scaling/cooking/shopping.
+            val defaultOptionals = recipe?.ingredients
+                ?.filter { it.isOptional }?.map { it.id }?.toSet()
+                ?: emptySet()
+
             val anchorQty = recipe?.scaleIngredientId?.let { anchorId ->
                 recipe.ingredients.find { it.id == anchorId }?.quantityValue
             }
@@ -254,6 +261,8 @@ class RecipeDetailViewModel(
                         (prev.scaleAnchorQty ?: anchorQty) else anchorQty,
                     selectedSubstitutes = if (preserveSelections && prev.selectedSubstitutes.isNotEmpty())
                         prev.selectedSubstitutes else defaultSubs,
+                    enabledOptionals = if (preserveSelections && prev.enabledOptionals.isNotEmpty())
+                        prev.enabledOptionals else defaultOptionals,
                     isLoading = false,
                     isOwner = isOwner,
                     variants = variantRefs,
