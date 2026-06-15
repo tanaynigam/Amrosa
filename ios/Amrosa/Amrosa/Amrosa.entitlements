@@ -4,5 +4,9 @@
 <dict>
 	<key>aps-environment</key>
 	<string>production</string>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:amrosa-2ec82.web.app</string>
+	</array>
 </dict>
 </plist>

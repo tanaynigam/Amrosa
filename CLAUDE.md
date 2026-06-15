@@ -670,9 +670,10 @@ deepLinks = listOf(
 
 Firestore rules updated: `shared_recipes` allows `read: if true` (unauthenticated reads for the web page).
 
-**iOS Universal Links** — NOT yet implemented. Requires:
-1. `apple-app-site-association` file at `https://amrosa-2ec82.web.app/.well-known/apple-app-site-association`
-2. `Associated Domains` entitlement in Xcode project: `applinks:amrosa-2ec82.web.app`
+**iOS Universal Links** — ✅ wired (pending hosting deploy):
+1. `apple-app-site-association` at `hosting/public/.well-known/apple-app-site-association` (`appID 7S2FY6WF5V.com.aerion.amrosa`, paths `/shared/*`); served as `application/json` via a `firebase.json` header. **Requires `firebase deploy --only hosting` to go live.**
+2. `Associated Domains` entitlement `applinks:amrosa-2ec82.web.app` in `Amrosa.entitlements`.
+3. `ContentView.onOpenURL` already routes `https://amrosa-2ec82.web.app/shared/{id}` → Shared tab (so no app code change was needed beyond the entitlement).
 
 Test Android App Links via ADB:
 ```
@@ -1330,7 +1331,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | — | Recipe Images | Firebase Storage integration; image picker on editor; Coil (Android) / AsyncImage (iOS) display. **Both platforms.** Largest remaining feature. |
 | — | Discover tab | **Fully built on Android (F13):** feed · popularity · search · chef/public profiles · cuisine prefs · pull-to-refresh · default tab. (iOS port pending in the other session.) Future ideas if wanted: ratings, dietary filters, seasonal boosts. |
 | — | Gemini brand/substitute suggestions | The deferred half of F11 — AI-suggested top brands + substitutes per ingredient (author notes already ship). |
-| — | iOS: Universal Links | `apple-app-site-association` file + `Associated Domains` entitlement (Android App Links already done). |
+| — | iOS: Universal Links | ✅ Wired — AASA file + `Associated Domains` entitlement added. Needs `firebase deploy --only hosting` to publish the AASA. |
 | — | Shopping list — cross-recipe / standalone | Optional: combine multiple recipes into one shopping trip (current F11 is per-recipe). |
 
 **Tech debt / smaller follow-ups:**
@@ -1443,7 +1444,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 | Gap | Detail |
 |---|---|
 | **F16 — Edit mode redesign (jiggle + popups)** | ✅ **Ported (true in-place).** The detail pencil flips `RecipeDetailContent` itself into edit mode — the **same `ScrollView`/`LazyVStack` renders both modes**, so toggling Edit preserves scroll position and the layout is identical (rows just gain a jiggle + outline + tap via `.editable`, `UI/Util/EditAffordance.swift`). Mirrors Android's `toPreviewRecipe`: lightweight **display value types** (`RecipeDisplayModels.swift`: `DisplaySection`/`DisplayIngredient`/`DisplayStep`) that both the real `RecipeModel` (view, scaled by yield/unit) and the live draft (edit, 1×/original) map into via `RecipeDetailViewModel+Display.swift`, so `IngredientRow`/`StepRow` are one component for both. A tap opens its sheet (`EditSheetHost` in `RecipeEditSheets.swift`: Details/Section/Ingredient/Step via `EditTarget`, seeded in `init`, opens at `.large`). Ghost "＋ Add" rows per section + a top-bar ＋ menu (targets the last section); Save ✓ / Cancel ✕ in the bar. Edit state + ops live in `RecipeDetailViewModel+Edit.swift` (`enterEdit`/`cancelEdit`/`saveEdit`/`updateConversions`/`deleteRecipe`); save maps the draft via `updateFullRecipe` (now also rewrites step→ingredient refs from `EditorStep.ingredientIds`), pushes, and re-publishes if shared. `RecipeEditorView` is retained for the import/freeform & new-variation entry points. |
-| **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` already, but requires `Associated Domains` entitlement + `apple-app-site-association` file on the hosting server for iOS to intercept those URLs before Safari opens them |
+| **Universal Links** | ✅ Wired — `Associated Domains` entitlement (`applinks:amrosa-2ec82.web.app`) + AASA at `hosting/public/.well-known/apple-app-site-association` (served as application/json). Pending `firebase deploy --only hosting`. |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
 
 ---
@@ -1709,7 +1710,7 @@ ios/Amrosa/
 | **F12 — Visibility tiers + Co-Chef profiles** | `"friends"` tier in publish; 3-option visibility chooser; co-chef/public `ProfileView`. See the authoritative gaps table above. |
 | **F15 — Ingredient quantity ranges** | Add `quantityValueMax` (+ `…Metric`/`…Imperial`, all `Double?`) to the SwiftData ingredient model; scaler renders "min–max unit" scaling both ends; thread through push/pull + parsed-import maps; editor sets the range max. Backend already returns the maxes — no client conversion math. |
 | **Collective step-ingredient cooking-mode fallback** | Mirror `augmentedStepRefs()`: attach any ingredient referenced by no step in its section to that section's first step, so collectively-referenced ingredients show in cooking mode. Import-side server net is shared backend. |
-| **Universal Links** | iOS handles `https://amrosa-2ec82.web.app/shared/` via `onOpenURL` but requires `Associated Domains` entitlement + `apple-app-site-association` on the hosting server for the OS to intercept them before Safari |
+| **Universal Links** | ✅ Wired (entitlement + AASA file). Pending `firebase deploy --only hosting` to publish the AASA. |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
 
 ### iOS Notes for AI Coding Assistants
