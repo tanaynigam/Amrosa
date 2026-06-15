@@ -438,8 +438,9 @@ fun RecipeDetailScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    // Visibility chip — only shown to the recipe owner; hidden while editing.
-                    if (state.isOwner && !editing) {
+                    // Visibility chip — owner only; kept visible (greyed) while editing so the slot
+                    // is constant and toggling edit doesn't shift scroll.
+                    if (state.isOwner) {
                         Spacer(Modifier.height(10.dp))
                         val (visIcon, visLabel) = when (state.visibility) {
                             "public"  -> Icons.Default.Public to "Public"
@@ -450,7 +451,7 @@ fun RecipeDetailScreen(
                             FilterChip(
                                 selected = state.isPublished,
                                 onClick = { showVisibilityDialog = true },
-                                enabled = !state.isVisibilityUpdating,
+                                enabled = !state.isVisibilityUpdating && !editing,
                                 leadingIcon = {
                                     Icon(visIcon, contentDescription = null, modifier = Modifier.size(16.dp))
                                 },
@@ -477,17 +478,20 @@ fun RecipeDetailScreen(
                     // ── Variation selector ──────────────────────────────
                     // Shows the base + its variations as switchable chips, plus an
                     // "Add variation" chip for the owner (up to MAX_VARIANTS).
-                    if ((state.variants.size > 1 || state.canAddVariant) && !editing) {
+                    if (state.variants.size > 1 || state.canAddVariant) {
                         Spacer(Modifier.height(10.dp))
                         Row(
                             modifier = Modifier.horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            // Kept visible (greyed) while editing so the slot is constant. Switching
+                            // variation mid-edit is disabled to avoid discarding unsaved edits.
                             state.variants.forEach { v ->
                                 FilterChip(
                                     selected = v.isCurrent,
                                     onClick = { if (!v.isCurrent) onOpenRecipe(v.id) },
+                                    enabled = !editing,
                                     leadingIcon = if (v.isBase) {
                                         { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp)) }
                                     } else null,
@@ -497,6 +501,7 @@ fun RecipeDetailScreen(
                             if (state.canAddVariant) {
                                 AssistChip(
                                     onClick = { variantNameInput = ""; showVariantDialog = true },
+                                    enabled = !editing,
                                     leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp)) },
                                     label = { Text("Variation", style = MaterialTheme.typography.labelMedium) }
                                 )
@@ -736,6 +741,8 @@ fun RecipeDetailScreen(
                 }
             } else {
                 // View mode: blocks already exclude empty sections (no header shown for them).
+                // Reserve the "＋ Add ingredient" row's height after each block so toggling edit
+                // doesn't change list height.
                 ingredientBlocks.forEach { (sectionName, groups) ->
                     val blockSectionId = groups.flatMap { it.second }.firstOrNull()?.sectionId
                     if (sectionName != null) ingredientSubHeader(sectionName)
@@ -743,6 +750,7 @@ fun RecipeDetailScreen(
                         if (label.isNotBlank()) groupLabel(label)
                         ingredientRowItems(ings, blockSectionId)
                     }
+                    item(key = "add-ing-reserve-$blockSectionId") { Spacer(Modifier.height(AddRowHeight)) }
                 }
             }
 
@@ -807,6 +815,9 @@ fun RecipeDetailScreen(
                     item(key = "add-step-${section.id}") {
                         GhostAddRow("Add step") { editTarget = EditTarget.Step(section.id, null) }
                     }
+                } else if (sectionSteps.isNotEmpty()) {
+                    // Reserve the "＋ Add step" height so toggling edit doesn't change list height.
+                    item(key = "add-step-reserve-${section.id}") { Spacer(Modifier.height(AddRowHeight)) }
                 }
             }
 
@@ -818,24 +829,6 @@ fun RecipeDetailScreen(
                 items(unsectionedSteps, key = { it.id }) { step ->
                     StepRow(step = step, stepNumber = step.orderIndex + 1, recipe = recipe, state = state)
                 }
-            }
-
-            // ── Edit-only footer: add section + delete recipe ──
-            if (editing) {
-                item(key = "add-section") {
-                    GhostAddRow("Add section") { editTarget = EditTarget.Section(null) }
-                }
-                item(key = "delete-recipe") {
-                    OutlinedButton(
-                        onClick = { showDeleteDialog = true },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                    ) {
-                        Icon(Icons.Default.DeleteForever, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp)); Text("Delete recipe")
-                    }
-                }
-                item(key = "edit-bottom-spacer") { Spacer(Modifier.height(80.dp)) }
             }
 
             item {
@@ -976,6 +969,24 @@ fun RecipeDetailScreen(
                 }
 
                 item { Spacer(Modifier.height(16.dp)) }
+            }
+
+            // ── Edit-only footer — at the very bottom so it never shifts content above ──
+            if (editing) {
+                item(key = "add-section") {
+                    GhostAddRow("Add section") { editTarget = EditTarget.Section(null) }
+                }
+                item(key = "delete-recipe") {
+                    OutlinedButton(
+                        onClick = { showDeleteDialog = true },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) {
+                        Icon(Icons.Default.DeleteForever, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp)); Text("Delete recipe")
+                    }
+                }
+                item(key = "edit-bottom-spacer") { Spacer(Modifier.height(80.dp)) }
             }
         }
 
@@ -1553,14 +1564,19 @@ private fun SectionHeader(title: String) {
     )
 }
 
+/** Fixed height shared by the edit-mode "＋ Add" rows and the view-mode reserved spacer,
+ *  so toggling edit doesn't change list height (no scroll shift). */
+private val AddRowHeight = 44.dp
+
 /** Faint "＋ Add …" row shown only in edit mode, appended below a list (existing rows untouched). */
 @Composable
 private fun GhostAddRow(label: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .height(AddRowHeight)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp),

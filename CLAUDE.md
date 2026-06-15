@@ -431,10 +431,13 @@ the pinned top bar; Cancel is the nav X.
   untouched) and the **top-bar ＋ menu** (targets the last section).
 - **View == Edit layout (no scroll jump)** — edit keeps the *same item slots* as view so toggling doesn't
   shift scroll. Substitute **Options**, **Notes**, and **Comments** stay rendered **read-only** in edit
-  (their add/input/delete controls hidden); the yield row holds a constant height (`heightIn(min=48)`); the
-  only in-place swaps are yield scaler → static yield (tap = Details sheet), optional Switch → plain bullet,
-  and the **unit-toggle slot → "Update conversions" chip** (`viewModel.updateConversions()`). Top-bar view
-  actions (Share/Cart/Cooking) are replaced by ＋/Save/Cancel.
+  (their add/input/delete controls hidden); the **visibility chip + variation chips** stay visible but
+  **disabled** (greyed) in edit (variation-switch is disabled to avoid discarding unsaved edits); the yield
+  row holds a constant height (`heightIn(min=48)`). In-place swaps only: yield scaler → static yield
+  (tap = Details sheet), optional Switch → plain bullet, **unit-toggle slot → "Update conversions" chip**.
+  Ghost "＋ Add ingredient/step" rows have a fixed height (`AddRowHeight`) and view mode reserves the same
+  height with a Spacer; the **add-section + delete-recipe footer sits at the very bottom** (after Comments)
+  so it never shifts content above. Top-bar view actions (Share/Cart/Cooking) are replaced by ＋/Save/Cancel.
 - **Empty sections** — in edit mode every section renders its header + a "＋ Add ingredient" row and a
   "＋ Add step" row (even when empty), so a freshly added section can be filled in place. In **view mode**
   a section with no ingredients shows no ingredient sub-header, and a section with no steps shows no step
