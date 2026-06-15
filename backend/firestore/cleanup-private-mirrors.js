@@ -30,7 +30,7 @@ admin.initializeApp({ credential: admin.credential.cert(require(SERVICE_ACCOUNT_
 const db = admin.firestore();
 
 const APPLY = process.argv.includes("--apply");
-const SHARED_TIERS = new Set(["friends", "public"]);
+const SHARED_TIERS = new Set(["shared", "friends", "public"]);
 
 async function main() {
   const shared = await db.collection("shared_recipes").get();

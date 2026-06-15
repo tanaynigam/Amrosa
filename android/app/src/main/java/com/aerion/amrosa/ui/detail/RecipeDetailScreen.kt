@@ -74,6 +74,7 @@ fun RecipeDetailScreen(
     var showVariantDialog by remember { mutableStateOf(false) }
     var variantNameInput by remember { mutableStateOf("") }
     var showVisibilityDialog by remember { mutableStateOf(false) }
+    var showRecipientsSheet by remember { mutableStateOf(false) }
     // Dedicated prompt for the Share-link flow when the recipe isn't Public yet
     var showMakePublicForLink by remember { mutableStateOf(false) }
     var commentText by remember { mutableStateOf("") }
@@ -446,11 +447,12 @@ fun RecipeDetailScreen(
                         val (visIcon, visLabel) = when (state.visibility) {
                             "public"  -> Icons.Default.Public to "Public"
                             "friends" -> Icons.Default.People to "Co-Chefs"
+                            "shared"  -> Icons.Default.PersonAdd to "Shared (${state.sharedRecipients.size})"
                             else       -> Icons.Default.Lock to "Private"
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             FilterChip(
-                                selected = state.isPublished,
+                                selected = state.isPublished || state.visibility == "shared",
                                 onClick = { showVisibilityDialog = true },
                                 enabled = !state.isVisibilityUpdating && !editing,
                                 leadingIcon = {
@@ -1020,6 +1022,13 @@ fun RecipeDetailScreen(
                         onClick = { viewModel.setVisibility("private"); showVisibilityDialog = false }
                     )
                     VisibilityOption(
+                        selected = state.visibility == "shared",
+                        icon = Icons.Default.PersonAdd, title = "Specific people",
+                        subtitle = if (state.sharedRecipients.isEmpty()) "Choose exactly who can see it"
+                                   else "Shared with ${state.sharedRecipients.size}",
+                        onClick = { showVisibilityDialog = false; showRecipientsSheet = true }
+                    )
+                    VisibilityOption(
                         selected = state.visibility == "friends",
                         icon = Icons.Default.People, title = "Co-Chefs only",
                         subtitle = "Your co-chefs can find it on your profile",
@@ -1036,6 +1045,17 @@ fun RecipeDetailScreen(
             confirmButton = {
                 TextButton(onClick = { showVisibilityDialog = false }) { Text("Done") }
             }
+        )
+    }
+
+    // ── "Shared with specific people" recipients sheet ────────────────────────
+    if (showRecipientsSheet) {
+        RecipientsSheet(
+            current = state.sharedRecipients,
+            onSearch = { q -> app.container.socialRepository.searchUsers(q) },
+            onAdd = { viewModel.addSharedRecipient(it) },
+            onRemove = { viewModel.removeSharedRecipient(it) },
+            onDismiss = { showRecipientsSheet = false },
         )
     }
 
@@ -1608,6 +1628,80 @@ private fun VisibilityOption(
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(subtitle, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Manage who a recipe is shared with: current recipients (removable) + name/email search to add. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RecipientsSheet(
+    current: List<com.aerion.amrosa.domain.model.UserProfile>,
+    onSearch: suspend (String) -> List<com.aerion.amrosa.domain.model.UserProfile>,
+    onAdd: (com.aerion.amrosa.domain.model.UserProfile) -> Unit,
+    onRemove: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<com.aerion.amrosa.domain.model.UserProfile>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    LaunchedEffect(query) {
+        val q = query.trim()
+        if (q.length < 2) { results = emptyList(); searching = false; return@LaunchedEffect }
+        searching = true
+        kotlinx.coroutines.delay(300)
+        results = runCatching { onSearch(q) }.getOrDefault(emptyList())
+        searching = false
+    }
+    val currentIds = current.map { it.uid }.toSet()
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            Modifier.fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp).padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("Shared with", style = MaterialTheme.typography.titleLarge)
+            if (current.isEmpty()) {
+                Text("Not shared with anyone yet — only you can see it. Add people below.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                current.forEach { u ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(u.displayName, style = MaterialTheme.typography.bodyLarge)
+                            u.email?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        TextButton(onClick = { onRemove(u.uid) }) { Text("Remove") }
+                    }
+                }
+            }
+            HorizontalDivider()
+            OutlinedTextField(
+                value = query, onValueChange = { query = it },
+                label = { Text("Add by name or email") },
+                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                trailingIcon = { if (searching) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) }
+            )
+            results.filter { it.uid !in currentIds }.forEach { u ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(u.displayName, style = MaterialTheme.typography.bodyLarge)
+                        u.email?.takeIf { it.isNotBlank() }?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    FilledTonalButton(onClick = { onAdd(u); query = "" }) {
+                        Icon(Icons.Default.PersonAdd, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Add")
+                    }
+                }
+            }
+            Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Done") }
         }
     }
 }

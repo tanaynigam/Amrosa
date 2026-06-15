@@ -66,3 +66,14 @@ val MIGRATION_13_14 = object : Migration(13, 14) {
         db.execSQL("ALTER TABLE ingredients ADD COLUMN quantityValueMaxImperial REAL")
     }
 }
+
+/**
+ * v14 → v15: per-recipient sharing. `recipes.sharedWith` is a JSON list of recipient UIDs for the
+ * `visibility = "shared"` tier (recipe visible only to the author + these users). Existing recipes
+ * default to an empty list. Data preserved.
+ */
+val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE recipes ADD COLUMN sharedWith TEXT NOT NULL DEFAULT '[]'")
+    }
+}

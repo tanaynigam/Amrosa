@@ -69,6 +69,8 @@ data class RecipeDetailUiState(
     val saveCount: Int = 0,
     val likeCount: Int = 0,
     val isVisibilityUpdating: Boolean = false,
+    // "Shared with specific people" — resolved profiles for the recipe's sharedWith UIDs.
+    val sharedRecipients: List<UserProfile> = emptyList(),
     // Direct sharing to follower
     val following: List<UserProfile> = emptyList(),
     val isFollowingLoading: Boolean = false,
@@ -314,6 +316,14 @@ class RecipeDetailViewModel(
                 startObservingComments()
                 startObservingCounts()
             }
+
+            // Resolve "shared with" recipient names for the owner's recipients sheet.
+            if (isOwner && recipe != null && recipe.sharedWith.isNotEmpty()) {
+                val profiles = socialRepository.getUsers(recipe.sharedWith)
+                _uiState.update { it.copy(sharedRecipients = profiles) }
+            } else {
+                _uiState.update { it.copy(sharedRecipients = emptyList()) }
+            }
         }
     }
 
@@ -361,16 +371,17 @@ class RecipeDetailViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isVisibilityUpdating = true) }
 
-            // 1. Persist to Room
-            repository.setVisibility(recipeId, visibility)
+            // Going Private clears the share list too. Friends/Public keep the (now-irrelevant) list.
+            if (visibility == "private") repository.setSharedWith(recipeId, emptyList())
+            else repository.setVisibility(recipeId, visibility)
 
-            // 2. Update in-memory state immediately
-            val updatedRecipe = _uiState.value.recipe?.copy(visibility = visibility)
-            _uiState.update { it.copy(recipe = updatedRecipe, isVisibilityUpdating = false) }
+            val newShared = if (visibility == "private") emptyList() else _uiState.value.recipe?.sharedWith ?: emptyList()
+            val updatedRecipe = _uiState.value.recipe?.copy(visibility = visibility, sharedWith = newShared)
+            _uiState.update {
+                it.copy(recipe = updatedRecipe, isVisibilityUpdating = false,
+                    sharedRecipients = if (visibility == "private") emptyList() else it.sharedRecipients)
+            }
 
-            // 3. Mirror to / remove from shared_recipes.
-            //    "friends" + "public" are both published (the mirror records the tier, which
-            //    the Firestore read rule enforces); "private" removes the mirror.
             val recipe = updatedRecipe ?: return@launch
             if (visibility == "friends" || visibility == "public") {
                 sharedRecipeService.publish(recipe)
@@ -383,6 +394,27 @@ class RecipeDetailViewModel(
             }
         }
     }
+
+    /** Set the recipe's "shared with specific people" list (visibility ⇒ "shared", or "private" if empty). */
+    fun setSharedRecipients(profiles: List<UserProfile>) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isVisibilityUpdating = true) }
+            val uids = profiles.map { it.uid }.distinct()
+            repository.setSharedWith(recipeId, uids)
+            val newVis = if (uids.isEmpty()) "private" else "shared"
+            val updatedRecipe = _uiState.value.recipe?.copy(visibility = newVis, sharedWith = uids)
+            _uiState.update { it.copy(recipe = updatedRecipe, sharedRecipients = profiles, isVisibilityUpdating = false) }
+            val recipe = updatedRecipe ?: return@launch
+            if (uids.isEmpty()) sharedRecipeService.unpublish(recipeId)
+            else sharedRecipeService.publish(recipe)   // mirror with the ACL so recipients can read
+        }
+    }
+
+    fun addSharedRecipient(user: UserProfile) =
+        setSharedRecipients((_uiState.value.sharedRecipients + user).distinctBy { it.uid })
+
+    fun removeSharedRecipient(uid: String) =
+        setSharedRecipients(_uiState.value.sharedRecipients.filterNot { it.uid == uid })
 
     // ── Received recipes (Tab 2) ────────────────────────────────────────────────
 
@@ -490,26 +522,31 @@ class RecipeDetailViewModel(
     }
 
     /**
-     * Make the recipe at least Co-Chefs-visible (publishes the mirror) and then share it directly.
-     * Used when the user confirms the "make visible to your co-chefs to share" prompt for a
-     * private recipe. An already-Public recipe is left Public (not downgraded).
+     * Share the recipe directly to a specific person: add them to the recipe's per-recipient
+     * share list (visibility "shared") so they — and only they (plus the author) — can read the
+     * live recipe, then deliver the pointer + notification. A recipe that is already Friends/Public
+     * stays as-is (already broadly readable). Edits propagate via the single mirror doc.
      */
     fun makeSharableAndShareToFollower(recipientUid: String, recipientName: String) {
         viewModelScope.launch {
-            ensureSharableVisibility()
+            ensureSharedWith(recipientUid)
             shareToFollowerInternal(recipientUid, recipientName)
         }
     }
 
-    /** Ensure the recipe is mirrored at Co-Chefs tier so a co-chef can read it. Keeps Public as-is. */
-    private suspend fun ensureSharableVisibility() {
-        val current = _uiState.value.recipe?.visibility ?: "private"
-        if (current == "public") return  // already world-visible — don't downgrade
-        repository.setVisibility(recipeId, "friends")
-        val updated = _uiState.value.recipe?.copy(visibility = "friends") ?: return
+    /** Add [recipientUid] to the recipe's share list (visibility "shared") + republish the mirror. */
+    private suspend fun ensureSharedWith(recipientUid: String) {
+        val recipe = _uiState.value.recipe ?: return
+        if (recipe.visibility == "public" || recipe.visibility == "friends") return  // already readable
+        if (recipientUid in recipe.sharedWith) return
+        val uids = (recipe.sharedWith + recipientUid).distinct()
+        repository.setSharedWith(recipeId, uids)
+        val updated = recipe.copy(visibility = "shared", sharedWith = uids)
         _uiState.update { it.copy(recipe = updated) }
         sharedRecipeService.publish(updated)
-        startObservingComments()
+        // Refresh the recipients chips.
+        val profiles = socialRepository.getUsers(uids)
+        _uiState.update { it.copy(sharedRecipients = profiles) }
     }
 
     private suspend fun shareToFollowerInternal(recipientUid: String, recipientName: String) {
@@ -562,6 +599,7 @@ class RecipeDetailViewModel(
     private var editChangeLog: List<RecipeChange> = emptyList()
     private var editAuthorId: String? = null
     private var editVisibility: String = "private"
+    private var editSharedWith: List<String> = emptyList()
     private var editParentRecipeId: String? = null
 
     fun enterEdit() {
@@ -576,6 +614,7 @@ class RecipeDetailViewModel(
         editChangeLog = recipe.changeLog
         editAuthorId = recipe.authorId ?: authRepository.uid
         editVisibility = recipe.visibility
+        editSharedWith = recipe.sharedWith
         editParentRecipeId = recipe.parentRecipeId
 
         val sections = if (recipe.sections.isEmpty()) {
@@ -766,6 +805,7 @@ class RecipeDetailViewModel(
                     authorId = editAuthorId,
                     authorDisplayName = if (draft.isPersonalAuthor) (authRepository.displayName ?: authRepository.email) else "Imported",
                     visibility = editVisibility,
+                    sharedWith = gson.toJson(editSharedWith),
                     parentRecipeId = editParentRecipeId,
                     variantName = if (editParentRecipeId != null) draft.variantName.trim().ifBlank { "Variation" } else null,
                 )
@@ -822,11 +862,10 @@ class RecipeDetailViewModel(
                 if (!editIsImported) {
                     viewModelScope.launch(Dispatchers.IO) { syncService.pushPersonalRecipe(recipeId) }
                 }
-                // Reconcile the public mirror with the recipe's visibility: publish for
-                // friends/public, otherwise remove any lingering mirror doc (so a recipe that
-                // is/became private never stays visible in Discovery/profile).
+                // Reconcile the mirror with the recipe's visibility: publish for any shared tier
+                // (shared/friends/public) so recipients get the edit; remove it for private.
                 viewModelScope.launch(Dispatchers.IO) {
-                    if (editVisibility == "friends" || editVisibility == "public") {
+                    if (editVisibility == "shared" || editVisibility == "friends" || editVisibility == "public") {
                         repository.getRecipeWithDetails(recipeId)?.let { sharedRecipeService.publish(it) }
                     } else {
                         sharedRecipeService.unpublish(recipeId)

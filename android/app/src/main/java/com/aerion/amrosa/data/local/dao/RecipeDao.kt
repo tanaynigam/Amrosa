@@ -143,6 +143,9 @@ abstract class RecipeDao {
     @Query("UPDATE recipes SET visibility = :visibility WHERE id = :id")
     abstract suspend fun updateVisibility(id: String, visibility: String)
 
+    @Query("UPDATE recipes SET visibility = :visibility, sharedWith = :sharedWith WHERE id = :id")
+    abstract suspend fun updateVisibilityAndSharedWith(id: String, visibility: String, sharedWith: String)
+
     // ─── Single-item deletes (used by Recipe Editor) ──────────────────────────
 
     @Query("DELETE FROM steps WHERE id = :stepId")

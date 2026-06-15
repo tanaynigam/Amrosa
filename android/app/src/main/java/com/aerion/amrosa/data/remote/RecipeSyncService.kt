@@ -396,6 +396,7 @@ class RecipeSyncService(
             "authorId" to (recipe.authorId ?: authorIdOverride),
             "authorDisplayName" to recipe.authorDisplayName,
             "visibility" to recipe.visibility,
+            "sharedWith" to recipe.sharedWith,
             "parentRecipeId" to recipe.parentRecipeId,
             "variantName" to recipe.variantName,
             "sections" to sections,
@@ -437,6 +438,7 @@ class RecipeSyncService(
             authorId = data["authorId"] as? String,
             authorDisplayName = data["authorDisplayName"] as? String,
             visibility = if (markReceived) "private" else (data["visibility"] as? String ?: "private"),
+            sharedWith = gson.toJson((data["sharedWith"] as? List<*>)?.filterIsInstance<String>() ?: emptyList<String>()),
             // Received recipes become standalone (the sharer's base doesn't exist locally);
             // personal-device pull preserves the variation grouping.
             parentRecipeId = if (markReceived) null else data["parentRecipeId"] as? String,

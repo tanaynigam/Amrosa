@@ -29,7 +29,8 @@ data class RecipeEntity(
     val syncedAt: Long? = null,
     val authorId: String? = null,           // Firebase UID of the ORIGINAL author (always preserved)
     val authorDisplayName: String? = null,  // ORIGINAL author display name (never overwritten with "Imported")
-    val visibility: String = "private",     // "private" or "public" (public = mirrored to shared_recipes)
+    val visibility: String = "private",     // private | shared | friends | public (shared/friends/public = mirrored)
     val parentRecipeId: String? = null,      // null = base recipe; else id of the base this is a variation of
     val variantName: String? = null,         // e.g. "Spicy", "Vegan" — only set on variations
+    val sharedWith: String = "[]",           // JSON List<String> of recipient UIDs (visibility == "shared" ACL)
 )

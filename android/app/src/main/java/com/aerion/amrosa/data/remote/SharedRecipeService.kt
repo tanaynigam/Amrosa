@@ -349,9 +349,11 @@ class SharedRecipeService(
             // vs "X" label is computed at display time — never overwrite the name here.
             "authorId" to recipe.authorId,
             "authorDisplayName" to (recipe.authorDisplayName ?: "User"),
-            // Mirror records the actual tier ("friends" or "public") — drives the read rule.
-            // Default to "public" for safety if a private recipe somehow reaches publish().
-            "visibility" to (recipe.visibility.takeIf { it == "friends" || it == "public" } ?: "public"),
+            // Mirror records the actual shared tier — drives the read rule. "shared" recipes are
+            // readable only by the author + the UIDs in sharedWith (per-recipient ACL); they never
+            // appear in Discovery/profile (those query friends/public only).
+            "visibility" to (recipe.visibility.takeIf { it == "shared" || it == "friends" || it == "public" } ?: "public"),
+            "sharedWith" to recipe.sharedWith,
             "sharedAt" to System.currentTimeMillis(),
             // F13 Phase 3a — word tokens (title + tags, lowercased) for array-contains search.
             "searchTokens" to searchTokens(recipe.title, recipe.tags),
@@ -464,7 +466,8 @@ class SharedRecipeService(
             updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: now,
             authorId = data["authorId"] as? String,
             authorDisplayName = data["authorDisplayName"] as? String,
-            visibility = data["visibility"] as? String ?: "public"
+            visibility = data["visibility"] as? String ?: "public",
+            sharedWith = (data["sharedWith"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
         )
     }
 

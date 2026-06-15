@@ -108,6 +108,12 @@ class RecipeRepository(
     suspend fun setVisibility(recipeId: String, visibility: String) =
         recipeDao.updateVisibility(recipeId, visibility)
 
+    /** Set the per-recipient share list; non-empty ⇒ visibility "shared", empty ⇒ "private". */
+    suspend fun setSharedWith(recipeId: String, uids: List<String>) {
+        val visibility = if (uids.isEmpty()) "private" else "shared"
+        recipeDao.updateVisibilityAndSharedWith(recipeId, visibility, gson.toJson(uids))
+    }
+
     suspend fun getAllPersonalRecipesWithDetails(): List<Recipe> =
         recipeDao.getPersonalRecipesOnce().mapNotNull { entity ->
             getRecipeWithDetails(entity.id)
@@ -345,7 +351,8 @@ class RecipeRepository(
         createdAt = createdAt, updatedAt = updatedAt,
         authorId = authorId, authorDisplayName = authorDisplayName,
         visibility = visibility,
-        parentRecipeId = parentRecipeId, variantName = variantName
+        parentRecipeId = parentRecipeId, variantName = variantName,
+        sharedWith = stringList(sharedWith)
     )
 
     private fun RecipeEntity.toDomain(
@@ -367,7 +374,8 @@ class RecipeRepository(
         createdAt = createdAt, updatedAt = updatedAt,
         authorId = authorId, authorDisplayName = authorDisplayName,
         visibility = visibility,
-        parentRecipeId = parentRecipeId, variantName = variantName
+        parentRecipeId = parentRecipeId, variantName = variantName,
+        sharedWith = stringList(sharedWith)
     )
 
     private fun RecipeSectionEntity.toDomain() = RecipeSection(id, name, orderIndex)

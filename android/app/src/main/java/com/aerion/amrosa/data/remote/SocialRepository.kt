@@ -109,6 +109,26 @@ class SocialRepository(
         }
     }
 
+    /** Resolve a set of UIDs to their profiles (for showing a recipe's share recipients). */
+    suspend fun getUsers(uids: List<String>): List<UserProfile> {
+        if (uids.isEmpty()) return emptyList()
+        return uids.distinct().mapNotNull { id ->
+            try {
+                val doc = firestore.collection(COL_USERS).document(id).get().await()
+                val data = doc.data ?: return@mapNotNull null
+                UserProfile(
+                    uid = doc.id,
+                    displayName = data["displayName"] as? String ?: id.take(6),
+                    email = data["email"] as? String,
+                    photoUrl = data["photoUrl"] as? String,
+                    createdAt = (data["updatedAt"] as? Number)?.toLong() ?: 0L,
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "getUsers $id failed", e); null
+            }
+        }
+    }
+
     // ── Follows ────────────────────────────────────────────────────────────────
 
     private fun followDocId(followerId: String, followeeId: String) =
