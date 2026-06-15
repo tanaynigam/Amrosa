@@ -783,9 +783,14 @@ class RecipeDetailViewModel(
                 if (!editIsImported) {
                     viewModelScope.launch(Dispatchers.IO) { syncService.pushPersonalRecipe(recipeId) }
                 }
-                if (editVisibility == "friends" || editVisibility == "public") {
-                    viewModelScope.launch(Dispatchers.IO) {
+                // Reconcile the public mirror with the recipe's visibility: publish for
+                // friends/public, otherwise remove any lingering mirror doc (so a recipe that
+                // is/became private never stays visible in Discovery/profile).
+                viewModelScope.launch(Dispatchers.IO) {
+                    if (editVisibility == "friends" || editVisibility == "public") {
                         repository.getRecipeWithDetails(recipeId)?.let { sharedRecipeService.publish(it) }
+                    } else {
+                        sharedRecipeService.unpublish(recipeId)
                     }
                 }
                 // Exit edit mode; the Room-Flow observer reloads the fresh recipe into view.
@@ -846,12 +851,13 @@ class RecipeDetailViewModel(
                     repository.getVariants(recipeId).forEach { variant ->
                         repository.deleteFullRecipe(variant.id)
                         syncService.deletePersonalRecipe(variant.id)
-                        if (variant.visibility == "public") sharedRecipeService.unpublish(variant.id)
+                        // Remove the mirror for any shared tier (friends OR public), not just public.
+                        if (variant.visibility != "private") sharedRecipeService.unpublish(variant.id)
                     }
                 }
                 repository.deleteFullRecipe(recipeId)
                 syncService.deletePersonalRecipe(recipeId)
-                if (editVisibility == "public") sharedRecipeService.unpublish(recipeId)
+                if (editVisibility != "private") sharedRecipeService.unpublish(recipeId)
             }
             _uiState.update { it.copy(isDeleting = false, deleteComplete = true) }
         }

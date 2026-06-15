@@ -32,11 +32,16 @@ service cloud.firestore {
             && exists(/databases/$(database)/documents/follows/$(request.auth.uid + '_' + resource.data.authorId))
             && get(/databases/$(database)/documents/follows/$(request.auth.uid + '_' + resource.data.authorId)).data.status == 'accepted');
 
+      // Only the author may write, and ONLY shared tiers may exist here — a doc with
+      // visibility 'private' (or anything other than friends/public) is rejected, so a
+      // private recipe can never be mirrored into Discovery / profiles.
       allow create: if request.auth != null
-        && request.auth.uid == request.resource.data.authorId;
+        && request.auth.uid == request.resource.data.authorId
+        && request.resource.data.visibility in ['friends', 'public'];
 
       allow update: if request.auth != null
-        && request.auth.uid == resource.data.authorId;
+        && request.auth.uid == resource.data.authorId
+        && request.resource.data.visibility in ['friends', 'public'];
 
       allow delete: if request.auth != null
         && request.auth.uid == resource.data.authorId;
