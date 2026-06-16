@@ -82,8 +82,9 @@ final class RecipeDetailViewModel {
     private let socialRepository: SocialRepository
     let syncService: RecipeSyncService?
     let cloudFunctions: CloudFunctionsService?
+    let userPreferences: UserPreferences?
 
-    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService, socialRepository: SocialRepository, syncService: RecipeSyncService? = nil, cloudFunctions: CloudFunctionsService? = nil) {
+    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService, socialRepository: SocialRepository, syncService: RecipeSyncService? = nil, cloudFunctions: CloudFunctionsService? = nil, userPreferences: UserPreferences? = nil) {
         self.recipe = recipe
         self.repository = repository
         self.authRepository = authRepository
@@ -91,6 +92,7 @@ final class RecipeDetailViewModel {
         self.socialRepository = socialRepository
         self.syncService = syncService
         self.cloudFunctions = cloudFunctions
+        self.userPreferences = userPreferences
         self.selectedServings = recipe.baseServings
         // Seed anchor quantity from the anchor ingredient's base value
         if let anchorId = recipe.scaleIngredientId,
@@ -99,6 +101,31 @@ final class RecipeDetailViewModel {
             self.scaleAnchorQty = baseValue
         } else {
             self.scaleAnchorQty = 0
+        }
+        seedSelections()
+    }
+
+    /// Restore remembered substitute + optional choices for this recipe (validated against the
+    /// current recipe so stale ids are ignored); falls back to the "include optionals" default.
+    private func seedSelections() {
+        let optionalIds = Set(recipe.ingredients.filter { $0.isOptional }.map { $0.id })
+
+        // Substitutes: keep only groupId→ingredientId pairs whose ingredient still exists in that group.
+        if let prefs = userPreferences {
+            let saved = prefs.recipeSubstitutes(recipe.id)
+            var valid: [String: String] = [:]
+            for (gid, ingId) in saved where recipe.ingredients.contains(where: { $0.id == ingId && $0.substituteGroupId == gid }) {
+                valid[gid] = ingId
+            }
+            selectedSubstitutes = valid
+
+            if let savedOpts = prefs.recipeEnabledOptionals(recipe.id) {
+                enabledOptionals = savedOpts.intersection(optionalIds)
+            } else {
+                enabledOptionals = prefs.includeOptionalsByDefault() ? optionalIds : []
+            }
+        } else {
+            enabledOptionals = optionalIds
         }
     }
 
@@ -337,10 +364,12 @@ final class RecipeDetailViewModel {
         } else {
             enabledOptionals.insert(ingredientId)
         }
+        userPreferences?.setRecipeEnabledOptionals(recipe.id, enabledOptionals)
     }
 
     func selectSubstitute(_ groupId: String, _ ingredientId: String) {
         selectedSubstitutes[groupId] = ingredientId
+        userPreferences?.setRecipeSubstitutes(recipe.id, selectedSubstitutes)
     }
 
     // MARK: - Notes

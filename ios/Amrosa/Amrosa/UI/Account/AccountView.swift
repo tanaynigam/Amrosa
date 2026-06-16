@@ -97,6 +97,18 @@ struct AccountView: View {
                     }
                 }
 
+                // Ingredients
+                Section {
+                    Toggle("Include optional ingredients by default", isOn: Binding(
+                        get: { vm.includeOptionalsByDefault },
+                        set: { vm.setIncludeOptionalsByDefault($0) }
+                    ))
+                } header: {
+                    Text("Ingredients")
+                } footer: {
+                    Text("When on, a recipe's optional ingredients start included. You can still toggle them per recipe.")
+                }
+
                 // Recipe preferences (Discover affinity)
                 if !vm.availableCuisines.isEmpty {
                     Section {

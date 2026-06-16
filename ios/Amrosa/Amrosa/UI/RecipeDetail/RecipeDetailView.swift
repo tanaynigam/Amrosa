@@ -163,7 +163,8 @@ struct RecipeDetailView: View {
                 sharedRecipeService: container.sharedRecipeService,
                 socialRepository: container.socialRepository,
                 syncService: container.syncService,
-                cloudFunctions: container.cloudFunctions
+                cloudFunctions: container.cloudFunctions,
+                userPreferences: container.userPreferences
             )
             viewModel?.startCommentListener()
             viewModel?.loadVariants()
