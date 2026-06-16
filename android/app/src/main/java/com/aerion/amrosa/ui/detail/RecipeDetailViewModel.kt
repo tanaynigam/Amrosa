@@ -601,6 +601,9 @@ class RecipeDetailViewModel(
     private var editVisibility: String = "private"
     private var editSharedWith: List<String> = emptyList()
     private var editParentRecipeId: String? = null
+    // Snapshot of each ingredient's conversion-relevant fields at edit start, so on save we
+    // recompute unit conversions ONLY for ingredients whose name/quantity actually changed.
+    private var editIngredientSig: Map<String, String> = emptyMap()
 
     fun enterEdit() {
         val recipe = _uiState.value.recipe ?: return
@@ -650,6 +653,7 @@ class RecipeDetailViewModel(
             variantName = recipe.variantName ?: "",
             sections = sections,
         )
+        editIngredientSig = sections.flatMap { it.ingredients }.associate { it.id to ingredientSig(it) }
         _uiState.update { it.copy(isEditMode = true, draft = draft, editError = null) }
         viewModelScope.launch {
             val vc = if (recipe.parentRecipeId == null) repository.getVariants(recipeId).size else 0
@@ -812,6 +816,17 @@ class RecipeDetailViewModel(
         val newChangeLog = editChangeLog + RecipeChange(newVersion, now, "Edited recipe")
         viewModelScope.launch {
             try {
+                // #8 — auto-update conversions ONLY for ingredients whose name/quantity changed
+                // (or were added) this session. Best-effort: a convert failure doesn't block save.
+                val changed = draft.sections.flatMap { it.ingredients }.filter {
+                    it.quantityDisplay.isNotBlank() && editIngredientSig[it.id] != ingredientSig(it)
+                }
+                val converted = if (changed.isNotEmpty())
+                    runCatching { convertRemote(changed) }.getOrDefault(emptyMap()) else emptyMap()
+                val effectiveSections = if (converted.isEmpty()) draft.sections else draft.sections.map { s ->
+                    s.copy(ingredients = s.ingredients.map { ing -> converted[ing.id]?.let { ing.withConversions(it) } ?: ing })
+                }
+
                 val recipeEntity = RecipeEntity(
                     id = recipeId, title = title,
                     description = draft.description.trim().ifBlank { null },
@@ -842,7 +857,7 @@ class RecipeDetailViewModel(
                 val sectionEntities = draft.sections.mapIndexed { idx, s ->
                     RecipeSectionEntity(id = s.id, recipeId = recipeId, name = s.name.trim(), orderIndex = idx)
                 }
-                val ingredientEntities = draft.sections.flatMap { s ->
+                val ingredientEntities = effectiveSections.flatMap { s ->
                     s.ingredients.mapIndexed { idx, ing ->
                         IngredientEntity(
                             id = ing.id, recipeId = recipeId, sectionId = s.id, name = ing.name.trim(),
@@ -912,6 +927,33 @@ class RecipeDetailViewModel(
     // ── Update conversions (Gemini) ─────────────────────────────────────────────
     private val functions by lazy { FirebaseFunctions.getInstance("us-central1") }
 
+    /** Conversion-relevant fingerprint of an ingredient (name + quantity) — drives "what changed". */
+    private fun ingredientSig(i: EditorIngredient): String =
+        "${i.name.trim()}|${i.quantityDisplay.trim()}|${i.quantityUnit.trim()}|${i.quantityValue}|${i.quantityValueMax}"
+
+    /** Call the `convertIngredients` Cloud Function for [ings]; returns id → raw conversion fields. */
+    private suspend fun convertRemote(ings: List<EditorIngredient>): Map<String, Map<String, Any?>> {
+        if (ings.isEmpty()) return emptyMap()
+        val payload = ings.map { hashMapOf("id" to it.id, "name" to it.name, "quantityDisplay" to it.quantityDisplay) }
+        @Suppress("UNCHECKED_CAST")
+        val data = withContext(Dispatchers.IO) {
+            functions.getHttpsCallable("convertIngredients").call(hashMapOf("ingredients" to payload)).await().getData()
+        } as? Map<String, Any?>
+        return ((data?.get("ingredients") as? List<*>)?.filterIsInstance<Map<String, Any?>>() ?: emptyList())
+            .mapNotNull { r -> (r["id"] as? String)?.let { it to r } }.toMap()
+    }
+
+    private fun EditorIngredient.withConversions(r: Map<String, Any?>) = copy(
+        quantityValueMetric = (r["quantityValueMetric"] as? Number)?.toDouble(),
+        quantityUnitMetric = r["quantityUnitMetric"] as? String,
+        quantityDisplayMetric = r["quantityDisplayMetric"] as? String,
+        quantityValueImperial = (r["quantityValueImperial"] as? Number)?.toDouble(),
+        quantityUnitImperial = r["quantityUnitImperial"] as? String,
+        quantityDisplayImperial = r["quantityDisplayImperial"] as? String,
+        quantityValueMaxMetric = (r["quantityValueMaxMetric"] as? Number)?.toDouble(),
+        quantityValueMaxImperial = (r["quantityValueMaxImperial"] as? Number)?.toDouble(),
+    )
+
     fun updateConversions() {
         val draft = _uiState.value.draft ?: return
         val ingredients = draft.sections.flatMap { it.ingredients }
@@ -919,27 +961,11 @@ class RecipeDetailViewModel(
         _uiState.update { it.copy(isConverting = true) }
         viewModelScope.launch {
             try {
-                val payload = ingredients.map { hashMapOf("id" to it.id, "name" to it.name, "quantityDisplay" to it.quantityDisplay) }
-                @Suppress("UNCHECKED_CAST")
-                val data = withContext(Dispatchers.IO) {
-                    functions.getHttpsCallable("convertIngredients").call(hashMapOf("ingredients" to payload)).await().getData()
-                } as? Map<String, Any?>
-                val byId = ((data?.get("ingredients") as? List<*>)?.filterIsInstance<Map<String, Any?>>() ?: emptyList())
-                    .associateBy { it["id"] as? String }
+                val byId = convertRemote(ingredients)
                 updateDraft { d ->
                     d.copy(sections = d.sections.map { sec ->
                         sec.copy(ingredients = sec.ingredients.map { ing ->
-                            val r = byId[ing.id] ?: return@map ing
-                            ing.copy(
-                                quantityValueMetric = (r["quantityValueMetric"] as? Number)?.toDouble(),
-                                quantityUnitMetric = r["quantityUnitMetric"] as? String,
-                                quantityDisplayMetric = r["quantityDisplayMetric"] as? String,
-                                quantityValueImperial = (r["quantityValueImperial"] as? Number)?.toDouble(),
-                                quantityUnitImperial = r["quantityUnitImperial"] as? String,
-                                quantityDisplayImperial = r["quantityDisplayImperial"] as? String,
-                                quantityValueMaxMetric = (r["quantityValueMaxMetric"] as? Number)?.toDouble(),
-                                quantityValueMaxImperial = (r["quantityValueMaxImperial"] as? Number)?.toDouble(),
-                            )
+                            byId[ing.id]?.let { ing.withConversions(it) } ?: ing
                         })
                     })
                 }
