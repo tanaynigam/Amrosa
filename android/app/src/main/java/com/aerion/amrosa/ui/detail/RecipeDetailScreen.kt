@@ -682,28 +682,24 @@ fun RecipeDetailScreen(
                         // View mode: unit toggle (when conversions exist) + Shopping List (moved
                         // here from the top bar) on the right.
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Compact unit cycler — one chip that rotates Original → Metric → Imperial
+                            // (replaces the wide 3-segment toggle so this row isn't crowded).
                             if (hasConversions) {
-                                SingleChoiceSegmentedButtonRow {
-                                    UnitMode.entries.forEachIndexed { index, mode ->
-                                        SegmentedButton(
-                                            selected = selectedUnit == mode,
-                                            onClick = { selectedUnit = mode },
-                                            shape = SegmentedButtonDefaults.itemShape(
-                                                index = index, count = UnitMode.entries.size
-                                            ),
-                                            label = {
-                                                Text(
-                                                    when (mode) {
-                                                        UnitMode.ORIGINAL -> "Orig"
-                                                        UnitMode.METRIC   -> "Metric"
-                                                        UnitMode.IMPERIAL -> "Imp"
-                                                    },
-                                                    style = MaterialTheme.typography.labelSmall
-                                                )
-                                            }
+                                val units = UnitMode.entries
+                                AssistChip(
+                                    onClick = { selectedUnit = units[(units.indexOf(selectedUnit) + 1) % units.size] },
+                                    leadingIcon = { Icon(Icons.Default.SwapHoriz, contentDescription = "Change units", modifier = Modifier.size(16.dp)) },
+                                    label = {
+                                        Text(
+                                            when (selectedUnit) {
+                                                UnitMode.ORIGINAL -> "Orig"
+                                                UnitMode.METRIC   -> "Metric"
+                                                UnitMode.IMPERIAL -> "Imp"
+                                            },
+                                            style = MaterialTheme.typography.labelMedium
                                         )
-                                    }
-                                }
+                                    },
+                                )
                                 Spacer(Modifier.width(4.dp))
                             }
                             IconButton(onClick = {
