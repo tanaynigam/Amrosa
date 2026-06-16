@@ -48,27 +48,8 @@ service cloud.firestore {
       allow delete: if request.auth != null
         && request.auth.uid == resource.data.authorId;
 
-      // ── Notes (community thread; stored in the `comments` subcollection) ──────
-      match /comments/{commentId} {
-        allow read: if request.auth != null;
-
-        // Anyone who can read the recipe may add a note, UNLESS the author locked the thread
-        // (notesLocked on the parent doc; defaults false).
-        allow create: if request.auth != null
-          && request.auth.token.firebase.sign_in_provider != 'anonymous'
-          && request.auth.uid == request.resource.data.authorId
-          && request.resource.data.content is string
-          && request.resource.data.content.size() > 0
-          && request.resource.data.content.size() <= 1000
-          && get(/databases/$(database)/documents/shared_recipes/$(recipeId)).data.get('notesLocked', false) == false;
-
-        allow delete: if request.auth != null && (
-          request.auth.uid == resource.data.authorId ||
-          request.auth.uid == get(/databases/$(database)/documents/shared_recipes/$(recipeId)).data.authorId
-        );
-
-        allow update: if false; // comments are immutable once posted
-      }
+      // (Notes moved out of shared_recipes into the top-level `recipe_notes` collection so they
+      //  persist independently of the recipe's visibility — see below.)
 
       // ── Likes ─────────────────────────────────────────────────────────────
       // Presence of likes/{uid} = that user liked the recipe. likeCount on the parent
@@ -79,6 +60,42 @@ service cloud.firestore {
           && request.auth.token.firebase.sign_in_provider != 'anonymous'
           && request.auth.uid == uid;
         allow update: if false;
+      }
+    }
+
+    // ── Recipe notes (visibility-independent thread, keyed by recipeId) ───────
+    // Lives outside shared_recipes so notes persist across a recipe's private↔shared changes.
+    // `recipe_notes/{recipeId}` = { recipeAuthorId, locked }; `notes/{noteId}` = the entries.
+    // (Per product decision, read/add are open to any signed-in user; the recipe is the gate in-app.)
+    match /recipe_notes/{recipeId} {
+      allow read: if request.auth != null;
+      // The recipe owner records themselves + manages the lock. Self-claim (recipe ids are UUIDs;
+      // same trust posture as shared_recipes.authorId).
+      allow create, update: if request.auth != null
+        && request.resource.data.recipeAuthorId == request.auth.uid;
+      allow delete: if false;
+
+      match /notes/{noteId} {
+        allow read: if request.auth != null;
+
+        // Any signed-in (non-anonymous) user may add a note, unless the thread is locked.
+        allow create: if request.auth != null
+          && request.auth.token.firebase.sign_in_provider != 'anonymous'
+          && request.auth.uid == request.resource.data.authorId
+          && request.resource.data.content is string
+          && request.resource.data.content.size() > 0
+          && request.resource.data.content.size() <= 1000
+          && (!exists(/databases/$(database)/documents/recipe_notes/$(recipeId))
+              || get(/databases/$(database)/documents/recipe_notes/$(recipeId)).data.get('locked', false) == false);
+
+        // The note's author OR the recipe owner may delete.
+        allow delete: if request.auth != null && (
+          request.auth.uid == resource.data.authorId
+          || (exists(/databases/$(database)/documents/recipe_notes/$(recipeId))
+              && request.auth.uid == get(/databases/$(database)/documents/recipe_notes/$(recipeId)).data.get('recipeAuthorId', ''))
+        );
+
+        allow update: if false; // notes are immutable once posted
       }
     }
 

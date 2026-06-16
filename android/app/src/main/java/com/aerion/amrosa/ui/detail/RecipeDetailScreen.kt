@@ -897,53 +897,7 @@ fun RecipeDetailScreen(
                 item(key = "edit-bottom-spacer") { Spacer(Modifier.height(80.dp)) }
             }
 
-            // ── Personal notes — on a NON-shared (private) recipe the Notes thread is just your own
-            //    on-device jottings (the cloud thread needs a shared recipe). ──
-            if (!state.notesVisible && !editing) {
-                item {
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Notes", style = MaterialTheme.typography.headlineMedium)
-                        IconButton(onClick = { showNoteInput = !showNoteInput }) {
-                            Icon(Icons.Default.AddComment, contentDescription = "Add note")
-                        }
-                    }
-                }
-                if (showNoteInput) {
-                    item {
-                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            OutlinedTextField(
-                                value = noteText, onValueChange = { noteText = it },
-                                placeholder = { Text("Add a note, tweak, or observation…") },
-                                modifier = Modifier.fillMaxWidth(), minLines = 2
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Button(
-                                onClick = { viewModel.addNote(noteText); noteText = ""; showNoteInput = false },
-                                enabled = noteText.isNotBlank()
-                            ) { Text("Save Note") }
-                        }
-                    }
-                }
-                items(state.notes, key = { it.id }) { note ->
-                    NoteRow(note = note, onDelete = { viewModel.deleteNote(note.id) })
-                }
-                if (state.notes.isEmpty() && !showNoteInput) {
-                    item {
-                        Text("No notes yet. Tap + to add one — these stay private to you. Share the recipe to start a notes thread others can join.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                    }
-                }
-                item { Spacer(Modifier.height(16.dp)) }
-            }
-
-            // ── Notes — a community thread on shared recipes (anyone who can view may add; the
+            // ── Notes — a cloud thread on EVERY recipe (anyone who can view may add; the
             //    author can delete any note and Lock the thread to freeze new ones). Replaces the
             //    old separate Comments section. Only shown when shared. ──
             if (state.notesVisible && !editing) {

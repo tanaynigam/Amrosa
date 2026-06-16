@@ -32,8 +32,16 @@ class SharedRecipeService(
     companion object {
         private const val TAG = "SharedRecipeService"
         private const val COLLECTION_SHARED = "shared_recipes"
-        private const val COLLECTION_COMMENTS = "comments"
+        // Notes live in a dedicated, visibility-independent collection so they persist across a
+        // recipe's private↔shared changes (a note added while private becomes visible to everyone
+        // once the recipe is shared/public). `recipe_notes/{recipeId}` holds {recipeAuthorId, locked};
+        // its `notes` subcollection holds the entries.
+        private const val COLLECTION_NOTES = "recipe_notes"
+        private const val SUBCOLLECTION_NOTES = "notes"
     }
+
+    private fun notesDoc(recipeId: String) = firestore.collection(COLLECTION_NOTES).document(recipeId)
+    private fun notesCol(recipeId: String) = notesDoc(recipeId).collection(SUBCOLLECTION_NOTES)
 
     // ─── Publish / Unpublish ──────────────────────────────────────────────────
 
@@ -71,20 +79,30 @@ class SharedRecipeService(
         }
     }
 
-    // ─── Notes lock (author freezes the community notes thread) ────────────────
-    // Stored on the mirror doc only (merge-written, so publish/republish never clears it).
+    // ─── Notes lock + ownership marker (on the recipe_notes parent doc) ────────
+
+    /** Ensure the notes parent doc records the recipe owner — lets the owner delete any note. */
+    suspend fun ensureNotesParent(recipeId: String) {
+        val uid = authRepository.uid ?: return
+        try {
+            notesDoc(recipeId).set(mapOf("recipeAuthorId" to uid), SetOptions.merge()).await()
+        } catch (e: Exception) {
+            Log.e(TAG, "ensureNotesParent failed for $recipeId", e)
+        }
+    }
 
     suspend fun setNotesLocked(recipeId: String, locked: Boolean): Boolean = try {
-        firestore.collection(COLLECTION_SHARED).document(recipeId)
-            .set(mapOf("notesLocked" to locked), SetOptions.merge()).await()
+        val uid = authRepository.uid
+        notesDoc(recipeId).set(
+            mapOf("locked" to locked, "recipeAuthorId" to uid), SetOptions.merge()
+        ).await()
         true
     } catch (e: Exception) {
         Log.e(TAG, "setNotesLocked failed for $recipeId", e); false
     }
 
     suspend fun getNotesLocked(recipeId: String): Boolean = try {
-        firestore.collection(COLLECTION_SHARED).document(recipeId).get().await()
-            .getBoolean("notesLocked") ?: false
+        notesDoc(recipeId).get().await().getBoolean("locked") ?: false
     } catch (e: Exception) { false }
 
     // ─── Browse shared recipes ────────────────────────────────────────────────
@@ -242,12 +260,10 @@ class SharedRecipeService(
 
     // ─── Comments ─────────────────────────────────────────────────────────────
 
-    /** Live stream of comments for a shared recipe, ordered by createdAt. */
+    /** Live stream of notes for a recipe, ordered by createdAt. */
     fun getCommentsFlow(recipeId: String): Flow<List<Comment>> = callbackFlow {
         var registration: ListenerRegistration? = null
-        registration = firestore.collection(COLLECTION_SHARED)
-            .document(recipeId)
-            .collection(COLLECTION_COMMENTS)
+        registration = notesCol(recipeId)
             .orderBy("createdAt")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -279,12 +295,7 @@ class SharedRecipeService(
                 "content" to content.trim(),
                 "createdAt" to System.currentTimeMillis()
             )
-            firestore.collection(COLLECTION_SHARED)
-                .document(recipeId)
-                .collection(COLLECTION_COMMENTS)
-                .document(id)
-                .set(doc)
-                .await()
+            notesCol(recipeId).document(id).set(doc).await()
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to add comment on $recipeId", e)
@@ -298,12 +309,7 @@ class SharedRecipeService(
      */
     suspend fun deleteComment(recipeId: String, commentId: String): Boolean {
         return try {
-            firestore.collection(COLLECTION_SHARED)
-                .document(recipeId)
-                .collection(COLLECTION_COMMENTS)
-                .document(commentId)
-                .delete()
-                .await()
+            notesCol(recipeId).document(commentId).delete().await()
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to delete comment $commentId on $recipeId", e)

@@ -103,8 +103,9 @@ data class RecipeDetailUiState(
     /** True when the recipe is mirrored to the cloud (Co-Chefs or Public) — gates sharing/popularity. */
     val isPublished: Boolean get() = recipe?.visibility == "friends" || recipe?.visibility == "public"
 
-    /** True when the recipe is shared in any tier → the community Notes thread is available. */
-    val notesVisible: Boolean get() = recipe != null && recipe.visibility != "private"
+    /** Notes thread is available on every recipe (cloud-backed, visibility-independent, so notes
+     *  written while private become visible to everyone once the recipe is shared). */
+    val notesVisible: Boolean get() = recipe != null && !recipe.needsReview
 
     /** Current visibility tier; defaults to "private". */
     val visibility: String get() = recipe?.visibility ?: "private"
@@ -316,10 +317,12 @@ class RecipeDetailViewModel(
                 )
             }
 
-            // Start listening to notes (comments) + popularity counts if shared; load the notes lock.
-            if (recipe != null && recipe.visibility != "private") {
+            // Notes thread exists for every recipe (cloud, visibility-independent). Popularity
+            // counts only when published. Record ownership on the notes doc so the owner can moderate.
+            if (recipe != null && !recipe.needsReview) {
                 startObservingComments()
                 if (recipe.visibility == "friends" || recipe.visibility == "public") startObservingCounts()
+                if (isOwner) sharedRecipeService.ensureNotesParent(recipeId)
                 _uiState.update { it.copy(notesLocked = sharedRecipeService.getNotesLocked(recipeId)) }
             }
 
