@@ -422,6 +422,49 @@ faint outline (`Modifier.editable(active, phase, onClick)` in `ui/util/EditAffor
 opens a bottom sheet** scoped to that item. Nothing is edited inline. Save ✓ + a ＋ add-menu live in
 the pinned top bar; Cancel is the nav X.
 
+#### Design intent & rationale — **port the *intent*, not just the widgets** (READ before iOS work)
+
+iOS keeps implementing the mechanics without the reasoning, so it diverges. The *why* behind every
+edit-mode decision, as a set of **invariants** both platforms must honour:
+
+1. **One screen, visually identical in both modes.** The detail screen **is** the edit surface — not a
+   separate form. *Why:* the old separate editor was "too confusing and crowded" and broke the user's
+   place; editing should feel like marking up the recipe you're reading. So edit mode renders the **live
+   draft through the same view components** (Android: `toPreviewRecipe` → the normal row composables). If
+   you build a parallel edit layout, you've already lost the intent.
+2. **Zero scroll shift when toggling edit — the non-negotiable.** *Why:* the literal user requirement is
+   "scroll to step 3, toggle edit, **stay on step 3** and edit it right there." **Every** other rule below
+   exists only to serve this. If toggling edit moves the page even slightly, the design has failed. This is
+   why we: keep identical item slots + keys; swap controls **in place** (never add/remove whole sections on
+   toggle); **reserve space** for edit-only adds; keep owner chrome (visibility + variation chips) **visible
+   but greyed** instead of removing it; hold **constant-height** rows (yield); and only hide things that sit
+   **below the fold** (Notes/Comments). Each greyed chip / reserved spacer / fixed height is plugging one
+   specific source of vertical shift — not arbitrary polish.
+3. **Jiggle + outline = the "editable" signal.** *Why:* a familiar, **layout-neutral** way to say "these
+   elements are editable" (home-screen jiggle). It MUST use rotation + an overlay border that **don't
+   reflow** — a real border/padding would violate invariant #2. It removes the need for inline form fields.
+4. **Tap → a focused per-item popup, never inline fields.** *Why:* the old form's failure was showing
+   *every field for every item at once*. The sheet edits **one item's** full detail (the fiddly bits:
+   quantity ranges, units, optional flag, substitute links, step→ingredient links) in a calm, focused
+   context, so the reading view stays clean and identical.
+5. **Draft + explicit Save/Cancel.** *Why:* edits accumulate in a draft and commit only on Save (Cancel
+   discards). The body shows the live draft so changes are visible immediately, but nothing persists until
+   Save → predictable and reversible. (This is also why switching variations is **disabled** mid-edit — it
+   would silently discard the draft.)
+6. **Adds are in-context.** Android appends faint **ghost "＋ Add" rows** right where the item belongs
+   ("add an ingredient to *this* section, here") + a top-bar ＋ as a shortcut; view mode reserves the row's
+   height so adding doesn't shift. *Why:* you should add an item where it will land, not via a detached
+   menu. **iOS currently uses an ellipsis toolbar menu with no in-context add rows — that diverges from this
+   intent** (it preserves zero-reflow, which is good, but loses in-context placement). Prefer the ghost-row
+   pattern unless there's a strong platform reason.
+
+The optional/substitute **view** decisions follow the same "don't bloat the read view" intent: optionals
+collapse to a one-line **chip row** per section (selecting *drops the ingredient into* the recipe — opt-in
+model; default-included is a per-user setting); substitutes show **swap chips under the ingredient row**
+(choose as you read) instead of a separate "Options" section; a step that "uses Butter" **resolves to the
+selected substitute** (shows Ghee if chosen) rather than going blank; and both choices are **remembered per
+recipe** so "I always make this with ghee, no cilantro" sticks next time.
+
 - **Bottom sheets** — `ui/detail/RecipeEditSheets.kt` (`EditBottomSheet` switches on a sealed
   `EditTarget`): **Ingredient** (name, quantity, range max `quantityValueMax`, unit, group, optional,
   shopping note, Delete — numeric quantity edits drive scaling, free-text only when blank),
@@ -1472,7 +1515,7 @@ The iOS codebase (`ios/Amrosa/`) is a fully-functional port of the Android app. 
 
 | Gap | Detail |
 |---|---|
-| **F16 — Edit mode redesign (jiggle + popups)** | ✅ **Ported (true in-place, zero-reflow).** The detail pencil flips `RecipeDetailContent` into edit mode while rendering the **identical body** — same `ScrollView`/`LazyVStack`, same items, same heights, same scaled/unit quantities — so **nothing on screen moves**: editable rows just gain an outline + jiggle + tap (`.editable`, `UI/Util/EditAffordance.swift`, uses `.overlay`+`.rotationEffect` which don't affect layout). Scroll position is preserved exactly. All add/convert/delete actions live in the **edit toolbar** (`ellipsis.circle` menu: Recipe details / Add ingredient / Add step / Add section / Update unit conversions / Delete recipe) — **no ghost rows or body chrome that would shift content**. Mirrors Android's `toPreviewRecipe`: lightweight **display value types** (`RecipeDisplayModels.swift`: `DisplaySection`/`DisplayIngredient`/`DisplayStep`) that both the real `RecipeModel` (view) and the live draft (edit) map into via `RecipeDetailViewModel+Display.swift` (same scale+unit + same grouping/empty-section hiding in both modes, incl. a single-nameless-section sentinel so no-section recipes match exactly), so `IngredientRow`/`StepRow` are one component for both. Tapping a row/header/description opens its sheet (`EditSheetHost` in `RecipeEditSheets.swift`: Details/Section/Ingredient/Step via `EditTarget`, state seeded in `init`, opens at `.large`; add-Ingredient/Step sheets have a section picker). Edit state + ops live in `RecipeDetailViewModel+Edit.swift` (`enterEdit`/`cancelEdit`/`saveEdit`/`updateConversions`/`deleteRecipe`); save maps the draft via `updateFullRecipe` (also rewrites step→ingredient refs from `EditorStep.ingredientIds`), pushes, and re-publishes if shared. `RecipeEditorView` is retained for the import/freeform & new-variation entry points. |
+| **F16 — Edit mode redesign (jiggle + popups)** | ✅ **Ported (true in-place, zero-reflow).** The detail pencil flips `RecipeDetailContent` into edit mode while rendering the **identical body** — same `ScrollView`/`LazyVStack`, same items, same heights, same scaled/unit quantities — so **nothing on screen moves**: editable rows just gain an outline + jiggle + tap (`.editable`, `UI/Util/EditAffordance.swift`, uses `.overlay`+`.rotationEffect` which don't affect layout). Scroll position is preserved exactly. All add/convert/delete actions live in the **edit toolbar** (`ellipsis.circle` menu: Recipe details / Add ingredient / Add step / Add section / Update unit conversions / Delete recipe) — **no ghost rows or body chrome that would shift content**. Mirrors Android's `toPreviewRecipe`: lightweight **display value types** (`RecipeDisplayModels.swift`: `DisplaySection`/`DisplayIngredient`/`DisplayStep`) that both the real `RecipeModel` (view) and the live draft (edit) map into via `RecipeDetailViewModel+Display.swift` (same scale+unit + same grouping/empty-section hiding in both modes, incl. a single-nameless-section sentinel so no-section recipes match exactly), so `IngredientRow`/`StepRow` are one component for both. Tapping a row/header/description opens its sheet (`EditSheetHost` in `RecipeEditSheets.swift`: Details/Section/Ingredient/Step via `EditTarget`, state seeded in `init`, opens at `.large`; add-Ingredient/Step sheets have a section picker). Edit state + ops live in `RecipeDetailViewModel+Edit.swift` (`enterEdit`/`cancelEdit`/`saveEdit`/`updateConversions`/`deleteRecipe`); save maps the draft via `updateFullRecipe` (also rewrites step→ingredient refs from `EditorStep.ingredientIds`), pushes, and re-publishes if shared. `RecipeEditorView` is retained for the import/freeform & new-variation entry points. **⚠️ Read F4's "Design intent & rationale" first — it explains the *why* behind these rules.** Still to align with Android's intent: **(a) in-context adds** — Android uses faint ghost "＋ Add ingredient/step" rows *where the item lands*, with view-mode space reserved so adding doesn't shift; the iOS toolbar-menu loses that placement (zero-reflow is preserved, but adopt the ghost-row pattern). **(b) Recent refinements that post-date this port and must be carried over:** optional ingredients render as a **one-line chip row per section** (selecting drops the ingredient in; default-included via an Account toggle) — not inline checkboxes; substitutes show **inline swap chips under the ingredient** (no separate "Options" section) + a **"Substitute for" picker** in the ingredient sheet, and a step that uses a group member **resolves to the selected member** (never blank); **per-recipe remembered selections** (substitute + optional choices persist); quantity **ranges** (F15: `quantityValueMax`) editable in the ingredient sheet; and the scroll-stability refinements (visibility/variation chips kept **greyed** not removed, constant-height yield, reserved add-row height). |
 | **F17 — Shared with specific people** | Android-only. iOS needs: a `sharedWith: [String]` on the SwiftData recipe; the mirror build/read to include `sharedWith` + allow the `"shared"` visibility tier; a "Specific people" option in the visibility chooser opening a recipients sheet (reuse `searchUsers` + a `getUsers(uids)` batch read for names); `setSharedWith`/add/remove + republish on change; and the direct-share path adding the recipient to `sharedWith` (visibility `"shared"`) instead of bumping to Co-Chefs. Firestore rules (the `sharedWith` ACL) are shared infra — already deployed. |
 | **Universal Links** | ✅ Wired — `Associated Domains` entitlement (`applinks:amrosa-2ec82.web.app`) + AASA at `hosting/public/.well-known/apple-app-site-association` (served as application/json). Pending `firebase deploy --only hosting`. |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
