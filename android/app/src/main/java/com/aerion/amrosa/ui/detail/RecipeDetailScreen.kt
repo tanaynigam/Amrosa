@@ -283,6 +283,12 @@ fun RecipeDetailScreen(
                                     text = { Text("Add section") },
                                     onClick = { showAddMenu = false; editTarget = EditTarget.Section(null) },
                                 )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Auto-arrange from steps") },
+                                    leadingIcon = { Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp)) },
+                                    onClick = { showAddMenu = false; viewModel.autoArrangeFromSteps() },
+                                )
                             }
                         }
                         if (state.isSavingEdit) {

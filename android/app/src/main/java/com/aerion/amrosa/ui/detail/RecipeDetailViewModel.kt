@@ -772,6 +772,36 @@ class RecipeDetailViewModel(
             })
         }
 
+    /**
+     * #9 — Auto-arrange ingredients from the step text (local, no Gemini). Per section: link any
+     * ingredient that isn't referenced by any step to the **first step that mentions it** (by a
+     * significant word of its name, e.g. "oil" in "olive oil"), then **reorder** the ingredient list
+     * by first-mention order (unmentioned ones keep their relative order at the end). Explicit action
+     * (edit-mode ＋ menu) so it never silently overrides a manual reorder.
+     */
+    fun autoArrangeFromSteps() = updateDraft { d ->
+        val stop = setOf("the","and","for","with","to","of","an","into","until","then","your","you",
+            "add","stir","cook","heat","mix","over","from","this","that","each","about","minutes","minute")
+        fun tokens(s: String) = s.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length >= 3 && it !in stop }
+        d.copy(sections = d.sections.map { sec ->
+            val firstMention = HashMap<String, Int>()
+            sec.steps.forEachIndexed { si, step ->
+                val words = step.instruction.lowercase().split(Regex("[^a-z0-9]+")).toHashSet()
+                sec.ingredients.forEach { ing ->
+                    if (ing.id !in firstMention && ing.name.isNotBlank() && tokens(ing.name).any { it in words })
+                        firstMention[ing.id] = si
+                }
+            }
+            val linkedAnywhere = sec.steps.flatMap { it.ingredientIds }.toHashSet()
+            val newSteps = sec.steps.mapIndexed { si, step ->
+                val toAdd = sec.ingredients.filter { firstMention[it.id] == si && it.id !in linkedAnywhere }.map { it.id }
+                if (toAdd.isEmpty()) step else step.copy(ingredientIds = (step.ingredientIds + toAdd).distinct())
+            }
+            val newIngredients = sec.ingredients.sortedWith(compareBy { firstMention[it.id] ?: Int.MAX_VALUE })
+            sec.copy(ingredients = newIngredients, steps = newSteps)
+        })
+    }
+
     fun saveEdit() {
         val draft = _uiState.value.draft ?: return
         val title = draft.title.trim()
