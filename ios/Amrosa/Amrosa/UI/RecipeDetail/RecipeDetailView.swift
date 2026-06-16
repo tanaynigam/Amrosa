@@ -59,7 +59,9 @@ struct RecipeDetailView: View {
                     viewModel: vm,
                     onOpenVariant: { openVariant = $0 },
                     onAddVariant: { newVariantName = ""; showAddVariant = true },
-                    onCookFromSection: { cookFromSectionId = $0; showCookingMode = true }
+                    onCookFromSection: { cookFromSectionId = $0; showCookingMode = true },
+                    onShare: { vm.loadFollowing(); showShareOptions = true },
+                    onShoppingList: { showShoppingList = true }
                 )
             } else {
                 ProgressView()
@@ -214,30 +216,23 @@ struct RecipeDetailView: View {
             }
         } else {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
+            // Slimmed down to free up title space: Share moved to the visibility row, cart to the
+            // Ingredients header. Smaller icons leave more room for the recipe title.
             if viewModel?.isReceived == true {
                 Button(role: .destructive) { showRemoveConfirm = true } label: {
-                    Image(systemName: "trash")
-                }
-                Button { showShoppingList = true } label: {
-                    Image(systemName: "cart")
+                    Image(systemName: "trash").imageScale(.small)
                 }
                 Button { cookFromSectionId = nil; showCookingMode = true } label: {
-                    Image(systemName: "book.closed")
+                    Image(systemName: "book.closed").imageScale(.small)
                 }
             } else {
                 if viewModel?.isOwner == true {
-                    Button { viewModel?.loadFollowing(); showShareOptions = true } label: {
-                        Image(systemName: "square.and.arrow.up")
-                    }
                     Button { viewModel?.enterEdit() } label: {
-                        Image(systemName: "pencil")
+                        Image(systemName: "pencil").imageScale(.small)
                     }
-                }
-                Button { showShoppingList = true } label: {
-                    Image(systemName: "cart")
                 }
                 Button { cookFromSectionId = nil; showCookingMode = true } label: {
-                    Image(systemName: "book.closed")
+                    Image(systemName: "book.closed").imageScale(.small)
                 }
             }
         }
@@ -303,6 +298,8 @@ private struct RecipeDetailContent: View {
     var onOpenVariant: (RecipeModel) -> Void = { _ in }
     var onAddVariant: () -> Void = {}
     var onCookFromSection: (String) -> Void = { _ in }
+    var onShare: () -> Void = {}
+    var onShoppingList: () -> Void = {}
 
     var body: some View {
         // F16: edit mode renders the IDENTICAL body — only `.editable` (outline + jiggle + tap)
@@ -313,6 +310,13 @@ private struct RecipeDetailContent: View {
         ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+
+                // ── Recipe title (prominent; the nav-bar title is small). Editable in edit mode. ──
+                Text(viewModel.displayTitle.isEmpty ? "Untitled recipe" : viewModel.displayTitle)
+                    .font(.title).fontWeight(.bold)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.top, 12)
+                    .editable(active: editing, phase: 0) { viewModel.editTarget = .details }
 
                 // ── Variation chips (F10) ──
                 if viewModel.variants.count > 1 || viewModel.canAddVariant {
@@ -356,8 +360,18 @@ private struct RecipeDetailContent: View {
                 }
                 if viewModel.isOwner {
                     // Kept in both modes (not an editable field) so the layout never reflows.
-                    VisibilityChip(viewModel: viewModel)
-                        .padding(.horizontal, 16).padding(.top, 8)
+                    // Share lives here now (moved off the crowded title bar); hidden while editing.
+                    HStack {
+                        VisibilityChip(viewModel: viewModel)
+                        Spacer()
+                        if !editing {
+                            Button(action: onShare) {
+                                Image(systemName: "square.and.arrow.up")
+                            }
+                            .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.top, 8)
                 }
 
                 // ── Time + Yield row (unchanged in both modes) ──
@@ -406,14 +420,21 @@ private struct RecipeDetailContent: View {
                 // (Substitutes are shown inline as swap chips under the ingredient — no "Options" section.)
 
                 // ── Ingredients ──
-                HStack {
+                HStack(spacing: 10) {
                     Text("Ingredients").font(.title2).fontWeight(.semibold)
                     Spacer()
                     if viewModel.hasConversionData {
                         Picker("Units", selection: Binding(get: { viewModel.unitMode }, set: { viewModel.unitMode = $0 })) {
                             ForEach(UnitMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                         }
-                        .pickerStyle(.segmented).frame(width: 180)
+                        .pickerStyle(.segmented).frame(width: 170)
+                    }
+                    // Shopping list lives here now (moved off the title bar); hidden while editing.
+                    if !editing {
+                        Button(action: onShoppingList) {
+                            Image(systemName: "cart")
+                        }
+                        .buttonStyle(.plain).foregroundStyle(Color.accentColor)
                     }
                 }
                 .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
@@ -513,45 +534,49 @@ private struct RecipeDetailContent: View {
                     viewModel.editTarget = .section(sectionId: nil)
                 }
 
-                Divider().padding(.horizontal, 16).padding(.vertical, 8)
+                // Notes + Comments are hidden while editing (they sit below the fold, so hiding
+                // them doesn't shift the content you're editing above).
+                if !editing {
+                    Divider().padding(.horizontal, 16).padding(.vertical, 8)
 
-                // ── Notes ──
-                HStack {
-                    Text("Notes").font(.title2).fontWeight(.semibold)
-                    Spacer()
-                    Button { viewModel.newNoteText = viewModel.newNoteText.isEmpty ? " " : "" } label: {
-                        Image(systemName: "plus.bubble")
-                    }
-                    .buttonStyle(.plain).foregroundStyle(Color.accentColor)
-                }
-                .padding(.horizontal, 16).padding(.bottom, 4)
-
-                if !viewModel.newNoteText.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField("Add a note, tweak, or observation…", text: Binding(
-                            get: { viewModel.newNoteText.trimmingCharacters(in: .whitespaces) == "" ? "" : viewModel.newNoteText },
-                            set: { viewModel.newNoteText = $0 }
-                        ), axis: .vertical)
-                        .textFieldStyle(.roundedBorder).lineLimit(3...6)
-                        if !viewModel.newNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Button("Save Note") { viewModel.addNote() }
-                                .buttonStyle(.borderedProminent).font(.subheadline)
+                    // ── Notes ──
+                    HStack {
+                        Text("Notes").font(.title2).fontWeight(.semibold)
+                        Spacer()
+                        Button { viewModel.newNoteText = viewModel.newNoteText.isEmpty ? " " : "" } label: {
+                            Image(systemName: "plus.bubble")
                         }
+                        .buttonStyle(.plain).foregroundStyle(Color.accentColor)
                     }
-                    .padding(.horizontal, 16).padding(.bottom, 8)
-                }
+                    .padding(.horizontal, 16).padding(.bottom, 4)
 
-                ForEach(viewModel.sortedNotes) { note in
-                    NoteRow(note: note, viewModel: viewModel)
-                }
-                if viewModel.sortedNotes.isEmpty && viewModel.newNoteText.isEmpty {
-                    Text("No notes yet. Tap + to add one.")
-                        .font(.body).foregroundStyle(.secondary)
-                        .padding(.horizontal, 16).padding(.vertical, 8)
-                }
+                    if !viewModel.newNoteText.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            TextField("Add a note, tweak, or observation…", text: Binding(
+                                get: { viewModel.newNoteText.trimmingCharacters(in: .whitespaces) == "" ? "" : viewModel.newNoteText },
+                                set: { viewModel.newNoteText = $0 }
+                            ), axis: .vertical)
+                            .textFieldStyle(.roundedBorder).lineLimit(3...6)
+                            if !viewModel.newNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Button("Save Note") { viewModel.addNote() }
+                                    .buttonStyle(.borderedProminent).font(.subheadline)
+                            }
+                        }
+                        .padding(.horizontal, 16).padding(.bottom, 8)
+                    }
 
-                if viewModel.isPublished {
-                    CommentsSection(viewModel: viewModel)
+                    ForEach(viewModel.sortedNotes) { note in
+                        NoteRow(note: note, viewModel: viewModel)
+                    }
+                    if viewModel.sortedNotes.isEmpty && viewModel.newNoteText.isEmpty {
+                        Text("No notes yet. Tap + to add one.")
+                            .font(.body).foregroundStyle(.secondary)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                    }
+
+                    if viewModel.isPublished {
+                        CommentsSection(viewModel: viewModel)
+                    }
                 }
 
                 Spacer(minLength: 32)

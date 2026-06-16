@@ -37,6 +37,16 @@ struct EditSheetHost: View {
     @Environment(\.dismiss) private var dismiss
     @State private var detent: PresentationDetent = .large
 
+    /// "Add new" sheets (nil id) commit via the in-form button; existing items edit live.
+    private var isAddMode: Bool {
+        switch target {
+        case .section(let s): return s == nil
+        case .ingredient(_, let i): return i == nil
+        case .step(_, let st): return st == nil
+        case .details: return false
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -53,7 +63,12 @@ struct EditSheetHost: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                // Add mode: Cancel only (the in-form "Add …" button commits). Edit mode: edits
+                // apply live, so "Done" just closes.
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                if !isAddMode {
+                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                }
             }
         }
         // Open fully expanded so every field is visible immediately (matches Android's
@@ -140,7 +155,7 @@ private struct SectionSheet: View {
         } else {
             Section {
                 Button { viewModel.addSection(name: name); dismiss() } label: {
-                    Label("Add section", systemImage: "plus")
+                    Label("Add section", systemImage: "plus").fontWeight(.semibold)
                 }
             }
         }
@@ -257,7 +272,7 @@ private struct IngredientSheet: View {
         Section {
             if existing == nil {
                 Button { viewModel.addIngredient(to: sectionPick, build()); dismiss() } label: {
-                    Label("Add ingredient", systemImage: "plus")
+                    Label("Add ingredient", systemImage: "plus").fontWeight(.semibold)
                 }
                 .disabled(name.trimmed.isEmpty)
             } else if let e = existing {
@@ -344,7 +359,7 @@ private struct StepSheet: View {
                     viewModel.addStep(to: sectionPick, EditorStep(instruction: instruction, ingredientIds: Array(ids)))
                     dismiss()
                 } label: {
-                    Label("Add step", systemImage: "plus")
+                    Label("Add step", systemImage: "plus").fontWeight(.semibold)
                 }
                 .disabled(instruction.trimmed.isEmpty)
             } else if let e = existing {
