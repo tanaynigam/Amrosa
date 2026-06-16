@@ -134,6 +134,7 @@ final class RecipeSyncService {
             "needsReview": recipe.needsReview,
             "version": recipe.version,
             "visibility": recipe.visibility,
+            "sharedWith": recipe.sharedWith,
             "scaleStep": recipe.scaleStep,
             "updatedAt": Int64(recipe.updatedAt.timeIntervalSince1970 * 1000),
             "createdAt": Int64(recipe.createdAt.timeIntervalSince1970 * 1000)

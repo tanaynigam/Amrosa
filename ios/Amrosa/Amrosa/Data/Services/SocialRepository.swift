@@ -80,6 +80,24 @@ final class SocialRepository {
         }
     }
 
+    /// Resolve a batch of user profiles by UID (F17 — recipient names for the share list).
+    func getUsers(_ uids: [String]) async -> [UserProfile] {
+        guard !uids.isEmpty else { return [] }
+        var result: [UserProfile] = []
+        // Firestore `in` queries cap at 10 — chunk to be safe.
+        for chunk in stride(from: 0, to: uids.count, by: 10).map({ Array(uids[$0..<min($0 + 10, uids.count)]) }) {
+            guard let snapshot = try? await db.collection("users")
+                .whereField("uid", in: chunk).getDocuments() else { continue }
+            for doc in snapshot.documents {
+                let data = doc.data()
+                guard let uid = data["uid"] as? String,
+                      let displayName = data["displayName"] as? String else { continue }
+                result.append(UserProfile(id: uid, uid: uid, displayName: displayName, photoUrl: data["photoUrl"] as? String))
+            }
+        }
+        return result
+    }
+
     // MARK: - Co-Chef (mutual friendship) actions
 
     /// Send a Co-Chef request to targetUid. Creates a "pending" follow doc.

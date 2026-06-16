@@ -458,6 +458,8 @@ final class RecipeDetailViewModel {
             try? repository.updateVisibility(recipeId: recipe.id, visibility: visibility)
             recipe.visibility = visibility   // update in-memory so the chip reflects immediately
             if visibility == "private" {
+                recipe.sharedWith = []
+                sharedRecipients = []
                 _ = await sharedRecipeService.unpublish(recipe.id)
                 stopCommentListener()
                 comments = []
@@ -466,6 +468,50 @@ final class RecipeDetailViewModel {
                 startCommentListener()
             }
         }
+    }
+
+    // MARK: - F17: Shared with specific people (per-recipient ACL)
+
+    /// Resolved recipient profiles for the recipe's `sharedWith` UIDs (drives the recipients sheet).
+    var sharedRecipients: [UserProfile] = []
+
+    /// Load recipient names for the current share list (call when opening the recipients sheet).
+    func loadSharedRecipients() {
+        let uids = recipe.sharedWith
+        guard !uids.isEmpty else { sharedRecipients = []; return }
+        Task { sharedRecipients = await socialRepository.getUsers(uids) }
+    }
+
+    /// Replace the share list. Empty → private; otherwise the "shared" tier + republish the mirror.
+    func setSharedRecipients(_ profiles: [UserProfile]) {
+        let uids = profiles.map { $0.uid }
+        sharedRecipients = profiles
+        Task {
+            try? repository.updateSharedRecipients(recipeId: recipe.id, sharedWith: uids)
+            recipe.sharedWith = uids
+            recipe.visibility = uids.isEmpty ? "private" : "shared"
+            if uids.isEmpty {
+                _ = await sharedRecipeService.unpublish(recipe.id)
+                stopCommentListener(); comments = []
+            } else {
+                _ = await sharedRecipeService.publish(recipe)
+                startCommentListener()
+            }
+        }
+    }
+
+    func addSharedRecipient(_ user: UserProfile) {
+        guard !sharedRecipients.contains(where: { $0.uid == user.uid }) else { return }
+        setSharedRecipients(sharedRecipients + [user])
+    }
+
+    func removeSharedRecipient(_ uid: String) {
+        setSharedRecipients(sharedRecipients.filter { $0.uid != uid })
+    }
+
+    /// User search for the recipients sheet.
+    func searchUsers(_ query: String) async -> [UserProfile] {
+        await socialRepository.searchUsers(query: query)
     }
 
     // MARK: - Direct sharing to followers
@@ -488,20 +534,27 @@ final class RecipeDetailViewModel {
         Task { await shareToFollowerInternal(uid: uid, name: name) }
     }
 
-    /// Make the recipe Public (publishes the canonical mirror), then share it.
-    /// Used when the user confirms the "make public to share" prompt for a private recipe.
-    /// F12: direct-share a private recipe → publish at the **Co-Chefs** tier (not Public).
-    /// An already-public recipe is left Public. Used by the "share makes this visible to co-chefs" prompt.
+    /// Direct-share a recipe to a specific person. F17: instead of bumping a private recipe to the
+    /// Co-Chefs tier, add the recipient to the per-recipient `sharedWith` ACL ("shared" tier) and
+    /// publish the mirror — so only that person (plus any already-listed) can read it.
     func makeSharableAndShareToFollower(uid: String, name: String) {
         Task {
-            if recipe.visibility == "private" {
-                try? repository.updateVisibility(recipeId: recipe.id, visibility: "friends")
-                recipe.visibility = "friends"
-                _ = await sharedRecipeService.publish(recipe)
-                startCommentListener()
-            }
+            await ensureSharedWith(uid)
             await shareToFollowerInternal(uid: uid, name: name)
         }
+    }
+
+    /// Ensure `recipientUid` is in the share list (publishing at the "shared" tier if needed).
+    /// An already-public/friends recipe is left at its tier.
+    private func ensureSharedWith(_ recipientUid: String) async {
+        if recipe.visibility == "public" || recipe.visibility == "friends" { return }
+        guard !recipe.sharedWith.contains(recipientUid) else { return }
+        let uids = (recipe.sharedWith + [recipientUid])
+        try? repository.updateSharedRecipients(recipeId: recipe.id, sharedWith: uids)
+        recipe.sharedWith = uids
+        recipe.visibility = "shared"
+        _ = await sharedRecipeService.publish(recipe)
+        startCommentListener()
     }
 
     private func shareToFollowerInternal(uid: String, name: String) async {

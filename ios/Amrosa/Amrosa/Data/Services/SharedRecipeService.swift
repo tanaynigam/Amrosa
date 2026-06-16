@@ -391,6 +391,8 @@ final class SharedRecipeService {
             "version": recipe.version,
             // F12: write the real tier ("friends" or "public") so the read rule + profile query work.
             "visibility": recipe.visibility == "private" ? "public" : recipe.visibility,
+            // F17: per-recipient ACL — the read rule grants access to UIDs in this array.
+            "sharedWith": recipe.sharedWith,
             "sharedAt": Date().timeIntervalSince1970 * 1000,
             "updatedAt": recipe.updatedAt.timeIntervalSince1970 * 1000,
             "createdAt": recipe.createdAt.timeIntervalSince1970 * 1000,

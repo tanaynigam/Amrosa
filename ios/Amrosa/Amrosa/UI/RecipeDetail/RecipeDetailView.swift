@@ -276,7 +276,7 @@ private struct SentAndRemoveDialogs: ViewModifier {
                 }
                 Button("Cancel", role: .cancel) { pendingShareRecipient = nil }
             } message: {
-                Text("Sharing makes this recipe visible to your co-chefs so they can view it. You can make it private again later.")
+                Text("Sharing adds this person to the recipe so they can view it. Only people you pick can see it. You can change this any time.")
             }
             .confirmationDialog("Remove this recipe?", isPresented: $showRemoveConfirm, titleVisibility: .visible) {
                 Button("Remove", role: .destructive) { viewModel?.removeReceivedRecipe() }
@@ -737,13 +737,24 @@ private struct SubstituteChipsRow: View {
 private struct VisibilityChip: View {
     @Bindable var viewModel: RecipeDetailViewModel
     @State private var showChooser = false
+    @State private var showRecipients = false
 
     private var tier: String { viewModel.recipe.visibility }
     private var label: String {
-        switch tier { case "public": return "Public"; case "friends": return "Co-Chefs"; default: return "Private" }
+        switch tier {
+        case "public": return "Public"
+        case "friends": return "Co-Chefs"
+        case "shared": return "Specific people"
+        default: return "Private"
+        }
     }
     private var icon: String {
-        switch tier { case "public": return "globe"; case "friends": return "person.2"; default: return "lock" }
+        switch tier {
+        case "public": return "globe"
+        case "friends": return "person.2"
+        case "shared": return "person.crop.circle.badge.checkmark"
+        default: return "lock"
+        }
     }
     private var isShared: Bool { tier != "private" }
 
@@ -759,12 +770,78 @@ private struct VisibilityChip: View {
         .buttonStyle(.plain)
         .confirmationDialog("Who can see this recipe?", isPresented: $showChooser, titleVisibility: .visible) {
             Button("🔒 Private") { viewModel.setVisibility("private") }
+            Button("👤 Specific people") { viewModel.loadSharedRecipients(); showRecipients = true }
             Button("👥 Co-Chefs only") { viewModel.setVisibility("friends") }
             Button("🌐 Public (anyone with the link)") { viewModel.setVisibility("public") }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Private: only you. Co-Chefs: people you follow each other with. Public: anyone with the link.")
+            Text("Private: only you. Specific people: only the people you pick. Co-Chefs: people you follow each other with. Public: anyone with the link.")
         }
+        .sheet(isPresented: $showRecipients) {
+            RecipientsSheet(viewModel: viewModel)
+        }
+    }
+}
+
+// MARK: - Recipients sheet (F17 — share with specific people)
+
+private struct RecipientsSheet: View {
+    @Bindable var viewModel: RecipeDetailViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var results: [UserProfile] = []
+    @State private var searchTask: Task<Void, Never>?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Shared with") {
+                    if viewModel.sharedRecipients.isEmpty {
+                        Text("No one yet — search below to add people.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(viewModel.sharedRecipients) { person in
+                            HStack {
+                                Text(person.displayName)
+                                Spacer()
+                                Button(role: .destructive) { viewModel.removeSharedRecipient(person.uid) } label: {
+                                    Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                if !results.isEmpty {
+                    Section("Results") {
+                        ForEach(results.filter { r in !viewModel.sharedRecipients.contains { $0.uid == r.uid } }) { person in
+                            Button { viewModel.addSharedRecipient(person); query = ""; results = [] } label: {
+                                HStack {
+                                    Text(person.displayName).foregroundStyle(.primary)
+                                    Spacer()
+                                    Image(systemName: "plus.circle.fill").foregroundStyle(Color.accentColor)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "Add by name or email")
+            .onChange(of: query) { _, q in
+                searchTask?.cancel()
+                let trimmed = q.trimmingCharacters(in: .whitespaces)
+                guard trimmed.count >= 2 else { results = []; return }
+                searchTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    if Task.isCancelled { return }
+                    results = await viewModel.searchUsers(trimmed)
+                }
+            }
+            .navigationTitle("Specific people")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .onAppear { viewModel.loadSharedRecipients() }
     }
 }
 

@@ -28,8 +28,10 @@ final class RecipeModel {
     var syncedAt: Date?
     var authorId: String?
     var authorDisplayName: String?
-    /// "private" or "public". Controls visibility in shared_recipes.
+    /// "private" | "shared" (specific people, F17) | "friends" (Co-Chefs) | "public".
     var visibility: String
+    /// F17: recipient UIDs for the "shared" tier (per-recipient ACL). JSON-encoded (additive).
+    var sharedWithJson: String = "[]"
     /// F10: null = base recipe; else id of the base this is a variation of.
     var parentRecipeId: String? = nil
     /// F10: e.g. "Spicy", "Vegan" — only set on variations.
@@ -117,6 +119,12 @@ final class RecipeModel {
 
     var tags: [String] {
         decode(tagsJson) ?? []
+    }
+
+    /// F17: recipient UIDs for the "shared" tier.
+    var sharedWith: [String] {
+        get { decode(sharedWithJson) ?? [] }
+        set { sharedWithJson = Self.encode(newValue) }
     }
 
     var changeLog: [RecipeChange] {
