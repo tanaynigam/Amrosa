@@ -224,8 +224,29 @@ private fun IngredientSheet(target: EditTarget.Ingredient, draft: EditDraft, vm:
         OutlinedTextField(text, { text = it; push() }, label = { Text("Or free text (e.g. to taste)") },
             modifier = Modifier.fillMaxWidth(), singleLine = true)
     }
-    OutlinedTextField(group, { group = it; push() }, label = { Text("Group (e.g. Spices)") },
-        modifier = Modifier.fillMaxWidth(), singleLine = true)
+    // Group — an editable dropdown: suggests the recipe's existing groups, but typing a new value
+    // creates a new group.
+    val existingGroups = remember(draft) {
+        draft.sections.flatMap { it.ingredients }.map { it.groupLabel }.filter { it.isNotBlank() }.distinct()
+    }
+    var groupExpanded by remember(target) { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = groupExpanded, onExpandedChange = { groupExpanded = it }) {
+        OutlinedTextField(
+            value = group, onValueChange = { group = it; groupExpanded = true; push() },
+            label = { Text("Group (e.g. Spices)") },
+            trailingIcon = { if (existingGroups.isNotEmpty()) ExposedDropdownMenuDefaults.TrailingIcon(groupExpanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
+            singleLine = true,
+        )
+        val suggestions = existingGroups.filter { group.isBlank() || (it.contains(group, true) && it != group) }
+        if (suggestions.isNotEmpty()) {
+            ExposedDropdownMenu(groupExpanded, { groupExpanded = false }) {
+                suggestions.forEach { g ->
+                    DropdownMenuItem(text = { Text(g) }, onClick = { group = g; groupExpanded = false; push() })
+                }
+            }
+        }
+    }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Switch(optional, { optional = it; push() })
         Spacer(Modifier.width(8.dp)); Text("Optional", style = MaterialTheme.typography.bodyMedium)
@@ -269,6 +290,14 @@ private fun IngredientSheet(target: EditTarget.Ingredient, draft: EditDraft, vm:
             Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add ingredient")
         }
     } else {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { vm.moveIngredientUp(target.sectionId, existing.id) }, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Default.KeyboardArrowUp, "Move up"); Text("Up")
+            }
+            OutlinedButton(onClick = { vm.moveIngredientDown(target.sectionId, existing.id) }, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Default.KeyboardArrowDown, "Move down"); Text("Down")
+            }
+        }
         DeleteButton("Delete ingredient") { vm.deleteIngredient(target.sectionId, existing.id); onDismiss() }
         DoneButton(onDismiss)
     }

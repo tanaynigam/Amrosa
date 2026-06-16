@@ -1,8 +1,12 @@
 package com.aerion.amrosa.ui.detail
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -23,6 +27,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -343,6 +349,15 @@ fun RecipeDetailScreen(
         val listState = rememberLazyListState()
         val coroutineScope = rememberCoroutineScope()
 
+        // A substitute group renders at a STABLE position (the lowest orderIndex among its members),
+        // so switching the selected substitute doesn't make the row jump up/down the list.
+        val groupAnchor = remember(recipe) {
+            recipe.ingredients.filter { it.substituteGroupId != null }
+                .groupBy { it.substituteGroupId!! }
+                .mapValues { (_, list) -> list.minOf { it.orderIndex } }
+        }
+        fun anchorIndex(ing: Ingredient): Int = ing.substituteGroupId?.let { groupAnchor[it] } ?: ing.orderIndex
+
         // Ingredient checklist ordered by SECTION (in step order) then by GROUP within.
         // Each block = (sectionName? , [ (groupLabel, [ingredients]) ]). Section names are
         // null for single-section recipes (no redundant sub-header). Ingredients with no/unknown
@@ -422,20 +437,57 @@ fun RecipeDetailScreen(
 
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(padding),
+            // imePadding so the list shrinks above the keyboard and the focused note/comment field
+            // is auto-scrolled into view instead of hiding behind it.
+            modifier = Modifier.fillMaxSize().padding(padding).imePadding(),
             contentPadding = PaddingValues(bottom = 32.dp)
         ) {
             // ── Header ─────────────────────────────────────────────
             item(key = "header") {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    // Title + description — tappable in edit mode (opens the recipe-details sheet).
-                    Column(Modifier.editable(editing, 0) { editTarget = EditTarget.Details }) {
+                    // Title — tappable in edit mode (opens the recipe-details sheet).
+                    Box(Modifier.editable(editing, 0) { editTarget = EditTarget.Details }) {
                         Text(
                             recipe.title.ifBlank { "Untitled recipe" },
                             style = MaterialTheme.typography.headlineLarge,
                         )
-                        recipe.description?.let {
-                            Spacer(Modifier.height(6.dp))
+                    }
+
+                    // ── Variation selector — above the description ──────────
+                    if (state.variants.size > 1 || state.canAddVariant) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Greyed while editing; variation-switch disabled to avoid discarding edits.
+                            state.variants.forEach { v ->
+                                FilterChip(
+                                    selected = v.isCurrent,
+                                    onClick = { if (!v.isCurrent) onOpenRecipe(v.id) },
+                                    enabled = !editing,
+                                    leadingIcon = if (v.isBase) {
+                                        { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    label = { Text(v.label, style = MaterialTheme.typography.labelMedium) }
+                                )
+                            }
+                            if (state.canAddVariant) {
+                                AssistChip(
+                                    onClick = { variantNameInput = ""; showVariantDialog = true },
+                                    enabled = !editing,
+                                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                    label = { Text("Variation", style = MaterialTheme.typography.labelMedium) }
+                                )
+                            }
+                        }
+                    }
+
+                    // Description — tappable in edit mode.
+                    recipe.description?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Box(Modifier.editable(editing, 0) { editTarget = EditTarget.Details }) {
                             Text(it, style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -474,40 +526,6 @@ fun RecipeDetailScreen(
                                     modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(" ${state.likeCount}", style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-
-                    // ── Variation selector ──────────────────────────────
-                    // Shows the base + its variations as switchable chips, plus an
-                    // "Add variation" chip for the owner (up to MAX_VARIANTS).
-                    if (state.variants.size > 1 || state.canAddVariant) {
-                        Spacer(Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier.horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Kept visible (greyed) while editing so the slot is constant. Switching
-                            // variation mid-edit is disabled to avoid discarding unsaved edits.
-                            state.variants.forEach { v ->
-                                FilterChip(
-                                    selected = v.isCurrent,
-                                    onClick = { if (!v.isCurrent) onOpenRecipe(v.id) },
-                                    enabled = !editing,
-                                    leadingIcon = if (v.isBase) {
-                                        { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                                    } else null,
-                                    label = { Text(v.label, style = MaterialTheme.typography.labelMedium) }
-                                )
-                            }
-                            if (state.canAddVariant) {
-                                AssistChip(
-                                    onClick = { variantNameInput = ""; showVariantDialog = true },
-                                    enabled = !editing,
-                                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                    label = { Text("Variation", style = MaterialTheme.typography.labelMedium) }
-                                )
                             }
                         }
                     }
@@ -745,6 +763,7 @@ fun RecipeDetailScreen(
                 val knownIds = recipe.sections.map { it.id }.toSet()
                 recipe.sections.sortedBy { it.orderIndex }.forEach { section ->
                     val secVisible = state.visibleIngredients.filter { it.sectionId == section.id }
+                        .sortedBy { anchorIndex(it) }
                     val secOptionals = recipe.ingredients.filter { it.sectionId == section.id && it.isOptional }
                     if (secVisible.isEmpty() && secOptionals.isEmpty()) return@forEach
                     if (multiSection) ingredientSubHeader(section.name)
@@ -1401,6 +1420,10 @@ internal fun CookingModeScreen(
     var currentIndex by remember { mutableIntStateOf(initialIndex) }
     val step = steps.getOrNull(currentIndex)
     var showSectionMenu by remember { mutableStateOf(false) }
+    var finishing by remember { mutableStateOf(false) }   // true → play the done animation, then onDone
+    // Tap anywhere (not a control) or swipe → next; the last step finishes.
+    val goNext: () -> Unit = { if (currentIndex < steps.size - 1) currentIndex++ else finishing = true }
+    val goPrev: () -> Unit = { if (currentIndex > 0) currentIndex-- }
 
     // Fallback for recipes whose steps reference a section's ingredients collectively
     // (e.g. "add all the paste ingredients") without explicit refs — those ingredients
@@ -1454,16 +1477,29 @@ internal fun CookingModeScreen(
             )
         }
     ) { padding ->
+      Box(Modifier.fillMaxSize().padding(padding)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
                 .padding(24.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(
                 modifier = Modifier
                     .weight(1f)
+                    // Swipe ← → for next/previous; tap (not on a control) advances.
+                    .pointerInput(steps.size) {
+                        var dx = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { dx = 0f },
+                            onDragEnd = { val t = 64.dp.toPx(); if (dx <= -t) goNext() else if (dx >= t) goPrev() },
+                            onHorizontalDrag = { _, d -> dx += d },
+                        )
+                    }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { goNext() }
                     .verticalScroll(rememberScrollState())
             ) {
                 // Unit toggle — only when conversions exist; shared with the detail screen
@@ -1555,17 +1591,51 @@ internal fun CookingModeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                OutlinedButton(
-                    onClick = { if (currentIndex > 0) currentIndex-- },
-                    enabled = currentIndex > 0
-                ) { Text("← Previous") }
+                OutlinedButton(onClick = goPrev, enabled = currentIndex > 0) { Text("← Previous") }
 
                 if (currentIndex < steps.size - 1) {
-                    Button(onClick = { currentIndex++ }) { Text("Next →") }
+                    Button(onClick = goNext) { Text("Next →") }
                 } else {
-                    Button(onClick = onDone) { Text("Done ✓") }
+                    Button(onClick = { finishing = true }) { Text("Done ✓") }
                 }
             }
+        }
+        // Done celebration → then exit + mark cooked.
+        if (finishing) CookDoneOverlay(onFinished = onDone)
+      }
+    }
+}
+
+/** Brief "all done" celebration shown when cooking finishes, then calls [onFinished]. */
+@Composable
+private fun CookDoneOverlay(onFinished: () -> Unit) {
+    var shown by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (shown) 1f else 0.3f,
+        animationSpec = spring(dampingRatio = 0.45f, stiffness = 220f), label = "doneScale"
+    )
+    val alpha by animateFloatAsState(if (shown) 1f else 0f, label = "doneAlpha")
+    LaunchedEffect(Unit) {
+        shown = true
+        kotlinx.coroutines.delay(1200)
+        onFinished()
+    }
+    Box(
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.55f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.graphicsLayer { this.alpha = alpha }
+        ) {
+            Icon(
+                Icons.Default.CheckCircle, contentDescription = null,
+                modifier = Modifier.size(120.dp).graphicsLayer { scaleX = scale; scaleY = scale },
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.height(16.dp))
+            Text("All done!", style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.inverseOnSurface)
         }
     }
 }
