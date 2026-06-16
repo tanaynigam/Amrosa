@@ -449,6 +449,13 @@ private struct RecipeDetailContent: View {
                             }
                         }
                     }
+                    // In-context "＋ Add ingredient" (edit); view reserves the same height so the
+                    // toggle never shifts (F16 intent: in-context adds without reflow).
+                    if let sid = block.sectionId {
+                        AddRowSlot(editing: editing, title: "Add ingredient") {
+                            viewModel.editTarget = .ingredient(sectionId: sid, ingredientId: nil)
+                        }
+                    }
                 }
 
                 Divider().padding(.horizontal, 16).padding(.vertical, 8)
@@ -480,6 +487,11 @@ private struct RecipeDetailContent: View {
                                 viewModel.editTarget = .step(sectionId: section.id, stepId: step.id)
                             }
                     }
+                    if !steps.isEmpty {
+                        AddRowSlot(editing: editing, title: "Add step") {
+                            viewModel.editTarget = .step(sectionId: section.id, stepId: nil)
+                        }
+                    }
                 }
 
                 // Flat (no-section) steps — both modes
@@ -489,6 +501,16 @@ private struct RecipeDetailContent: View {
                         .editable(active: editing, phase: step.number) {
                             viewModel.editTarget = .step(sectionId: viewModel.flatStepsSectionId ?? "", stepId: step.id)
                         }
+                }
+                if !flatSteps.isEmpty, let sid = viewModel.flatStepsSectionId {
+                    AddRowSlot(editing: editing, title: "Add step") {
+                        viewModel.editTarget = .step(sectionId: sid, stepId: nil)
+                    }
+                }
+
+                // In-context "＋ Add section" footer (edit); reserved in view.
+                AddRowSlot(editing: editing, title: "Add section") {
+                    viewModel.editTarget = .section(sectionId: nil)
                 }
 
                 Divider().padding(.horizontal, 16).padding(.vertical, 8)
@@ -591,6 +613,38 @@ private struct SectionHeader: View {
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .padding(.bottom, 4)
+    }
+}
+
+// MARK: - Add-row slot (F16) — ghost "＋ Add" row in edit; equal reserved height in view
+
+private let kAddRowHeight: CGFloat = 44
+
+private struct AddRowSlot: View {
+    let editing: Bool
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Group {
+            if editing {
+                Button(action: action) {
+                    Label(title, systemImage: "plus")
+                        .font(.subheadline).foregroundStyle(Color.accentColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .frame(height: kAddRowHeight - 8)
+                        .overlay(RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.accentColor.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [4])))
+                        .padding(.horizontal, 16)
+                }
+                .buttonStyle(.plain)
+            } else {
+                // Reserve identical height so toggling Edit never shifts the layout.
+                Color.clear
+            }
+        }
+        .frame(height: kAddRowHeight)
     }
 }
 
