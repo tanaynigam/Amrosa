@@ -48,16 +48,19 @@ service cloud.firestore {
       allow delete: if request.auth != null
         && request.auth.uid == resource.data.authorId;
 
-      // ── Comments ──────────────────────────────────────────────────────────
+      // ── Notes (community thread; stored in the `comments` subcollection) ──────
       match /comments/{commentId} {
         allow read: if request.auth != null;
 
+        // Anyone who can read the recipe may add a note, UNLESS the author locked the thread
+        // (notesLocked on the parent doc; defaults false).
         allow create: if request.auth != null
           && request.auth.token.firebase.sign_in_provider != 'anonymous'
           && request.auth.uid == request.resource.data.authorId
           && request.resource.data.content is string
           && request.resource.data.content.size() > 0
-          && request.resource.data.content.size() <= 1000;
+          && request.resource.data.content.size() <= 1000
+          && get(/databases/$(database)/documents/shared_recipes/$(recipeId)).data.get('notesLocked', false) == false;
 
         allow delete: if request.auth != null && (
           request.auth.uid == resource.data.authorId ||

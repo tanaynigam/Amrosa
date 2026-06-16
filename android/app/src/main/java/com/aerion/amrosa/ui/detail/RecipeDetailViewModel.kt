@@ -63,8 +63,10 @@ data class RecipeDetailUiState(
     val isLoading: Boolean = true,
     // Ownership + visibility
     val isOwner: Boolean = false,
-    // Comments (populated when recipe is public)
+    // Notes — the community thread (populated when the recipe is shared). `notesLocked` = author
+    // froze new notes. (Backed by the comments subcollection on the mirror.)
     val comments: List<Comment> = emptyList(),
+    val notesLocked: Boolean = false,
     // F13 Phase 2 — popularity (when published)
     val saveCount: Int = 0,
     val likeCount: Int = 0,
@@ -98,8 +100,11 @@ data class RecipeDetailUiState(
 ) {
     val isPublic: Boolean get() = recipe?.visibility == "public"
 
-    /** True when the recipe is mirrored to the cloud (Co-Chefs or Public) — gates comments + sharing. */
+    /** True when the recipe is mirrored to the cloud (Co-Chefs or Public) — gates sharing/popularity. */
     val isPublished: Boolean get() = recipe?.visibility == "friends" || recipe?.visibility == "public"
+
+    /** True when the recipe is shared in any tier → the community Notes thread is available. */
+    val notesVisible: Boolean get() = recipe != null && recipe.visibility != "private"
 
     /** Current visibility tier; defaults to "private". */
     val visibility: String get() = recipe?.visibility ?: "private"
@@ -311,10 +316,11 @@ class RecipeDetailViewModel(
                 )
             }
 
-            // Start listening to comments + popularity counts if already shared (Co-Chefs or Public)
-            if (recipe?.visibility == "friends" || recipe?.visibility == "public") {
+            // Start listening to notes (comments) + popularity counts if shared; load the notes lock.
+            if (recipe != null && recipe.visibility != "private") {
                 startObservingComments()
-                startObservingCounts()
+                if (recipe.visibility == "friends" || recipe.visibility == "public") startObservingCounts()
+                _uiState.update { it.copy(notesLocked = sharedRecipeService.getNotesLocked(recipeId)) }
             }
 
             // Resolve "shared with" recipient names for the owner's recipients sheet.
@@ -356,6 +362,16 @@ class RecipeDetailViewModel(
             sharedRecipeService.getCommentsFlow(recipeId).collect { comments ->
                 _uiState.update { it.copy(comments = comments) }
             }
+        }
+    }
+
+    /** Owner-only: freeze / unfreeze new notes on this recipe (existing notes are kept). */
+    fun toggleNotesLock() {
+        val locked = !_uiState.value.notesLocked
+        _uiState.update { it.copy(notesLocked = locked) }   // optimistic
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = sharedRecipeService.setNotesLocked(recipeId, locked)
+            if (!ok) _uiState.update { it.copy(notesLocked = !locked) }  // revert on failure
         }
     }
 

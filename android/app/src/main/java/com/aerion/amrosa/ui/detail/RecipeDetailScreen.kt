@@ -897,124 +897,86 @@ fun RecipeDetailScreen(
                 item(key = "edit-bottom-spacer") { Spacer(Modifier.height(80.dp)) }
             }
 
-            if (!editing) item {
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-            }
-
-            // ── Notes (hidden while editing — replaced by the edit footer above) ───────────────
-            if (!editing) item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Notes", style = MaterialTheme.typography.headlineMedium)
-                    IconButton(onClick = { showNoteInput = !showNoteInput }) {
-                        Icon(Icons.Default.AddComment, contentDescription = "Add note")
-                    }
-                }
-            }
-
-            if (showNoteInput && !editing) {
-                item {
-                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                        OutlinedTextField(
-                            value = noteText,
-                            onValueChange = { noteText = it },
-                            placeholder = { Text("Add a note, tweak, or observation…") },
-                            modifier = Modifier.fillMaxWidth(),
-                            minLines = 2
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Button(
-                            onClick = {
-                                viewModel.addNote(noteText)
-                                noteText = ""
-                                showNoteInput = false
-                            },
-                            enabled = noteText.isNotBlank()
-                        ) { Text("Save Note") }
-                    }
-                }
-            }
-
-            if (!editing) items(state.notes, key = { it.id }) { note ->
-                NoteRow(note = note, onDelete = { viewModel.deleteNote(note.id) })
-            }
-
-            if (state.notes.isEmpty() && !showNoteInput && !editing) {
-                item {
-                    Text(
-                        "No notes yet. Tap + to add one.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
-                }
-            }
-
-            // ── Comments (shown when recipe is shared; hidden while editing) ──────────
-            if (state.isPublished && !editing) {
+            // ── Notes — a community thread on shared recipes (anyone who can view may add; the
+            //    author can delete any note and Lock the thread to freeze new ones). Replaces the
+            //    old private notes + the separate Comments section. Only shown when shared. ──
+            if (state.notesVisible && !editing) {
                 item {
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                            .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(Icons.Default.Forum, contentDescription = null,
                             modifier = Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(8.dp))
-                        Text("Comments", style = MaterialTheme.typography.headlineMedium)
-                        Spacer(Modifier.weight(1f))
+                        Text("Notes", style = MaterialTheme.typography.headlineMedium)
+                        Spacer(Modifier.width(8.dp))
                         Text(
                             "${state.comments.size}",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Spacer(Modifier.weight(1f))
+                        // Owner-only lock toggle: freeze / unfreeze new notes.
+                        if (state.isOwner) {
+                            IconButton(onClick = { viewModel.toggleNotesLock() }, enabled = !state.isVisibilityUpdating) {
+                                Icon(
+                                    if (state.notesLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                                    contentDescription = if (state.notesLocked) "Unlock notes" else "Lock notes",
+                                    tint = if (state.notesLocked) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
 
-                // Comment input — hidden while editing (read-only)
-                if (!editing) item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = commentText,
-                            onValueChange = { commentText = it },
-                            placeholder = { Text("Add a comment…") },
-                            modifier = Modifier.weight(1f),
-                            maxLines = 3,
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        IconButton(
-                            onClick = {
-                                viewModel.addComment(commentText)
-                                commentText = ""
-                            },
-                            enabled = commentText.isNotBlank()
+                // Add-note input — hidden when the author has locked the thread.
+                if (!state.notesLocked) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Post comment",
-                                tint = if (commentText.isNotBlank())
-                                    MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant)
+                            OutlinedTextField(
+                                value = commentText,
+                                onValueChange = { commentText = it },
+                                placeholder = { Text("Add a note…") },
+                                modifier = Modifier.weight(1f),
+                                maxLines = 3,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            IconButton(
+                                onClick = { viewModel.addComment(commentText); commentText = "" },
+                                enabled = commentText.isNotBlank()
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Post note",
+                                    tint = if (commentText.isNotBlank())
+                                        MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
+                    }
+                } else {
+                    item {
+                        Text("🔒 Notes are locked by the author.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     }
                 }
 
                 if (state.comments.isEmpty()) {
                     item {
                         Text(
-                            "No comments yet. Be the first!",
+                            "No notes yet. Be the first!",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -1022,7 +984,7 @@ fun RecipeDetailScreen(
                     }
                 }
 
-                items(state.comments, key = { "comment-${it.id}" }) { comment ->
+                items(state.comments, key = { "note-${it.id}" }) { comment ->
                     val currentUid = (LocalContext.current.applicationContext as AmrosaApplication)
                         .container.authRepository.uid
                     CommentRow(

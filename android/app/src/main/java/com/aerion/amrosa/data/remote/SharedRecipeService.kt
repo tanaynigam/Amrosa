@@ -71,6 +71,22 @@ class SharedRecipeService(
         }
     }
 
+    // ─── Notes lock (author freezes the community notes thread) ────────────────
+    // Stored on the mirror doc only (merge-written, so publish/republish never clears it).
+
+    suspend fun setNotesLocked(recipeId: String, locked: Boolean): Boolean = try {
+        firestore.collection(COLLECTION_SHARED).document(recipeId)
+            .set(mapOf("notesLocked" to locked), SetOptions.merge()).await()
+        true
+    } catch (e: Exception) {
+        Log.e(TAG, "setNotesLocked failed for $recipeId", e); false
+    }
+
+    suspend fun getNotesLocked(recipeId: String): Boolean = try {
+        firestore.collection(COLLECTION_SHARED).document(recipeId).get().await()
+            .getBoolean("notesLocked") ?: false
+    } catch (e: Exception) { false }
+
     // ─── Browse shared recipes ────────────────────────────────────────────────
 
     /**
