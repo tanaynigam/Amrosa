@@ -23,6 +23,9 @@ final class DiscoverViewModel {
     var searchQuery: String = ""
     var searchResults: [DiscoverRecipe] = []
     var isSearching: Bool = false
+    // People search — surfaced alongside recipe results.
+    var userResults: [UserProfile] = []
+    var followStatuses: [String: String] = [:]   // uid → none|pending|accepted
 
     private let repository: RecipeRepository
     private let socialRepository: SocialRepository
@@ -158,14 +161,30 @@ final class DiscoverViewModel {
                 .filter { !excluded.contains($0.recipeId) && $0.authorUid != myUid }
             if Task.isCancelled { return }
             self.searchResults = self.dedupe(own + friends + pub)
+
+            // People search (name / email) + their follow status.
+            let users = await self.socialRepository.searchUsers(query: q)
+            var statuses: [String: String] = [:]
+            for u in users { statuses[u.uid] = await self.socialRepository.getFollowStatus(targetUid: u.uid) }
+            if Task.isCancelled { return }
+            self.userResults = users
+            self.followStatuses = statuses
             self.isSearching = false
         }
+    }
+
+    /// Send a co-chef request to a user from the People results.
+    func sendFollowRequest(_ user: UserProfile) {
+        followStatuses[user.uid] = "pending"
+        Task { await socialRepository.sendFollowRequest(targetUid: user.uid, targetName: user.displayName) }
     }
 
     func clearSearch() {
         searchTask?.cancel()
         searchQuery = ""
         searchResults = []
+        userResults = []
+        followStatuses = [:]
         isSearching = false
     }
 
@@ -182,6 +201,7 @@ struct DiscoverView: View {
     @State private var viewModel: DiscoverViewModel?
     @State private var openLocal: RecipeModel?
     @State private var openRemote: DiscoverRecipe?
+    @State private var openProfile: UserProfile?
 
     var body: some View {
         Group {
@@ -200,6 +220,9 @@ struct DiscoverView: View {
             ReceivedRecipeView(source: .direct(recipeId: r.recipeId,
                                                authorUid: r.authorUid ?? "",
                                                authorName: r.authorName ?? "Someone"))
+        }
+        .navigationDestination(item: $openProfile) { p in
+            ProfileView(uid: p.uid, name: p.displayName)
         }
         .onAppear {
             if viewModel == nil {
@@ -274,14 +297,33 @@ struct DiscoverView: View {
 
     @ViewBuilder
     private func searchResults(_ vm: DiscoverViewModel) -> some View {
-        if vm.isSearching && vm.searchResults.isEmpty {
+        let noResults = vm.searchResults.isEmpty && vm.userResults.isEmpty
+        if vm.isSearching && noResults {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if vm.searchResults.isEmpty {
+        } else if noResults {
             ContentUnavailableView.search(text: vm.searchQuery)
         } else {
-            List(vm.searchResults) { recipe in
-                Button { open(recipe) } label: { DiscoverSearchRow(recipe: recipe) }
-                    .buttonStyle(.plain)
+            List {
+                if !vm.userResults.isEmpty {
+                    Section("People") {
+                        ForEach(vm.userResults) { person in
+                            DiscoverPersonRow(
+                                person: person,
+                                status: vm.followStatuses[person.uid] ?? "none",
+                                onFollow: { vm.sendFollowRequest(person) },
+                                onTap: { openProfile = person }
+                            )
+                        }
+                    }
+                }
+                if !vm.searchResults.isEmpty {
+                    Section("Recipes") {
+                        ForEach(vm.searchResults) { recipe in
+                            Button { open(recipe) } label: { DiscoverSearchRow(recipe: recipe) }
+                                .buttonStyle(.plain)
+                        }
+                    }
+                }
             }
             .listStyle(.plain)
         }
@@ -372,5 +414,36 @@ private struct DiscoverSearchRow: View {
         }
         .contentShape(Rectangle())
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - People search result row
+
+private struct DiscoverPersonRow: View {
+    let person: UserProfile
+    let status: String          // none | pending | accepted
+    let onFollow: () -> Void
+    let onTap: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(Color.accentColor.opacity(0.12)).frame(width: 36, height: 36)
+                Text(String(person.displayName.prefix(1)).uppercased())
+                    .font(.subheadline).foregroundStyle(Color.accentColor)
+            }
+            Text(person.displayName).font(.body)
+            Spacer()
+            switch status {
+            case "accepted":
+                Label("Co-Chef", systemImage: "checkmark").font(.caption).foregroundStyle(.secondary)
+            case "pending":
+                Text("Requested").font(.caption).foregroundStyle(.secondary)
+            default:
+                Button("Add", action: onFollow).font(.caption).buttonStyle(.borderedProminent)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
     }
 }
