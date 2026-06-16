@@ -307,22 +307,12 @@ fun RecipeDetailScreen(
                             Icon(Icons.Default.MenuBook, contentDescription = "Cooking Mode")
                         }
                     } else {
+                        // Decluttered: Share moved next to the visibility chip, Shopping List next to
+                        // the Ingredients header. Top bar keeps just Edit (owner) + Cooking Mode.
                         if (state.isOwner) {
-                            IconButton(
-                                onClick = { viewModel.loadFollowing(); showShareOptions = true },
-                                enabled = !state.isVisibilityUpdating
-                            ) {
-                                Icon(Icons.Default.Share, contentDescription = "Share recipe")
-                            }
                             IconButton(onClick = { viewModel.enterEdit() }) {
                                 Icon(Icons.Default.Edit, contentDescription = "Edit Recipe")
                             }
-                        }
-                        IconButton(onClick = {
-                            onShoppingClick(state.selectedServings,
-                                if (state.usesAnchorScaling) state.scaleAnchorQty else null)
-                        }) {
-                            Icon(Icons.Default.ShoppingCart, contentDescription = "Shopping List")
                         }
                         IconButton(onClick = { cookingStartSectionId = null; showCookingMode = true }) {
                             Icon(Icons.Default.MenuBook, contentDescription = "Cooking Mode")
@@ -508,7 +498,10 @@ fun RecipeDetailScreen(
                             "shared"  -> Icons.Default.PersonAdd to "Shared (${state.sharedRecipients.size})"
                             else       -> Icons.Default.Lock to "Private"
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             FilterChip(
                                 selected = state.isPublished || state.visibility == "shared",
                                 onClick = { showVisibilityDialog = true },
@@ -532,6 +525,16 @@ fun RecipeDetailScreen(
                                     modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(" ${state.likeCount}", style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            // Share — moved here from the top bar (owners; hidden while editing).
+                            if (!editing) {
+                                Spacer(Modifier.weight(1f))
+                                IconButton(
+                                    onClick = { viewModel.loadFollowing(); showShareOptions = true },
+                                    enabled = !state.isVisibilityUpdating
+                                ) {
+                                    Icon(Icons.Default.Share, contentDescription = "Share recipe")
+                                }
                             }
                         }
                     }
@@ -675,27 +678,39 @@ fun RecipeDetailScreen(
                             },
                             label = { Text("Update conversions", style = MaterialTheme.typography.labelSmall) },
                         )
-                    } else if (hasConversions) {
-                        // Unit toggle — only when at least one ingredient has conversions.
-                        SingleChoiceSegmentedButtonRow {
-                            UnitMode.entries.forEachIndexed { index, mode ->
-                                SegmentedButton(
-                                    selected = selectedUnit == mode,
-                                    onClick = { selectedUnit = mode },
-                                    shape = SegmentedButtonDefaults.itemShape(
-                                        index = index, count = UnitMode.entries.size
-                                    ),
-                                    label = {
-                                        Text(
-                                            when (mode) {
-                                                UnitMode.ORIGINAL -> "Orig"
-                                                UnitMode.METRIC   -> "Metric"
-                                                UnitMode.IMPERIAL -> "Imp"
-                                            },
-                                            style = MaterialTheme.typography.labelSmall
+                    } else {
+                        // View mode: unit toggle (when conversions exist) + Shopping List (moved
+                        // here from the top bar) on the right.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (hasConversions) {
+                                SingleChoiceSegmentedButtonRow {
+                                    UnitMode.entries.forEachIndexed { index, mode ->
+                                        SegmentedButton(
+                                            selected = selectedUnit == mode,
+                                            onClick = { selectedUnit = mode },
+                                            shape = SegmentedButtonDefaults.itemShape(
+                                                index = index, count = UnitMode.entries.size
+                                            ),
+                                            label = {
+                                                Text(
+                                                    when (mode) {
+                                                        UnitMode.ORIGINAL -> "Orig"
+                                                        UnitMode.METRIC   -> "Metric"
+                                                        UnitMode.IMPERIAL -> "Imp"
+                                                    },
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                            }
                                         )
                                     }
-                                )
+                                }
+                                Spacer(Modifier.width(4.dp))
+                            }
+                            IconButton(onClick = {
+                                onShoppingClick(state.selectedServings,
+                                    if (state.usesAnchorScaling) state.scaleAnchorQty else null)
+                            }) {
+                                Icon(Icons.Default.ShoppingCart, contentDescription = "Shopping List")
                             }
                         }
                     }
