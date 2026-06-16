@@ -293,12 +293,14 @@ final class RecipeDetailViewModel {
         return grouped.map { (groupId: $0.key, options: $0.value.sorted { $0.orderIndex < $1.orderIndex }) }
     }
 
-    /// ALL visible ingredients as a flat list — collapses substitute groups to the selected option
-    /// and always shows optional ingredients (they are individually togglable, like Android).
+    /// Visible ingredients as a flat list — collapses substitute groups to the selected option and
+    /// drops optionals the user hasn't included (they're added back via the per-section chip row).
     var visibleIngredients: [IngredientModel] {
         recipe.ingredients
             .sorted { $0.orderIndex < $1.orderIndex }
             .filter { ing in
+                // Optional ingredients are opt-in: only show when included via the chip row.
+                if ing.isOptional && !enabledOptionals.contains(ing.id) { return false }
                 // Substitute group: show only the selected option
                 if let gid = ing.substituteGroupId {
                     let groupMembers = recipe.ingredients.filter { $0.substituteGroupId == gid }
@@ -306,8 +308,16 @@ final class RecipeDetailViewModel {
                     if let s = selected { return ing.id == s }
                     return groupMembers.sorted { $0.orderIndex < $1.orderIndex }.first?.id == ing.id
                 }
-                return true // show all including optionals (they get a toggle UI)
+                return true
             }
+    }
+
+    /// Optional ingredients per section id (incl. nil → "__other__"), for the chip rows. These show
+    /// regardless of whether the optional is currently included, so you can always toggle them.
+    func optionalChips(forSectionId sectionId: String?) -> [IngredientModel] {
+        recipe.ingredients
+            .filter { $0.isOptional && ($0.section?.id ?? "__other__") == (sectionId ?? "__other__") }
+            .sorted { $0.orderIndex < $1.orderIndex }
     }
 
     struct IngredientGroup: Identifiable {

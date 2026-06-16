@@ -28,10 +28,17 @@ struct DisplayIngredientGroup: Identifiable {
     let items: [DisplayIngredient]
 }
 
+struct DisplayOptionalChip: Identifiable {
+    let id: String               // ingredient id
+    let name: String
+    let isEnabled: Bool          // currently included in the recipe
+}
+
 struct DisplayIngredientBlock: Identifiable {
     let id: String               // section id, or "__other__"
     let sectionId: String?       // ghost "＋ Add ingredient" target (nil = no section)
     let title: String?           // nil when no section sub-header is needed
+    let optionalChips: [DisplayOptionalChip]  // per-section opt-in chips (view mode only)
     let groups: [DisplayIngredientGroup]
 }
 

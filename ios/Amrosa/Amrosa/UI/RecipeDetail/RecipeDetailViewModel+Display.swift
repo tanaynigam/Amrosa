@@ -110,8 +110,28 @@ extension RecipeDetailViewModel {
         return result
     }
 
-    /// Ingredient blocks for the body. Mirrors the read-only grouping in BOTH modes (empty sections
-    /// hidden, sub-header only when multi-section) so flipping into edit doesn't reflow the layout.
+    private func groupView(_ ings: [IngredientModel]) -> [DisplayIngredientGroup] {
+        guard !ings.isEmpty else { return [] }
+        var result: [DisplayIngredientGroup] = []
+        let ungrouped = ings.filter { ($0.groupLabel ?? "").isEmpty }
+        if !ungrouped.isEmpty {
+            result.append(DisplayIngredientGroup(id: "__ungrouped__", label: "", items: ungrouped.map(displayViewIngredient)))
+        }
+        var seen = Set<String>()
+        for ing in ings {
+            guard let label = ing.groupLabel, !label.isEmpty, !seen.contains(label) else { continue }
+            seen.insert(label)
+            result.append(DisplayIngredientGroup(id: label, label: label,
+                items: ings.filter { $0.groupLabel == label }.map(displayViewIngredient)))
+        }
+        return result
+    }
+
+    /// Ingredient blocks for the body.
+    /// - Edit mode: every draft section's ingredients (no optional filtering / chips — optionals are
+    ///   plain editable rows). Empty sections hidden so the layout matches view mode.
+    /// - View mode: built per section so the **optional chip row shows even when every optional is
+    ///   currently hidden**; non-included optionals are dropped from the list (opt-in model).
     var displayIngredientBlocks: [DisplayIngredientBlock] {
         if isEditMode {
             let multi = !editIsSingleUnnamed && editSections.count > 1
@@ -119,19 +139,40 @@ extension RecipeDetailViewModel {
                 let groups = groupEdit(sec.ingredients)
                 guard !groups.isEmpty else { return nil }
                 return DisplayIngredientBlock(id: sec.id, sectionId: sec.id,
-                    title: multi ? (sec.name.isEmpty ? "Section" : sec.name) : nil, groups: groups)
+                    title: multi ? (sec.name.isEmpty ? "Section" : sec.name) : nil,
+                    optionalChips: [], groups: groups)
             }
         }
-        return ingredientSectionBlocks.map { block in
-            DisplayIngredientBlock(
-                id: block.id,
-                sectionId: block.id == "__other__" ? nil : block.id,
-                title: block.title,
-                groups: block.groups.map { g in
-                    DisplayIngredientGroup(id: g.label.isEmpty ? "__ungrouped__" : g.label, label: g.label,
-                        items: g.ingredients.map(displayViewIngredient))
-                })
+
+        let visible = visibleIngredients
+        let multiSection = sortedSections.count > 1
+        let hasSectionless = recipe.ingredients.contains { $0.section == nil }
+        var blocks: [DisplayIngredientBlock] = []
+
+        func chips(_ sectionId: String?) -> [DisplayOptionalChip] {
+            optionalChips(forSectionId: sectionId).map {
+                DisplayOptionalChip(id: $0.id, name: $0.name, isEnabled: enabledOptionals.contains($0.id))
+            }
         }
+
+        for section in sortedSections {
+            let groups = groupView(visible.filter { $0.section?.id == section.id })
+            let sectionChips = chips(section.id)
+            guard !groups.isEmpty || !sectionChips.isEmpty else { continue }
+            blocks.append(DisplayIngredientBlock(
+                id: section.id, sectionId: section.id,
+                title: (multiSection || hasSectionless) ? section.name : nil,
+                optionalChips: sectionChips, groups: groups))
+        }
+        let otherGroups = groupView(visible.filter { $0.section == nil })
+        let otherChips = chips(nil)
+        if !otherGroups.isEmpty || !otherChips.isEmpty {
+            blocks.append(DisplayIngredientBlock(
+                id: "__other__", sectionId: nil,
+                title: blocks.isEmpty ? nil : "Other",
+                optionalChips: otherChips, groups: otherGroups))
+        }
+        return blocks
     }
 
     // ── Steps ──

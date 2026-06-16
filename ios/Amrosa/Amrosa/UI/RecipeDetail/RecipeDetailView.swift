@@ -439,6 +439,11 @@ private struct RecipeDetailContent: View {
                                 if let sid = block.sectionId { viewModel.editTarget = .section(sectionId: sid) }
                             }
                     }
+                    // Optional ingredients: one-line chip row per section (view mode). Selecting a
+                    // chip drops the ingredient into the list; unselecting hides it.
+                    if !editing, !block.optionalChips.isEmpty {
+                        OptionalChipsRow(chips: block.optionalChips) { viewModel.toggleOptional($0) }
+                    }
                     ForEach(block.groups) { group in
                         if !group.label.isEmpty {
                             Text(group.label)
@@ -446,8 +451,7 @@ private struct RecipeDetailContent: View {
                                 .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 2)
                         }
                         ForEach(Array(group.items.enumerated()), id: \.element.id) { idx, ing in
-                            IngredientRow(ingredient: ing, editing: editing,
-                                          onToggleOptional: { viewModel.toggleOptional(ing.id) })
+                            IngredientRow(ingredient: ing, editing: editing)
                                 .editable(active: editing, phase: idx) {
                                     viewModel.editTarget = .ingredient(sectionId: block.sectionId ?? "", ingredientId: ing.id)
                                 }
@@ -598,21 +602,45 @@ private struct SectionHeader: View {
     }
 }
 
-// MARK: - Ingredient row (matches Android IngredientRow with per-ingredient optional toggle)
+// MARK: - Optional chip row (view mode) — opt-in optional ingredients per section
+
+private struct OptionalChipsRow: View {
+    let chips: [DisplayOptionalChip]
+    let onToggle: (String) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(chips) { chip in
+                    Button { onToggle(chip.id) } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: chip.isEnabled ? "checkmark.circle.fill" : "plus.circle")
+                                .font(.caption2)
+                            Text(chip.name).font(.caption).fontWeight(.medium)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(chip.isEnabled ? Color.accentColor.opacity(0.15) : Color(.secondarySystemBackground))
+                        .foregroundStyle(chip.isEnabled ? Color.accentColor : Color.secondary)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 4)
+        }
+    }
+}
+
+// MARK: - Ingredient row
 
 private struct IngredientRow: View {
     let ingredient: DisplayIngredient
     var editing: Bool = false
-    var onToggleOptional: () -> Void = {}
 
-    private var isDimmed: Bool { ingredient.isOptional && !ingredient.isOptionalEnabled && !editing }
-
-    // Display-only row (F11): the checkable list lives on the Shopping List screen. In edit mode
-    // the whole row is tapped (via `.editable`) to open its sheet, so the optional toggle is hidden.
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "circle.fill")
-                .foregroundStyle(isDimmed ? Color.secondary.opacity(0.3) : Color.accentColor.opacity(0.5))
+                .foregroundStyle(Color.accentColor.opacity(0.5))
                 .font(.system(size: 8))
                 .padding(.top, 7)
 
@@ -622,19 +650,12 @@ private struct IngredientRow: View {
                         Text(ingredient.scaledQuantity).fontWeight(.medium)
                     }
                     Text(ingredient.name.isEmpty ? "Tap to edit" : ingredient.name)
-                }
-                .font(.body)
-                .foregroundStyle(isDimmed ? Color.secondary : Color.primary)
-
-                if ingredient.isOptional {
-                    if editing {
-                        Text("Optional").font(.caption).foregroundStyle(.tertiary)
-                    } else {
-                        Button(ingredient.isOptionalEnabled ? "Optional (tap to disable)" : "Optional — tap to add",
-                               action: onToggleOptional)
-                            .font(.caption).foregroundStyle(Color.accentColor).buttonStyle(.plain)
+                    if ingredient.isOptional {
+                        Text("· optional").font(.caption).foregroundStyle(.tertiary)
                     }
                 }
+                .font(.body)
+
                 if editing, let note = ingredient.shoppingNote {
                     Label(note, systemImage: "lightbulb").font(.caption).foregroundStyle(.tertiary)
                 }
