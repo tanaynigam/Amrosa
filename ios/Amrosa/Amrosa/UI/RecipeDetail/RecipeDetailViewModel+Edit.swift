@@ -102,6 +102,35 @@ extension RecipeDetailViewModel {
         editSections[s].ingredients[g] = updated
     }
 
+    /// Link `ingredientId` as a substitute for `targetId` (they share a substitute group), or
+    /// unlink it when `targetId` is nil. Mirrors Android `linkSubstitute`.
+    func linkSubstitute(ingredientId: String, targetId: String?) {
+        guard let targetId else {
+            mutateIngredient(ingredientId) { $0.substituteGroupId = nil }
+            return
+        }
+        let target = editSections.flatMap { $0.ingredients }.first { $0.id == targetId }
+        let groupId = target?.substituteGroupId ?? "subgrp-\(UUID().uuidString)"
+        for s in editSections.indices {
+            for i in editSections[s].ingredients.indices {
+                let id = editSections[s].ingredients[i].id
+                if id == ingredientId {
+                    editSections[s].ingredients[i].substituteGroupId = groupId
+                } else if id == targetId, editSections[s].ingredients[i].substituteGroupId == nil {
+                    editSections[s].ingredients[i].substituteGroupId = groupId
+                }
+            }
+        }
+    }
+
+    private func mutateIngredient(_ id: String, _ change: (inout EditorIngredient) -> Void) {
+        for s in editSections.indices {
+            if let i = editSections[s].ingredients.firstIndex(where: { $0.id == id }) {
+                change(&editSections[s].ingredients[i]); return
+            }
+        }
+    }
+
     func deleteIngredient(in sectionId: String, _ ingredientId: String) {
         guard let s = editSections.firstIndex(where: { $0.id == sectionId }) else { return }
         editSections[s].ingredients.removeAll { $0.id == ingredientId }

@@ -562,6 +562,7 @@ final class RecipeRepository {
                     existing.quantityValueMax = edIng.quantityValueMax
                     existing.quantityValueMaxMetric = edIng.quantityValueMaxMetric
                     existing.quantityValueMaxImperial = edIng.quantityValueMaxImperial
+                    existing.substituteGroupId = edIng.substituteGroupId
                 } else {
                     let ing = IngredientModel(
                         id: edIng.id,
@@ -571,6 +572,7 @@ final class RecipeRepository {
                         quantityDisplay: edIng.quantityDisplay.isEmpty ? nil : edIng.quantityDisplay,
                         groupLabel: edIng.groupLabel.isEmpty ? nil : edIng.groupLabel,
                         isOptional: edIng.isOptional,
+                        substituteGroupId: edIng.substituteGroupId,
                         orderIndex: idx,
                         quantityValueMetric: edIng.quantityValueMetric,
                         quantityUnitMetric: edIng.quantityUnitMetric,

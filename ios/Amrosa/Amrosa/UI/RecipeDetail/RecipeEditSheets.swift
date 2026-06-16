@@ -165,6 +165,7 @@ private struct IngredientSheet: View {
     @State private var note: String
     @State private var base: EditorIngredient
     @State private var sectionPick: String
+    @State private var subPick: String   // "" = no substitute link; else target ingredient id
 
     init(viewModel: RecipeDetailViewModel, sectionId: String, ingredientId: String?, dismiss: @escaping () -> Void) {
         self.viewModel = viewModel
@@ -175,6 +176,12 @@ private struct IngredientSheet: View {
             .ingredients.first { $0.id == ingredientId } ?? EditorIngredient()
         _base = State(initialValue: b)
         _sectionPick = State(initialValue: sectionId)
+        // Seed the substitute picker: another member of this ingredient's group, if any.
+        let sibling = b.substituteGroupId.flatMap { gid in
+            viewModel.editSections.flatMap { $0.ingredients }
+                .first { $0.substituteGroupId == gid && $0.id != b.id }?.id
+        }
+        _subPick = State(initialValue: sibling ?? "")
         _name = State(initialValue: b.name)
         _qty = State(initialValue: b.quantityValue.map(plain) ?? "")
         _maxQty = State(initialValue: b.quantityValueMax.map(plain) ?? "")
@@ -227,6 +234,22 @@ private struct IngredientSheet: View {
                 Picker("Section", selection: $sectionPick) {
                     ForEach(Array(viewModel.editSections.enumerated()), id: \.element.id) { idx, sec in
                         Text(sec.name.trimmed.isEmpty ? "Section \(idx + 1)" : sec.name).tag(sec.id)
+                    }
+                }
+            }
+        }
+        // Substitute-for picker (existing ingredient): links this ingredient as an interchangeable
+        // swap for another, so the reading view shows swap chips under the chosen one.
+        if let e = existing {
+            let others = viewModel.allDraftIngredients.filter { $0.id != e.id }
+            if !others.isEmpty {
+                Section("Substitute for") {
+                    Picker("Substitute for", selection: $subPick) {
+                        Text("None").tag("")
+                        ForEach(others) { ing in Text(ing.name).tag(ing.id) }
+                    }
+                    .onChange(of: subPick) { _, v in
+                        viewModel.linkSubstitute(ingredientId: e.id, targetId: v.isEmpty ? nil : v)
                     }
                 }
             }

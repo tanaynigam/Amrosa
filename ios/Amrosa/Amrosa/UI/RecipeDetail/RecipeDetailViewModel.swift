@@ -283,7 +283,27 @@ final class RecipeDetailViewModel {
             }
             result[firstStepId] = list
         }
-        return result
+
+        // Resolve substitute groups to the selected member (one per group) and drop disabled
+        // optionals, so cooking mode matches the reading view's choices.
+        return result.mapValues { ings in
+            var seenGroups = Set<String>()
+            var out: [IngredientModel] = []
+            for ing in ings {
+                let resolved: IngredientModel
+                if let gid = ing.substituteGroupId {
+                    if !seenGroups.insert(gid).inserted { continue }
+                    let selectedId = selectedSubstitutes[gid]
+                        ?? recipe.ingredients.first { $0.substituteGroupId == gid }?.id
+                    resolved = recipe.ingredients.first { $0.id == selectedId } ?? ing
+                } else {
+                    resolved = ing
+                }
+                if resolved.isOptional && !enabledOptionals.contains(resolved.id) { continue }
+                if !out.contains(where: { $0.id == resolved.id }) { out.append(resolved) }
+            }
+            return out
+        }
     }
 
     /// Substitute groups — used to render "Options" selectors above ingredients.

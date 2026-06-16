@@ -403,19 +403,7 @@ private struct RecipeDetailContent: View {
                     Divider().padding(.horizontal, 16).padding(.vertical, 8)
                 }
 
-                // ── Substitute selectors ("Options") — view interactions only ──
-                let subGroups = viewModel.substituteGroups
-                if !subGroups.isEmpty {
-                    SectionHeader("Options")
-                    ForEach(subGroups, id: \.groupId) { group in
-                        SubstituteSelector(
-                            options: group.options,
-                            selectedId: viewModel.selectedSubstitutes[group.groupId] ?? group.options.first?.id ?? "",
-                            viewModel: viewModel, groupId: group.groupId
-                        )
-                    }
-                    Divider().padding(.horizontal, 16).padding(.vertical, 8)
-                }
+                // (Substitutes are shown inline as swap chips under the ingredient — no "Options" section.)
 
                 // ── Ingredients ──
                 HStack {
@@ -455,6 +443,10 @@ private struct RecipeDetailContent: View {
                                 .editable(active: editing, phase: idx) {
                                     viewModel.editTarget = .ingredient(sectionId: block.sectionId ?? "", ingredientId: ing.id)
                                 }
+                            // Substitute swap chips inline under the selected member (view mode).
+                            if !editing, let gid = ing.substituteGroupId, !ing.substituteOptions.isEmpty {
+                                SubstituteChipsRow(options: ing.substituteOptions) { viewModel.selectSubstitute(gid, $0) }
+                            }
                         }
                     }
                 }
@@ -713,34 +705,29 @@ private struct StepRow: View {
     }
 }
 
-// MARK: - Substitute selector
+// MARK: - Substitute swap chips (inline under the selected ingredient)
 
-private struct SubstituteSelector: View {
-    let options: [IngredientModel]
-    let selectedId: String
-    @Bindable var viewModel: RecipeDetailViewModel
-    let groupId: String
+private struct SubstituteChipsRow: View {
+    let options: [DisplaySubstituteChip]
+    let onSelect: (String) -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                Image(systemName: "arrow.left.arrow.right").font(.caption2).foregroundStyle(.tertiary)
                 ForEach(options) { option in
-                    Button {
-                        viewModel.selectSubstitute(groupId, option.id)
-                    } label: {
+                    Button { onSelect(option.id) } label: {
                         Text(option.name)
-                            .font(.subheadline)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(option.id == selectedId ? Color.accentColor : Color(.secondarySystemBackground))
-                            .foregroundStyle(option.id == selectedId ? Color.white : Color.primary)
+                            .font(.caption).fontWeight(.medium)
+                            .padding(.horizontal, 12).padding(.vertical, 5)
+                            .background(option.isSelected ? Color.accentColor : Color(.secondarySystemBackground))
+                            .foregroundStyle(option.isSelected ? Color.white : Color.primary)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
+            .padding(.leading, 38).padding(.trailing, 16).padding(.bottom, 6)
         }
     }
 }

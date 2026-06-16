@@ -12,6 +12,12 @@ struct DisplaySection: Identifiable {
     let name: String
 }
 
+struct DisplaySubstituteChip: Identifiable {
+    let id: String               // ingredient id (group member)
+    let name: String
+    let isSelected: Bool
+}
+
 struct DisplayIngredient: Identifiable {
     let id: String
     let sectionId: String?
@@ -20,6 +26,9 @@ struct DisplayIngredient: Identifiable {
     let isOptional: Bool
     let isOptionalEnabled: Bool
     let shoppingNote: String?
+    // Substitutes: the group id + sibling options shown as inline swap chips under the row (view mode).
+    let substituteGroupId: String?
+    let substituteOptions: [DisplaySubstituteChip]
 }
 
 struct DisplayIngredientGroup: Identifiable {

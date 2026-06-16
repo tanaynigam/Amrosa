@@ -12,6 +12,8 @@ struct EditorIngredient: Identifiable {
     var quantityDisplay: String
     var groupLabel: String
     var isOptional: Bool
+    /// Substitute link (F4): ingredients sharing a group id are interchangeable.
+    var substituteGroupId: String? = nil
     // F6 conversion fields — carried so editing doesn't wipe them and the
     // "Update unit conversions" button can populate them.
     var quantityValueMetric: Double? = nil
@@ -51,6 +53,7 @@ struct EditorIngredient: Identifiable {
         self.quantityDisplay = model.quantityDisplay ?? ""
         self.groupLabel = model.groupLabel ?? ""
         self.isOptional = model.isOptional
+        self.substituteGroupId = model.substituteGroupId
         self.quantityValueMetric = model.quantityValueMetric
         self.quantityUnitMetric = model.quantityUnitMetric
         self.quantityDisplayMetric = model.quantityDisplayMetric

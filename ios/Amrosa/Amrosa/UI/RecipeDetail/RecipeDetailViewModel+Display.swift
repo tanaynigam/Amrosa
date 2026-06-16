@@ -78,17 +78,27 @@ extension RecipeDetailViewModel {
         return DisplayIngredient(
             id: ing.id, sectionId: nil, name: ing.name,
             scaledQuantity: scaled, isOptional: ing.isOptional, isOptionalEnabled: false,
-            shoppingNote: ing.shoppingNote.trimmed.isEmpty ? nil : ing.shoppingNote
+            shoppingNote: ing.shoppingNote.trimmed.isEmpty ? nil : ing.shoppingNote,
+            substituteGroupId: nil, substituteOptions: []   // substitutes edited via the sheet, not chips
         )
     }
 
     private func displayViewIngredient(_ ing: IngredientModel) -> DisplayIngredient {
-        DisplayIngredient(
+        // Inline swap chips for a substitute group (the row IS the selected member).
+        var chips: [DisplaySubstituteChip] = []
+        if let gid = ing.substituteGroupId {
+            let members = recipe.ingredients.filter { $0.substituteGroupId == gid }.sorted { $0.orderIndex < $1.orderIndex }
+            if members.count > 1 {
+                chips = members.map { DisplaySubstituteChip(id: $0.id, name: $0.name, isSelected: $0.id == ing.id) }
+            }
+        }
+        return DisplayIngredient(
             id: ing.id, sectionId: ing.section?.id, name: ing.name,
             scaledQuantity: QuantityScaler.scale(ingredient: ing, scaleFactor: effScale, unitMode: effUnit),
             isOptional: ing.isOptional,
             isOptionalEnabled: enabledOptionals.contains(ing.id),
-            shoppingNote: ing.shoppingNote?.trimmed.isEmpty == false ? ing.shoppingNote : nil
+            shoppingNote: ing.shoppingNote?.trimmed.isEmpty == false ? ing.shoppingNote : nil,
+            substituteGroupId: ing.substituteGroupId, substituteOptions: chips
         )
     }
 
@@ -194,11 +204,31 @@ extension RecipeDetailViewModel {
         let steps = recipe.steps.filter { $0.section?.id == sectionId }.sorted { $0.orderIndex < $1.orderIndex }
         return steps.enumerated().map { idx, step in
             DisplayStep(id: step.id, number: idx + 1, instruction: step.instruction,
-                refs: step.ingredientRefs.compactMap { ref in
-                    guard let ing = ref.ingredient else { return nil }
-                    let disp = ref.quantityDisplay ?? ing.quantityDisplay ?? ""
-                    return DisplayStepRef(id: ing.id, text: "\(disp) \(ing.name)".trimmed)
-                })
+                refs: resolvedStepRefs(step))
         }
+    }
+
+    /// Step ingredient refs resolved for display: a ref to any substitute-group member shows the
+    /// **selected** member (one row per group), and disabled optionals are dropped — so a step that
+    /// "uses Butter" shows "Ghee" when chosen, and never goes blank. Mirrors Android `visibleStepRefs`.
+    private func resolvedStepRefs(_ step: StepModel) -> [DisplayStepRef] {
+        var seenGroups = Set<String>()
+        var out: [DisplayStepRef] = []
+        for ref in step.ingredientRefs {
+            guard let ing = ref.ingredient else { continue }
+            let resolved: IngredientModel
+            if let gid = ing.substituteGroupId {
+                if !seenGroups.insert(gid).inserted { continue }   // one row per group
+                let selectedId = selectedSubstitutes[gid]
+                    ?? recipe.ingredients.first { $0.substituteGroupId == gid }?.id
+                resolved = recipe.ingredients.first { $0.id == selectedId } ?? ing
+            } else {
+                resolved = ing
+            }
+            if resolved.isOptional && !enabledOptionals.contains(resolved.id) { continue }
+            let disp = (ing.substituteGroupId == nil ? ref.quantityDisplay : nil) ?? resolved.quantityDisplay ?? ""
+            out.append(DisplayStepRef(id: resolved.id, text: "\(disp) \(resolved.name)".trimmed))
+        }
+        return out
     }
 }
