@@ -203,6 +203,7 @@ struct RecipeDetailView: View {
                     }
                     Button { viewModel?.editTarget = .section(sectionId: nil) } label: { Label("Add section", systemImage: "square.stack") }
                     Divider()
+                    Button { viewModel?.autoArrangeFromSteps() } label: { Label("Auto-arrange from steps", systemImage: "wand.and.stars") }
                     Button { viewModel?.updateConversions() } label: { Label("Update unit conversions", systemImage: "arrow.triangle.2.circlepath") }
                     Button(role: .destructive) { showDeleteConfirm = true } label: { Label("Delete recipe", systemImage: "trash") }
                 } label: {

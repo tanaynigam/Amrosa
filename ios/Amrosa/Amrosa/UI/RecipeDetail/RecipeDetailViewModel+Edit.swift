@@ -171,6 +171,50 @@ extension RecipeDetailViewModel {
         deletedStepIds.insert(stepId)
     }
 
+    /// #9 — Auto-arrange ingredients from the step text (local, no Gemini). Per section: link any
+    /// ingredient not referenced by a step to the first step that mentions it (by a significant word
+    /// of its name, e.g. "oil" in "olive oil"), then reorder the ingredient list by first-mention
+    /// order (unmentioned keep their order at the end). Explicit edit-menu action so it never
+    /// silently overrides a manual reorder.
+    func autoArrangeFromSteps() {
+        let stop: Set<String> = ["the","and","for","with","to","of","an","into","until","then","your","you",
+            "add","stir","cook","heat","mix","over","from","this","that","each","about","minutes","minute"]
+        func tokens(_ s: String) -> [String] {
+            s.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+                .filter { $0.count >= 3 && !stop.contains($0) }
+        }
+        for sIdx in editSections.indices {
+            let sec = editSections[sIdx]
+            var firstMention: [String: Int] = [:]
+            for (si, step) in sec.steps.enumerated() {
+                let words = Set(step.instruction.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init))
+                for ing in sec.ingredients where firstMention[ing.id] == nil
+                    && !ing.name.trimmed.isEmpty && tokens(ing.name).contains(where: { words.contains($0) }) {
+                    firstMention[ing.id] = si
+                }
+            }
+            let linkedAnywhere = Set(sec.steps.flatMap { $0.ingredientIds })
+            for stIdx in editSections[sIdx].steps.indices {
+                let toAdd = sec.ingredients
+                    .filter { firstMention[$0.id] == stIdx && !linkedAnywhere.contains($0.id) }
+                    .map { $0.id }
+                if !toAdd.isEmpty {
+                    var ids = editSections[sIdx].steps[stIdx].ingredientIds
+                    for id in toAdd where !ids.contains(id) { ids.append(id) }
+                    editSections[sIdx].steps[stIdx].ingredientIds = ids
+                }
+            }
+            // Stable sort by first-mention order; ties (incl. unmentioned = .max) keep input order.
+            editSections[sIdx].ingredients = sec.ingredients.enumerated()
+                .sorted { a, b in
+                    let ka = firstMention[a.element.id] ?? Int.max
+                    let kb = firstMention[b.element.id] ?? Int.max
+                    return ka == kb ? a.offset < b.offset : ka < kb
+                }
+                .map { $0.element }
+        }
+    }
+
     // MARK: Save
 
     func saveEdit() {
