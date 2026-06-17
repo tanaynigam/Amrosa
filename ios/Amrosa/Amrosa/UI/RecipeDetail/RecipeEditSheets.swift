@@ -207,8 +207,10 @@ private struct IngredientSheet: View {
         _note = State(initialValue: b.shoppingNote)
     }
 
+    // Section-agnostic (F21): find the ingredient by id across all sections so moving it between
+    // sections mid-edit doesn't break the open sheet.
     private var existing: EditorIngredient? {
-        viewModel.editSections.first { $0.id == sectionId }?.ingredients.first { $0.id == ingredientId }
+        viewModel.editSections.flatMap { $0.ingredients }.first { $0.id == ingredientId }
     }
 
     private func build() -> EditorIngredient {
@@ -226,7 +228,7 @@ private struct IngredientSheet: View {
         return ing
     }
 
-    private func push() { if existing != nil { viewModel.updateIngredient(in: sectionId, build()) } }
+    private func push() { if existing != nil { viewModel.updateIngredientAnywhere(build()) } }
 
     var body: some View {
         Section(existing == nil ? "Add ingredient" : "Edit ingredient") {
@@ -265,6 +267,12 @@ private struct IngredientSheet: View {
                 }
             }
         }
+        // Section selector (F21): move this ingredient to another section, or a new one.
+        if let e = existing {
+            SectionSelector(viewModel: viewModel, currentSectionId: viewModel.sectionId(ofIngredient: e.id)) { dest in
+                viewModel.moveIngredientToSection(e.id, to: dest)
+            }
+        }
         // Substitute-for picker (existing ingredient): links this ingredient as an interchangeable
         // swap for another, so the reading view shows swap chips under the chosen one.
         if let e = existing {
@@ -288,9 +296,10 @@ private struct IngredientSheet: View {
                 }
                 .disabled(name.trimmed.isEmpty)
             } else if let e = existing {
-                Button { viewModel.moveIngredient(in: sectionId, e.id, by: -1) } label: { Label("Move up", systemImage: "arrow.up") }
-                Button { viewModel.moveIngredient(in: sectionId, e.id, by: 1) } label: { Label("Move down", systemImage: "arrow.down") }
-                Button(role: .destructive) { viewModel.deleteIngredient(in: sectionId, e.id); dismiss() } label: {
+                let cur = viewModel.sectionId(ofIngredient: e.id) ?? sectionId
+                Button { viewModel.moveIngredient(in: cur, e.id, by: -1) } label: { Label("Move up", systemImage: "arrow.up") }
+                Button { viewModel.moveIngredient(in: cur, e.id, by: 1) } label: { Label("Move down", systemImage: "arrow.down") }
+                Button(role: .destructive) { viewModel.deleteIngredientAnywhere(e.id); dismiss() } label: {
                     Label("Delete ingredient", systemImage: "trash")
                 }
             }
@@ -321,8 +330,9 @@ private struct StepSheet: View {
         _sectionPick = State(initialValue: sectionId)
     }
 
+    // Section-agnostic (F21): find the step by id across all sections.
     private var existing: EditorStep? {
-        viewModel.editSections.first { $0.id == sectionId }?.steps.first { $0.id == stepId }
+        viewModel.editSections.flatMap { $0.steps }.first { $0.id == stepId }
     }
 
     private func push() {
@@ -330,7 +340,7 @@ private struct StepSheet: View {
             var u = e
             u.instruction = instruction
             u.ingredientIds = Array(ids)
-            viewModel.updateStep(in: sectionId, u)
+            viewModel.updateStepAnywhere(u)
         }
     }
 
@@ -367,6 +377,12 @@ private struct StepSheet: View {
                 }
             }
         }
+        // Section selector (F21): move this step to another section, or a new one.
+        if let e = existing {
+            SectionSelector(viewModel: viewModel, currentSectionId: viewModel.sectionId(ofStep: e.id)) { dest in
+                viewModel.moveStepToSection(e.id, to: dest)
+            }
+        }
         Section {
             if existing == nil {
                 Button {
@@ -377,9 +393,45 @@ private struct StepSheet: View {
                 }
                 .disabled(instruction.trimmed.isEmpty)
             } else if let e = existing {
-                Button(role: .destructive) { viewModel.deleteStep(in: sectionId, e.id); dismiss() } label: {
+                Button(role: .destructive) { viewModel.deleteStepAnywhere(e.id); dismiss() } label: {
                     Label("Delete step", systemImage: "trash")
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Section selector (F21) — move an item to an existing or new section
+
+private struct SectionSelector: View {
+    let viewModel: RecipeDetailViewModel
+    let currentSectionId: String?
+    let onPick: (String) -> Void
+
+    private func name(_ sec: EditorSection, _ idx: Int) -> String {
+        sec.name.trimmed.isEmpty ? "Section \(idx + 1)" : sec.name
+    }
+    private var currentName: String {
+        guard let id = currentSectionId,
+              let idx = viewModel.editSections.firstIndex(where: { $0.id == id }) else { return "—" }
+        return name(viewModel.editSections[idx], idx)
+    }
+
+    var body: some View {
+        Section("Section") {
+            Menu {
+                ForEach(Array(viewModel.editSections.enumerated()), id: \.element.id) { idx, sec in
+                    Button { onPick(sec.id) } label: {
+                        if sec.id == currentSectionId { Label(name(sec, idx), systemImage: "checkmark") }
+                        else { Text(name(sec, idx)) }
+                    }
+                }
+                Divider()
+                Button { onPick(viewModel.addSectionReturningId()) } label: {
+                    Label("New section", systemImage: "plus")
+                }
+            } label: {
+                LabeledContent("In section", value: currentName)
             }
         }
     }
