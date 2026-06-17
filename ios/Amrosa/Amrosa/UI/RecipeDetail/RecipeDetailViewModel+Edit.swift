@@ -45,8 +45,35 @@ extension RecipeDetailViewModel {
             editSections = sorted.map { EditorSection(from: $0) }
         }
         deletedSectionIds = []; deletedIngredientIds = []; deletedStepIds = []
+        editIngredientSig = Dictionary(uniqueKeysWithValues:
+            editSections.flatMap { $0.ingredients }.map { ($0.id, Self.ingredientSig($0)) })
         editError = nil
         isEditMode = true
+    }
+
+    /// Conversion-relevant fingerprint of an ingredient (name + quantity) — drives "what changed".
+    static func ingredientSig(_ i: EditorIngredient) -> String {
+        "\(i.name.trimmed)|\(i.quantityDisplay.trimmed)|\(i.quantityUnit.trimmed)|\(String(describing: i.quantityValue))|\(String(describing: i.quantityValueMax))"
+    }
+
+    /// Call the convertIngredients CF for `ings`; returns id → raw conversion fields.
+    private func convertRemote(_ ings: [EditorIngredient]) async -> [String: [String: Any]] {
+        guard !ings.isEmpty, let cf = cloudFunctions else { return [:] }
+        let payload: [[String: Any]] = ings.map { ["id": $0.id, "name": $0.name, "quantityDisplay": $0.quantityDisplay] }
+        return (try? await cf.convertIngredients(payload)) ?? [:]
+    }
+
+    private func withConversions(_ ing: EditorIngredient, _ r: [String: Any]) -> EditorIngredient {
+        var u = ing
+        u.quantityValueMetric = (r["quantityValueMetric"] as? NSNumber)?.doubleValue
+        u.quantityUnitMetric = r["quantityUnitMetric"] as? String
+        u.quantityDisplayMetric = r["quantityDisplayMetric"] as? String
+        u.quantityValueImperial = (r["quantityValueImperial"] as? NSNumber)?.doubleValue
+        u.quantityUnitImperial = r["quantityUnitImperial"] as? String
+        u.quantityDisplayImperial = r["quantityDisplayImperial"] as? String
+        u.quantityValueMaxMetric = (r["quantityValueMaxMetric"] as? NSNumber)?.doubleValue
+        u.quantityValueMaxImperial = (r["quantityValueMaxImperial"] as? NSNumber)?.doubleValue
+        return u
     }
 
     func cancelEdit() {
@@ -234,6 +261,20 @@ extension RecipeDetailViewModel {
 
         Task {
             do {
+                // #8 — auto-update conversions ONLY for ingredients whose name/quantity changed
+                // (or were added) this session. Best-effort: a convert failure doesn't block save.
+                let changed = editSections.flatMap { $0.ingredients }.filter {
+                    !$0.quantityDisplay.trimmed.isEmpty && editIngredientSig[$0.id] != Self.ingredientSig($0)
+                }
+                let converted = await convertRemote(changed)
+                let effectiveSections: [EditorSection] = converted.isEmpty ? editSections : editSections.map { sec in
+                    var s = sec
+                    s.ingredients = sec.ingredients.map { ing in
+                        converted[ing.id].map { withConversions(ing, $0) } ?? ing
+                    }
+                    return s
+                }
+
                 try repository.updateFullRecipe(
                     recipeId: recipeId,
                     title: title,
@@ -248,7 +289,7 @@ extension RecipeDetailViewModel {
                     isImported: !editIsPersonalAuthor,
                     authorDisplayName: editIsPersonalAuthor ? personalAuthorName : "Imported",
                     variantName: editIsVariant ? (editVariantName.trimmed.isEmpty ? "Variation" : editVariantName.trimmed) : nil,
-                    sections: editSections,
+                    sections: effectiveSections,
                     deletedSectionIds: Array(deletedSectionIds),
                     deletedIngredientIds: Array(deletedIngredientIds),
                     deletedStepIds: Array(deletedStepIds)
@@ -275,35 +316,24 @@ extension RecipeDetailViewModel {
 
     func updateConversions() {
         let allIngs = editSections.flatMap { $0.ingredients }
-        guard !allIngs.isEmpty, let cf = cloudFunctions else { return }
+        guard !allIngs.isEmpty, cloudFunctions != nil else { return }
         isConverting = true
         Task {
-            do {
-                let payload: [[String: Any]] = allIngs.map { ["id": $0.id, "name": $0.name, "quantityDisplay": $0.quantityDisplay] }
-                let byId = try await cf.convertIngredients(payload)
-                editSections = editSections.map { section in
-                    var s = section
-                    s.ingredients = section.ingredients.map { ing in
-                        guard let r = byId[ing.id] else { return ing }
-                        var u = ing
-                        u.quantityValueMetric = (r["quantityValueMetric"] as? NSNumber)?.doubleValue
-                        u.quantityUnitMetric = r["quantityUnitMetric"] as? String
-                        u.quantityDisplayMetric = r["quantityDisplayMetric"] as? String
-                        u.quantityValueImperial = (r["quantityValueImperial"] as? NSNumber)?.doubleValue
-                        u.quantityUnitImperial = r["quantityUnitImperial"] as? String
-                        u.quantityDisplayImperial = r["quantityDisplayImperial"] as? String
-                        u.quantityValueMaxMetric = (r["quantityValueMaxMetric"] as? NSNumber)?.doubleValue
-                        u.quantityValueMaxImperial = (r["quantityValueMaxImperial"] as? NSNumber)?.doubleValue
-                        return u
-                    }
-                    return s
-                }
+            let byId = await convertRemote(allIngs)
+            if byId.isEmpty {
                 isConverting = false
-                conversionMessage = "Conversions updated — Save to keep them"
-            } catch {
-                isConverting = false
-                conversionMessage = "Conversion failed: \(error.localizedDescription)"
+                conversionMessage = "Conversion failed — try again."
+                return
             }
+            editSections = editSections.map { section in
+                var s = section
+                s.ingredients = section.ingredients.map { ing in
+                    byId[ing.id].map { withConversions(ing, $0) } ?? ing
+                }
+                return s
+            }
+            isConverting = false
+            conversionMessage = "Conversions updated — Save to keep them"
         }
     }
 

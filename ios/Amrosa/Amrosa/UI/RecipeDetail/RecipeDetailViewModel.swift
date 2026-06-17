@@ -72,6 +72,9 @@ final class RecipeDetailViewModel {
     var editIsVariant = false
     var editVariantName = ""
     var editSections: [EditorSection] = []
+    /// Snapshot of each ingredient's conversion-relevant fingerprint at edit start, so on save we
+    /// recompute unit conversions ONLY for ingredients whose name/quantity actually changed (#8).
+    var editIngredientSig: [String: String] = [:]
     var deletedSectionIds: Set<String> = []
     var deletedIngredientIds: Set<String> = []
     var deletedStepIds: Set<String> = []
