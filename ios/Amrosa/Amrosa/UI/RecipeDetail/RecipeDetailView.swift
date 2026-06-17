@@ -168,7 +168,7 @@ struct RecipeDetailView: View {
                 cloudFunctions: container.cloudFunctions,
                 userPreferences: container.userPreferences
             )
-            viewModel?.startCommentListener()
+            viewModel?.loadNotes()
             viewModel?.loadVariants()
         } else {
             viewModel?.reload()
@@ -203,6 +203,7 @@ struct RecipeDetailView: View {
                     }
                     Button { viewModel?.editTarget = .section(sectionId: nil) } label: { Label("Add section", systemImage: "square.stack") }
                     Divider()
+                    Button { viewModel?.autoArrangeFromSteps() } label: { Label("Auto-arrange from steps", systemImage: "wand.and.stars") }
                     Button { viewModel?.updateConversions() } label: { Label("Update unit conversions", systemImage: "arrow.triangle.2.circlepath") }
                     Button(role: .destructive) { showDeleteConfirm = true } label: { Label("Delete recipe", systemImage: "trash") }
                 } label: {
@@ -420,14 +421,20 @@ private struct RecipeDetailContent: View {
                 // (Substitutes are shown inline as swap chips under the ingredient — no "Options" section.)
 
                 // ── Ingredients ──
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
                     Text("Ingredients").font(.title2).fontWeight(.semibold)
                     Spacer()
+                    // Compact unit cycler — one chip that rotates Original → Metric → Imperial
+                    // (replaces the wide 3-segment toggle so this row isn't crowded).
                     if viewModel.hasConversionData {
-                        Picker("Units", selection: Binding(get: { viewModel.unitMode }, set: { viewModel.unitMode = $0 })) {
-                            ForEach(UnitMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        Button { viewModel.cycleUnitMode() } label: {
+                            Label(viewModel.unitMode.shortLabel, systemImage: "arrow.left.arrow.right")
+                                .font(.caption).fontWeight(.medium)
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Color(.secondarySystemBackground))
+                                .clipShape(Capsule())
                         }
-                        .pickerStyle(.segmented).frame(width: 170)
+                        .buttonStyle(.plain)
                     }
                     // Shopping list lives here now (moved off the title bar); hidden while editing.
                     if !editing {
@@ -534,49 +541,11 @@ private struct RecipeDetailContent: View {
                     viewModel.editTarget = .section(sectionId: nil)
                 }
 
-                // Notes + Comments are hidden while editing (they sit below the fold, so hiding
-                // them doesn't shift the content you're editing above).
-                if !editing {
+                // ── Notes (F18) — one cloud thread on EVERY recipe; visibility-independent.
+                // Hidden while editing (below the fold, so hiding doesn't shift content above).
+                if !editing && viewModel.notesVisible {
                     Divider().padding(.horizontal, 16).padding(.vertical, 8)
-
-                    // ── Notes ──
-                    HStack {
-                        Text("Notes").font(.title2).fontWeight(.semibold)
-                        Spacer()
-                        Button { viewModel.newNoteText = viewModel.newNoteText.isEmpty ? " " : "" } label: {
-                            Image(systemName: "plus.bubble")
-                        }
-                        .buttonStyle(.plain).foregroundStyle(Color.accentColor)
-                    }
-                    .padding(.horizontal, 16).padding(.bottom, 4)
-
-                    if !viewModel.newNoteText.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            TextField("Add a note, tweak, or observation…", text: Binding(
-                                get: { viewModel.newNoteText.trimmingCharacters(in: .whitespaces) == "" ? "" : viewModel.newNoteText },
-                                set: { viewModel.newNoteText = $0 }
-                            ), axis: .vertical)
-                            .textFieldStyle(.roundedBorder).lineLimit(3...6)
-                            if !viewModel.newNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Button("Save Note") { viewModel.addNote() }
-                                    .buttonStyle(.borderedProminent).font(.subheadline)
-                            }
-                        }
-                        .padding(.horizontal, 16).padding(.bottom, 8)
-                    }
-
-                    ForEach(viewModel.sortedNotes) { note in
-                        NoteRow(note: note, viewModel: viewModel)
-                    }
-                    if viewModel.sortedNotes.isEmpty && viewModel.newNoteText.isEmpty {
-                        Text("No notes yet. Tap + to add one.")
-                            .font(.body).foregroundStyle(.secondary)
-                            .padding(.horizontal, 16).padding(.vertical, 8)
-                    }
-
-                    if viewModel.isPublished {
-                        CommentsSection(viewModel: viewModel)
-                    }
+                    NotesSection(viewModel: viewModel)
                 }
 
                 Spacer(minLength: 32)
@@ -963,44 +932,58 @@ private struct NoteRow: View {
 
 // MARK: - Comments
 
-private struct CommentsSection: View {
+private struct NotesSection: View {
     @Bindable var viewModel: RecipeDetailViewModel
+
+    private var canPost: Bool {
+        !viewModel.newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Image(systemName: "bubble.left.and.bubble.right").foregroundStyle(Color.accentColor)
-                Text("Comments").font(.title2).fontWeight(.semibold)
-                Spacer()
+                Text("Notes").font(.title2).fontWeight(.semibold)
                 Text("\(viewModel.comments.count)").font(.footnote).foregroundStyle(.secondary)
+                Spacer()
+                // Owner-only lock: freeze / unfreeze new notes (existing notes are kept).
+                if viewModel.isOwner {
+                    Button { viewModel.toggleNotesLock() } label: {
+                        Image(systemName: viewModel.notesLocked ? "lock.fill" : "lock.open")
+                            .foregroundStyle(viewModel.notesLocked ? Color.accentColor : Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
 
-            // Comment input
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField("Add a comment…", text: Binding(
-                    get: { viewModel.newCommentText },
-                    set: { viewModel.newCommentText = $0 }
-                ), axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(2...5)
+            if viewModel.notesLocked {
+                Text("🔒 Notes are locked by the author.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .padding(.horizontal, 16).padding(.bottom, 8)
+            } else {
+                HStack(alignment: .bottom, spacing: 8) {
+                    TextField("Add a note…", text: Binding(
+                        get: { viewModel.newCommentText },
+                        set: { viewModel.newCommentText = $0 }
+                    ), axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(2...5)
 
-                Button {
-                    viewModel.postComment()
-                } label: {
-                    Image(systemName: "paperplane.fill")
-                        .foregroundStyle(viewModel.newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            ? Color.secondary : Color.accentColor)
+                    Button { viewModel.postComment() } label: {
+                        Image(systemName: "paperplane.fill")
+                            .foregroundStyle(canPost ? Color.accentColor : Color.secondary)
+                    }
+                    .disabled(!canPost)
+                    .buttonStyle(.plain)
                 }
-                .disabled(viewModel.newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
 
             if viewModel.comments.isEmpty {
-                Text("No comments yet. Be the first!")
+                Text("No notes yet. Be the first!")
                     .font(.body).foregroundStyle(.secondary)
                     .padding(.horizontal, 16).padding(.vertical, 8)
             } else {

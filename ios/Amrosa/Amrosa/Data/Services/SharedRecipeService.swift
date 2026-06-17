@@ -11,7 +11,18 @@ final class SharedRecipeService {
     private let repository: RecipeRepository
 
     private let sharedCollection = "shared_recipes"
-    private let commentsCollection = "comments"
+    // F18: Notes live in a dedicated top-level `recipe_notes/{recipeId}` collection (NOT the mirror)
+    // so they're visibility-independent — a note added while private persists and becomes visible
+    // to everyone once the recipe is shared. `recipe_notes/{id}` = {recipeAuthorId, locked}.
+    private let notesCollection = "recipe_notes"
+    private let notesSubcollection = "notes"
+
+    private func notesDoc(_ recipeId: String) -> DocumentReference {
+        db.collection(notesCollection).document(recipeId)
+    }
+    private func notesCol(_ recipeId: String) -> CollectionReference {
+        notesDoc(recipeId).collection(notesSubcollection)
+    }
 
     init(authRepository: AuthRepository, repository: RecipeRepository) {
         self.authRepository = authRepository
@@ -175,13 +186,30 @@ final class SharedRecipeService {
         return parseSharedRecipe(id: doc.documentID, data: data)
     }
 
-    // MARK: - Comments
+    // MARK: - Notes (F18 — one cloud thread on every recipe; reuses the Comment model)
+
+    /// Record the recipe owner on the notes parent doc so they can moderate (delete any note).
+    func ensureNotesParent(recipeId: String) async {
+        guard let uid = authRepository.uid else { return }
+        try? await notesDoc(recipeId).setData(["recipeAuthorId": uid], merge: true)
+    }
+
+    /// Owner-only: freeze / unfreeze new notes (existing notes are kept).
+    func setNotesLocked(recipeId: String, locked: Bool) async -> Bool {
+        do {
+            try await notesDoc(recipeId).setData(
+                ["locked": locked, "recipeAuthorId": authRepository.uid as Any], merge: true)
+            return true
+        } catch { return false }
+    }
+
+    func getNotesLocked(recipeId: String) async -> Bool {
+        (try? await notesDoc(recipeId).getDocument().get("locked") as? Bool) ?? false
+    }
 
     func commentsStream(recipeId: String) -> AsyncStream<[SharedComment]> {
         AsyncStream { continuation in
-            let listener = self.db.collection(self.sharedCollection)
-                .document(recipeId)
-                .collection(self.commentsCollection)
+            let listener = self.notesCol(recipeId)
                 .order(by: "createdAt")
                 .addSnapshotListener { snapshot, _ in
                     let comments = snapshot?.documents.compactMap { doc -> SharedComment? in
@@ -217,8 +245,7 @@ final class SharedRecipeService {
             "createdAt": Date().timeIntervalSince1970 * 1000
         ]
         do {
-            try await db.collection(sharedCollection).document(recipeId)
-                .collection(commentsCollection).document(id).setData(doc)
+            try await notesCol(recipeId).document(id).setData(doc)
             return true
         } catch {
             return false
@@ -227,8 +254,7 @@ final class SharedRecipeService {
 
     func deleteComment(recipeId: String, commentId: String) async -> Bool {
         do {
-            try await db.collection(sharedCollection).document(recipeId)
-                .collection(commentsCollection).document(commentId).delete()
+            try await notesCol(recipeId).document(commentId).delete()
             return true
         } catch {
             return false

@@ -240,7 +240,19 @@ private struct IngredientSheet: View {
             if qty.isEmpty {
                 TextField("Or free text (e.g. to taste)", text: $freeText).onChange(of: freeText) { _, _ in push() }
             }
-            TextField("Group (e.g. Spices)", text: $group).onChange(of: group) { _, _ in push() }
+            // Group — editable field + a menu suggesting the recipe's existing groups.
+            HStack {
+                TextField("Group (e.g. Spices)", text: $group).onChange(of: group) { _, _ in push() }
+                let existingGroups = Array(Set(viewModel.editSections.flatMap { $0.ingredients }
+                    .map { $0.groupLabel.trimmed }.filter { !$0.isEmpty })).sorted()
+                if !existingGroups.isEmpty {
+                    Menu {
+                        ForEach(existingGroups, id: \.self) { g in
+                            Button(g) { group = g; push() }
+                        }
+                    } label: { Image(systemName: "chevron.down.circle").foregroundStyle(.secondary) }
+                }
+            }
             Toggle("Optional", isOn: $optional).onChange(of: optional) { _, _ in push() }
             TextField("Shopping note (e.g. Amul)", text: $note).onChange(of: note) { _, _ in push() }
         }
@@ -276,6 +288,8 @@ private struct IngredientSheet: View {
                 }
                 .disabled(name.trimmed.isEmpty)
             } else if let e = existing {
+                Button { viewModel.moveIngredient(in: sectionId, e.id, by: -1) } label: { Label("Move up", systemImage: "arrow.up") }
+                Button { viewModel.moveIngredient(in: sectionId, e.id, by: 1) } label: { Label("Move down", systemImage: "arrow.down") }
                 Button(role: .destructive) { viewModel.deleteIngredient(in: sectionId, e.id); dismiss() } label: {
                     Label("Delete ingredient", systemImage: "trash")
                 }

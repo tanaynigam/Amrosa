@@ -45,8 +45,35 @@ extension RecipeDetailViewModel {
             editSections = sorted.map { EditorSection(from: $0) }
         }
         deletedSectionIds = []; deletedIngredientIds = []; deletedStepIds = []
+        editIngredientSig = Dictionary(uniqueKeysWithValues:
+            editSections.flatMap { $0.ingredients }.map { ($0.id, Self.ingredientSig($0)) })
         editError = nil
         isEditMode = true
+    }
+
+    /// Conversion-relevant fingerprint of an ingredient (name + quantity) — drives "what changed".
+    static func ingredientSig(_ i: EditorIngredient) -> String {
+        "\(i.name.trimmed)|\(i.quantityDisplay.trimmed)|\(i.quantityUnit.trimmed)|\(String(describing: i.quantityValue))|\(String(describing: i.quantityValueMax))"
+    }
+
+    /// Call the convertIngredients CF for `ings`; returns id → raw conversion fields.
+    private func convertRemote(_ ings: [EditorIngredient]) async -> [String: [String: Any]] {
+        guard !ings.isEmpty, let cf = cloudFunctions else { return [:] }
+        let payload: [[String: Any]] = ings.map { ["id": $0.id, "name": $0.name, "quantityDisplay": $0.quantityDisplay] }
+        return (try? await cf.convertIngredients(payload)) ?? [:]
+    }
+
+    private func withConversions(_ ing: EditorIngredient, _ r: [String: Any]) -> EditorIngredient {
+        var u = ing
+        u.quantityValueMetric = (r["quantityValueMetric"] as? NSNumber)?.doubleValue
+        u.quantityUnitMetric = r["quantityUnitMetric"] as? String
+        u.quantityDisplayMetric = r["quantityDisplayMetric"] as? String
+        u.quantityValueImperial = (r["quantityValueImperial"] as? NSNumber)?.doubleValue
+        u.quantityUnitImperial = r["quantityUnitImperial"] as? String
+        u.quantityDisplayImperial = r["quantityDisplayImperial"] as? String
+        u.quantityValueMaxMetric = (r["quantityValueMaxMetric"] as? NSNumber)?.doubleValue
+        u.quantityValueMaxImperial = (r["quantityValueMaxImperial"] as? NSNumber)?.doubleValue
+        return u
     }
 
     func cancelEdit() {
@@ -123,6 +150,15 @@ extension RecipeDetailViewModel {
         }
     }
 
+    /// Reorder an ingredient within its section (Up/Down in the ingredient sheet).
+    func moveIngredient(in sectionId: String, _ ingredientId: String, by delta: Int) {
+        guard let s = editSections.firstIndex(where: { $0.id == sectionId }),
+              let i = editSections[s].ingredients.firstIndex(where: { $0.id == ingredientId }) else { return }
+        let j = i + delta
+        guard editSections[s].ingredients.indices.contains(j) else { return }
+        editSections[s].ingredients.swapAt(i, j)
+    }
+
     private func mutateIngredient(_ id: String, _ change: (inout EditorIngredient) -> Void) {
         for s in editSections.indices {
             if let i = editSections[s].ingredients.firstIndex(where: { $0.id == id }) {
@@ -162,6 +198,50 @@ extension RecipeDetailViewModel {
         deletedStepIds.insert(stepId)
     }
 
+    /// #9 — Auto-arrange ingredients from the step text (local, no Gemini). Per section: link any
+    /// ingredient not referenced by a step to the first step that mentions it (by a significant word
+    /// of its name, e.g. "oil" in "olive oil"), then reorder the ingredient list by first-mention
+    /// order (unmentioned keep their order at the end). Explicit edit-menu action so it never
+    /// silently overrides a manual reorder.
+    func autoArrangeFromSteps() {
+        let stop: Set<String> = ["the","and","for","with","to","of","an","into","until","then","your","you",
+            "add","stir","cook","heat","mix","over","from","this","that","each","about","minutes","minute"]
+        func tokens(_ s: String) -> [String] {
+            s.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+                .filter { $0.count >= 3 && !stop.contains($0) }
+        }
+        for sIdx in editSections.indices {
+            let sec = editSections[sIdx]
+            var firstMention: [String: Int] = [:]
+            for (si, step) in sec.steps.enumerated() {
+                let words = Set(step.instruction.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init))
+                for ing in sec.ingredients where firstMention[ing.id] == nil
+                    && !ing.name.trimmed.isEmpty && tokens(ing.name).contains(where: { words.contains($0) }) {
+                    firstMention[ing.id] = si
+                }
+            }
+            let linkedAnywhere = Set(sec.steps.flatMap { $0.ingredientIds })
+            for stIdx in editSections[sIdx].steps.indices {
+                let toAdd = sec.ingredients
+                    .filter { firstMention[$0.id] == stIdx && !linkedAnywhere.contains($0.id) }
+                    .map { $0.id }
+                if !toAdd.isEmpty {
+                    var ids = editSections[sIdx].steps[stIdx].ingredientIds
+                    for id in toAdd where !ids.contains(id) { ids.append(id) }
+                    editSections[sIdx].steps[stIdx].ingredientIds = ids
+                }
+            }
+            // Stable sort by first-mention order; ties (incl. unmentioned = .max) keep input order.
+            editSections[sIdx].ingredients = sec.ingredients.enumerated()
+                .sorted { a, b in
+                    let ka = firstMention[a.element.id] ?? Int.max
+                    let kb = firstMention[b.element.id] ?? Int.max
+                    return ka == kb ? a.offset < b.offset : ka < kb
+                }
+                .map { $0.element }
+        }
+    }
+
     // MARK: Save
 
     func saveEdit() {
@@ -181,6 +261,20 @@ extension RecipeDetailViewModel {
 
         Task {
             do {
+                // #8 — auto-update conversions ONLY for ingredients whose name/quantity changed
+                // (or were added) this session. Best-effort: a convert failure doesn't block save.
+                let changed = editSections.flatMap { $0.ingredients }.filter {
+                    !$0.quantityDisplay.trimmed.isEmpty && editIngredientSig[$0.id] != Self.ingredientSig($0)
+                }
+                let converted = await convertRemote(changed)
+                let effectiveSections: [EditorSection] = converted.isEmpty ? editSections : editSections.map { sec in
+                    var s = sec
+                    s.ingredients = sec.ingredients.map { ing in
+                        converted[ing.id].map { withConversions(ing, $0) } ?? ing
+                    }
+                    return s
+                }
+
                 try repository.updateFullRecipe(
                     recipeId: recipeId,
                     title: title,
@@ -195,7 +289,7 @@ extension RecipeDetailViewModel {
                     isImported: !editIsPersonalAuthor,
                     authorDisplayName: editIsPersonalAuthor ? personalAuthorName : "Imported",
                     variantName: editIsVariant ? (editVariantName.trimmed.isEmpty ? "Variation" : editVariantName.trimmed) : nil,
-                    sections: editSections,
+                    sections: effectiveSections,
                     deletedSectionIds: Array(deletedSectionIds),
                     deletedIngredientIds: Array(deletedIngredientIds),
                     deletedStepIds: Array(deletedStepIds)
@@ -222,35 +316,24 @@ extension RecipeDetailViewModel {
 
     func updateConversions() {
         let allIngs = editSections.flatMap { $0.ingredients }
-        guard !allIngs.isEmpty, let cf = cloudFunctions else { return }
+        guard !allIngs.isEmpty, cloudFunctions != nil else { return }
         isConverting = true
         Task {
-            do {
-                let payload: [[String: Any]] = allIngs.map { ["id": $0.id, "name": $0.name, "quantityDisplay": $0.quantityDisplay] }
-                let byId = try await cf.convertIngredients(payload)
-                editSections = editSections.map { section in
-                    var s = section
-                    s.ingredients = section.ingredients.map { ing in
-                        guard let r = byId[ing.id] else { return ing }
-                        var u = ing
-                        u.quantityValueMetric = (r["quantityValueMetric"] as? NSNumber)?.doubleValue
-                        u.quantityUnitMetric = r["quantityUnitMetric"] as? String
-                        u.quantityDisplayMetric = r["quantityDisplayMetric"] as? String
-                        u.quantityValueImperial = (r["quantityValueImperial"] as? NSNumber)?.doubleValue
-                        u.quantityUnitImperial = r["quantityUnitImperial"] as? String
-                        u.quantityDisplayImperial = r["quantityDisplayImperial"] as? String
-                        u.quantityValueMaxMetric = (r["quantityValueMaxMetric"] as? NSNumber)?.doubleValue
-                        u.quantityValueMaxImperial = (r["quantityValueMaxImperial"] as? NSNumber)?.doubleValue
-                        return u
-                    }
-                    return s
-                }
+            let byId = await convertRemote(allIngs)
+            if byId.isEmpty {
                 isConverting = false
-                conversionMessage = "Conversions updated — Save to keep them"
-            } catch {
-                isConverting = false
-                conversionMessage = "Conversion failed: \(error.localizedDescription)"
+                conversionMessage = "Conversion failed — try again."
+                return
             }
+            editSections = editSections.map { section in
+                var s = section
+                s.ingredients = section.ingredients.map { ing in
+                    byId[ing.id].map { withConversions(ing, $0) } ?? ing
+                }
+                return s
+            }
+            isConverting = false
+            conversionMessage = "Conversions updated — Save to keep them"
         }
     }
 

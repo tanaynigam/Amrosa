@@ -4,6 +4,15 @@ enum UnitMode: String, CaseIterable {
     case original = "Original"
     case metric = "Metric"
     case imperial = "Imperial"
+
+    /// Compact label for the unit-cycler chip.
+    var shortLabel: String {
+        switch self {
+        case .original: return "Orig"
+        case .metric: return "Metric"
+        case .imperial: return "Imp"
+        }
+    }
 }
 
 enum QuantityScaler {

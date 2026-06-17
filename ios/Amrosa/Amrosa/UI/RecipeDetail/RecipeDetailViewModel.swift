@@ -72,6 +72,9 @@ final class RecipeDetailViewModel {
     var editIsVariant = false
     var editVariantName = ""
     var editSections: [EditorSection] = []
+    /// Snapshot of each ingredient's conversion-relevant fingerprint at edit start, so on save we
+    /// recompute unit conversions ONLY for ingredients whose name/quantity actually changed (#8).
+    var editIngredientSig: [String: String] = [:]
     var deletedSectionIds: Set<String> = []
     var deletedIngredientIds: Set<String> = []
     var deletedStepIds: Set<String> = []
@@ -207,6 +210,13 @@ final class RecipeDetailViewModel {
         recipe.ingredients.contains { $0.hasConversionData }
     }
 
+    /// Cycle Original → Metric → Imperial → Original (compact unit chip in the Ingredients header).
+    func cycleUnitMode() {
+        let all = UnitMode.allCases
+        let next = (all.firstIndex(of: unitMode).map { $0 + 1 } ?? 0) % all.count
+        unitMode = all[next]
+    }
+
     func scaledQuantity(for ingredient: IngredientModel) -> String {
         QuantityScaler.scale(ingredient: ingredient, scaleFactor: scaleFactor, unitMode: unitMode)
     }
@@ -313,11 +323,18 @@ final class RecipeDetailViewModel {
         return grouped.map { (groupId: $0.key, options: $0.value.sorted { $0.orderIndex < $1.orderIndex }) }
     }
 
+    /// Effective sort position: a substitute group is anchored at its MIN orderIndex so switching
+    /// the selected member never makes the row jump up/down the list (#7).
+    private func effectiveOrderIndex(_ ing: IngredientModel) -> Int {
+        guard let gid = ing.substituteGroupId else { return ing.orderIndex }
+        return recipe.ingredients.filter { $0.substituteGroupId == gid }.map { $0.orderIndex }.min() ?? ing.orderIndex
+    }
+
     /// Visible ingredients as a flat list — collapses substitute groups to the selected option and
     /// drops optionals the user hasn't included (they're added back via the per-section chip row).
     var visibleIngredients: [IngredientModel] {
         recipe.ingredients
-            .sorted { $0.orderIndex < $1.orderIndex }
+            .sorted { effectiveOrderIndex($0) < effectiveOrderIndex($1) }
             .filter { ing in
                 // Optional ingredients are opt-in: only show when included via the chip row.
                 if ing.isOptional && !enabledOptionals.contains(ing.id) { return false }
@@ -446,7 +463,6 @@ final class RecipeDetailViewModel {
             try? repository.updateVisibility(recipeId: recipe.id, visibility: "public")
             recipe.visibility = "public"    // update in-memory
             isPublishing = false
-            startCommentListener()
             openShareSheet()
         }
     }
@@ -461,11 +477,9 @@ final class RecipeDetailViewModel {
                 recipe.sharedWith = []
                 sharedRecipients = []
                 _ = await sharedRecipeService.unpublish(recipe.id)
-                stopCommentListener()
-                comments = []
+                // Notes are visibility-independent (F18) — keep the thread observed.
             } else {
                 _ = await sharedRecipeService.publish(recipe)
-                startCommentListener()
             }
         }
     }
@@ -492,10 +506,8 @@ final class RecipeDetailViewModel {
             recipe.visibility = uids.isEmpty ? "private" : "shared"
             if uids.isEmpty {
                 _ = await sharedRecipeService.unpublish(recipe.id)
-                stopCommentListener(); comments = []
             } else {
                 _ = await sharedRecipeService.publish(recipe)
-                startCommentListener()
             }
         }
     }
@@ -554,7 +566,6 @@ final class RecipeDetailViewModel {
         recipe.sharedWith = uids
         recipe.visibility = "shared"
         _ = await sharedRecipeService.publish(recipe)
-        startCommentListener()
     }
 
     private func shareToFollowerInternal(uid: String, name: String) async {
@@ -644,10 +655,16 @@ final class RecipeDetailViewModel {
         }
     }
 
-    // MARK: - Comments
+    // MARK: - Notes (F18 — one cloud thread on every recipe)
 
-    func startCommentListener() {
-        guard isPublic else { return }
+    /// Notes show on every real recipe (not a pending import). Visibility-independent.
+    var notesVisible: Bool { !recipe.needsReview }
+    var notesLocked: Bool = false
+
+    /// Start the notes thread for this recipe (every recipe, not just shared); record ownership so
+    /// the owner can moderate, and load the lock state.
+    func loadNotes() {
+        guard notesVisible else { return }
         commentListenerTask?.cancel()
         commentListenerTask = Task {
             for await batch in sharedRecipeService.commentsStream(recipeId: recipe.id) {
@@ -655,11 +672,25 @@ final class RecipeDetailViewModel {
                 comments = batch
             }
         }
+        Task {
+            if isOwner { await sharedRecipeService.ensureNotesParent(recipeId: recipe.id) }
+            notesLocked = await sharedRecipeService.getNotesLocked(recipeId: recipe.id)
+        }
     }
 
     func stopCommentListener() {
         commentListenerTask?.cancel()
         commentListenerTask = nil
+    }
+
+    /// Owner-only: freeze / unfreeze new notes on this recipe (existing notes are kept).
+    func toggleNotesLock() {
+        let locked = !notesLocked
+        notesLocked = locked   // optimistic
+        Task {
+            let ok = await sharedRecipeService.setNotesLocked(recipeId: recipe.id, locked: locked)
+            if !ok { notesLocked = !locked }   // revert on failure
+        }
     }
 
     func postComment() {
