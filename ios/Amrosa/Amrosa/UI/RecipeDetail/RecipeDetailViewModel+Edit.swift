@@ -123,6 +123,15 @@ extension RecipeDetailViewModel {
         }
     }
 
+    /// Reorder an ingredient within its section (Up/Down in the ingredient sheet).
+    func moveIngredient(in sectionId: String, _ ingredientId: String, by delta: Int) {
+        guard let s = editSections.firstIndex(where: { $0.id == sectionId }),
+              let i = editSections[s].ingredients.firstIndex(where: { $0.id == ingredientId }) else { return }
+        let j = i + delta
+        guard editSections[s].ingredients.indices.contains(j) else { return }
+        editSections[s].ingredients.swapAt(i, j)
+    }
+
     private func mutateIngredient(_ id: String, _ change: (inout EditorIngredient) -> Void) {
         for s in editSections.indices {
             if let i = editSections[s].ingredients.firstIndex(where: { $0.id == id }) {
