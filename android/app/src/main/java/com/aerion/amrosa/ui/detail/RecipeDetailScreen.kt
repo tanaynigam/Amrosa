@@ -841,6 +841,10 @@ fun RecipeDetailScreen(
                         }
                     }
                 }
+                // Add a section straight from the ingredients list (sections are shared with steps).
+                item(key = "add-section-ingredients") {
+                    GhostAddRow("Add section") { editTarget = EditTarget.Section(null) }
+                }
             } else {
                 // View mode: iterate sections so the optional chip row shows even when every
                 // optional in a section is currently hidden. Reserve the add-row height too.
