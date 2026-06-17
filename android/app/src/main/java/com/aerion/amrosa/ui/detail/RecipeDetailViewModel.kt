@@ -843,6 +843,9 @@ class RecipeDetailViewModel(
     fun onDragMove(fromKey: Any?, toKey: Any?) {
         val from = fromKey as? String ?: return
         val to = toKey as? String ?: return
+        // Dropping onto an empty section's placeholder row reassigns the item to that section.
+        if (to.startsWith(EMPTY_STEPS_KEY)) { moveStepToSection(from, to.removePrefix(EMPTY_STEPS_KEY)); return }
+        if (to.startsWith(EMPTY_INGS_KEY)) { moveIngredientToSection(from, to.removePrefix(EMPTY_INGS_KEY)); return }
         val draft = _uiState.value.draft ?: return
         val isIngredient = draft.sections.any { s -> s.ingredients.any { it.id == from } }
         if (isIngredient) reorderIngredient(from, to) else reorderStep(from, to)
@@ -1262,6 +1265,9 @@ class RecipeDetailViewModel(
     companion object {
         const val MAX_VARIANTS = 4
         const val MAX_VARIANT_NAME_LEN = 20
+        // Reorderable keys for the drop placeholders rendered in empty sections (edit mode).
+        const val EMPTY_STEPS_KEY = "empty-steps-"
+        const val EMPTY_INGS_KEY = "empty-ings-"
 
         fun factory(
             repository: RecipeRepository,

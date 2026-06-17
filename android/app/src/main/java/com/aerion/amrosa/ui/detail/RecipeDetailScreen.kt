@@ -826,8 +826,19 @@ fun RecipeDetailScreen(
                         if (label.isNotBlank()) groupLabel(label)
                         ingredientRowItems(gings, section.id)
                     }
-                    item(key = "add-ing-${section.id}") {
-                        GhostAddRow("Add ingredient") { editTarget = EditTarget.Ingredient(section.id, null) }
+                    // The "＋ Add ingredient" row. For an EMPTY section it doubles as a drop target
+                    // (a ReorderableItem) so you can drag an ingredient into the empty section.
+                    if (ings.isEmpty()) {
+                        val emptyKey = "${RecipeDetailViewModel.EMPTY_INGS_KEY}${section.id}"
+                        item(key = emptyKey) {
+                            ReorderableItem(reorderState, key = emptyKey) { _ ->
+                                GhostAddRow("Add ingredient (or drop here)") { editTarget = EditTarget.Ingredient(section.id, null) }
+                            }
+                        }
+                    } else {
+                        item(key = "add-ing-${section.id}") {
+                            GhostAddRow("Add ingredient") { editTarget = EditTarget.Ingredient(section.id, null) }
+                        }
                     }
                 }
             } else {
@@ -936,8 +947,19 @@ fun RecipeDetailScreen(
                     }
                 }
                 if (editing) {
-                    item(key = "add-step-${section.id}") {
-                        GhostAddRow("Add step") { editTarget = EditTarget.Step(section.id, null) }
+                    // The "＋ Add step" row. For an EMPTY section it's also a drop target so a step
+                    // can be dragged into the empty section.
+                    if (sectionSteps.isEmpty()) {
+                        val emptyKey = "${RecipeDetailViewModel.EMPTY_STEPS_KEY}${section.id}"
+                        item(key = emptyKey) {
+                            ReorderableItem(reorderState, key = emptyKey) { _ ->
+                                GhostAddRow("Add step (or drop here)") { editTarget = EditTarget.Step(section.id, null) }
+                            }
+                        }
+                    } else {
+                        item(key = "add-step-${section.id}") {
+                            GhostAddRow("Add step") { editTarget = EditTarget.Step(section.id, null) }
+                        }
                     }
                 } else if (sectionSteps.isNotEmpty()) {
                     // Reserve the "＋ Add step" height so toggling edit doesn't change list height.
