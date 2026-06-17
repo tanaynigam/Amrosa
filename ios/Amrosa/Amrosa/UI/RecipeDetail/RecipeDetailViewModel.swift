@@ -90,8 +90,9 @@ final class RecipeDetailViewModel {
     let syncService: RecipeSyncService?
     let cloudFunctions: CloudFunctionsService?
     let userPreferences: UserPreferences?
+    let saveTracker: RecipeSaveTracker?
 
-    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService, socialRepository: SocialRepository, syncService: RecipeSyncService? = nil, cloudFunctions: CloudFunctionsService? = nil, userPreferences: UserPreferences? = nil) {
+    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService, socialRepository: SocialRepository, syncService: RecipeSyncService? = nil, cloudFunctions: CloudFunctionsService? = nil, userPreferences: UserPreferences? = nil, saveTracker: RecipeSaveTracker? = nil) {
         self.recipe = recipe
         self.repository = repository
         self.authRepository = authRepository
@@ -100,6 +101,7 @@ final class RecipeDetailViewModel {
         self.syncService = syncService
         self.cloudFunctions = cloudFunctions
         self.userPreferences = userPreferences
+        self.saveTracker = saveTracker
         self.selectedServings = recipe.baseServings
         // Seed anchor quantity from the anchor ingredient's base value
         if let anchorId = recipe.scaleIngredientId,

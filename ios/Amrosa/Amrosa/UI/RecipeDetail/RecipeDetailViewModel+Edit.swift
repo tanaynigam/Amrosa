@@ -350,9 +350,19 @@ extension RecipeDetailViewModel {
     func saveEdit() {
         let title = editTitle.trimmingCharacters(in: .whitespaces)
         guard !title.isEmpty else { editError = "Title cannot be empty"; return }
-        isSavingEdit = true
+        let recipeId = recipe.id
+        // F19: exit edit mode IMMEDIATELY; the write runs on the app-scoped save tracker so it
+        // survives leaving the recipe (a spinner shows on the card + detail bar meanwhile).
         editError = nil
+        isEditMode = false
+        editTarget = nil
+        let work: () async -> Void = { [self] in await persistEdit(title: title, recipeId: recipeId) }
+        if let tracker = saveTracker { tracker.run(recipeId, work) } else { Task { await work() } }
+    }
 
+    /// The actual write (conversions + Room + push + mirror reconcile). Reads the frozen draft from
+    /// `self` (edit mode already exited, so the draft no longer mutates). Best-effort.
+    private func persistEdit(title: String, recipeId: String) async {
         let tags = editTagsText.split(separator: ",").map { String($0).trimmed }.filter { !$0.isEmpty }
         let urls = editSourceUrlsText.split(separator: "\n").map { String($0).trimmed }.filter { !$0.isEmpty }
         let prep = Int(editPrepTime)
@@ -360,58 +370,49 @@ extension RecipeDetailViewModel {
         let servings = Int(editBaseServings) ?? 1
         let servingsMin = editIsRangeYield ? Int(editServingsMin) : nil
         let servingsMax = editIsRangeYield ? Int(editServingsMax) : nil
-        let recipeId = recipe.id
 
-        Task {
-            do {
-                // #8 — auto-update conversions ONLY for ingredients whose name/quantity changed
-                // (or were added) this session. Best-effort: a convert failure doesn't block save.
-                let changed = editSections.flatMap { $0.ingredients }.filter {
-                    !$0.quantityDisplay.trimmed.isEmpty && editIngredientSig[$0.id] != Self.ingredientSig($0)
-                }
-                let converted = await convertRemote(changed)
-                let effectiveSections: [EditorSection] = converted.isEmpty ? editSections : editSections.map { sec in
-                    var s = sec
-                    s.ingredients = sec.ingredients.map { ing in
-                        converted[ing.id].map { withConversions(ing, $0) } ?? ing
-                    }
-                    return s
-                }
-
-                try repository.updateFullRecipe(
-                    recipeId: recipeId,
-                    title: title,
-                    recipeDescription: editDescription.trimmed.isEmpty ? nil : editDescription.trimmed,
-                    sourceUrls: urls,
-                    baseServings: servings,
-                    baseServingsMin: servingsMin,
-                    baseServingsMax: servingsMax,
-                    prepTimeMinutes: prep,
-                    cookTimeMinutes: cook,
-                    tags: tags,
-                    isImported: !editIsPersonalAuthor,
-                    authorDisplayName: editIsPersonalAuthor ? personalAuthorName : "Imported",
-                    variantName: editIsVariant ? (editVariantName.trimmed.isEmpty ? "Variation" : editVariantName.trimmed) : nil,
-                    sections: effectiveSections,
-                    deletedSectionIds: Array(deletedSectionIds),
-                    deletedIngredientIds: Array(deletedIngredientIds),
-                    deletedStepIds: Array(deletedStepIds)
-                )
-                // Push + reconcile the mirror (SwiftData @Model updates the view in place):
-                // re-publish when shared (shared/friends/public), unpublish when private — so a
-                // recipe flipped to Private can never linger in the public mirror / Discovery.
-                if let updated = try repository.fetchRecipe(id: recipeId) {
-                    if !updated.isImported { await syncService?.pushPersonalRecipe(updated) }
-                    if updated.visibility != "private" { _ = await sharedRecipeService.publish(updated) }
-                    else { _ = await sharedRecipeService.unpublish(updated.id) }
-                }
-                isSavingEdit = false
-                isEditMode = false
-                editTarget = nil
-            } catch {
-                isSavingEdit = false
-                editError = "Save failed: \(error.localizedDescription)"
+        // #8 — auto-update conversions ONLY for ingredients whose name/quantity changed (or were
+        // added) this session. Best-effort: a convert failure doesn't block the save.
+        let changed = editSections.flatMap { $0.ingredients }.filter {
+            !$0.quantityDisplay.trimmed.isEmpty && editIngredientSig[$0.id] != Self.ingredientSig($0)
+        }
+        let converted = await convertRemote(changed)
+        let effectiveSections: [EditorSection] = converted.isEmpty ? editSections : editSections.map { sec in
+            var s = sec
+            s.ingredients = sec.ingredients.map { ing in
+                converted[ing.id].map { withConversions(ing, $0) } ?? ing
             }
+            return s
+        }
+
+        do {
+            try repository.updateFullRecipe(
+                recipeId: recipeId,
+                title: title,
+                recipeDescription: editDescription.trimmed.isEmpty ? nil : editDescription.trimmed,
+                sourceUrls: urls,
+                baseServings: servings,
+                baseServingsMin: servingsMin,
+                baseServingsMax: servingsMax,
+                prepTimeMinutes: prep,
+                cookTimeMinutes: cook,
+                tags: tags,
+                isImported: !editIsPersonalAuthor,
+                authorDisplayName: editIsPersonalAuthor ? personalAuthorName : "Imported",
+                variantName: editIsVariant ? (editVariantName.trimmed.isEmpty ? "Variation" : editVariantName.trimmed) : nil,
+                sections: effectiveSections,
+                deletedSectionIds: Array(deletedSectionIds),
+                deletedIngredientIds: Array(deletedIngredientIds),
+                deletedStepIds: Array(deletedStepIds)
+            )
+            // Push + reconcile the mirror: re-publish when shared, unpublish when private.
+            if let updated = try repository.fetchRecipe(id: recipeId) {
+                if !updated.isImported { await syncService?.pushPersonalRecipe(updated) }
+                if updated.visibility != "private" { _ = await sharedRecipeService.publish(updated) }
+                else { _ = await sharedRecipeService.unpublish(updated.id) }
+            }
+        } catch {
+            // Background best-effort save; the launch-time push self-heals on next sign-in.
         }
     }
 

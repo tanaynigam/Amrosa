@@ -15,6 +15,7 @@ final class AppContainer {
     let sharedRecipeService: SharedRecipeService
     let socialRepository: SocialRepository
     let userPreferences = UserPreferences()
+    let saveTracker = RecipeSaveTracker()
 
     init() {
         let schema = Schema([

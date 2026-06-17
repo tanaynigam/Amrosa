@@ -132,6 +132,7 @@ private struct AddRecipeSheet: View {
 }
 
 private struct YourRecipesContent: View {
+    @Environment(AppContainer.self) private var container
     @Bindable var viewModel: YourRecipesViewModel
     @Binding var selectedRecipe: RecipeModel?
     var onTapNeedsReview: (RecipeModel) -> Void
@@ -190,7 +191,8 @@ private struct YourRecipesContent: View {
                                 else { selectedRecipe = recipe }
                             } label: {
                                 RecipeCard(recipe: recipe, showNeedsReviewBanner: true,
-                                           likeCount: viewModel.likeCounts[recipe.id] ?? 0)
+                                           likeCount: viewModel.likeCounts[recipe.id] ?? 0,
+                                           isSaving: container.saveTracker.isSaving(recipe.id))
                             }
                             .buttonStyle(.plain)
                             .padding(.horizontal, 16)

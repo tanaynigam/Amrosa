@@ -5,6 +5,8 @@ struct RecipeCard: View {
     var showNeedsReviewBanner: Bool = false
     /// F20: published like count for this recipe (from `getAuthorLikeCounts`); shown when > 0.
     var likeCount: Int = 0
+    /// F19: a background save for this recipe is in flight → show a small spinner.
+    var isSaving: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -73,6 +75,10 @@ struct RecipeCard: View {
                         .padding(.top, 2)
                 }
                 Spacer(minLength: 0)
+
+                if isSaving {
+                    ProgressView()
+                }
 
                 if recipe.imageUrl != nil {
                     RoundedRectangle(cornerRadius: 8)

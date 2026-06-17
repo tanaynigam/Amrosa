@@ -166,7 +166,8 @@ struct RecipeDetailView: View {
                 socialRepository: container.socialRepository,
                 syncService: container.syncService,
                 cloudFunctions: container.cloudFunctions,
-                userPreferences: container.userPreferences
+                userPreferences: container.userPreferences,
+                saveTracker: container.saveTracker
             )
             viewModel?.loadNotes()
             viewModel?.loadLikes()
@@ -228,6 +229,10 @@ struct RecipeDetailView: View {
                     Image(systemName: "book.closed").imageScale(.small)
                 }
             } else {
+                // F19: small spinner while a background save for this recipe is in flight.
+                if container.saveTracker.isSaving(recipe.id) {
+                    ProgressView()
+                }
                 if viewModel?.isOwner == true {
                     Button { viewModel?.enterEdit() } label: {
                         Image(systemName: "pencil").imageScale(.small)
