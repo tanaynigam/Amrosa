@@ -389,7 +389,7 @@ fun RecipeDetailScreen(
                 recipe.sections.sortedBy { it.orderIndex }.forEach { section ->
                     val ings = bySection[section.id].orEmpty()
                     if (ings.isNotEmpty()) {
-                        blocks += (if (multiSection) section.name else null) to groupsOf(ings)
+                        blocks += (if (section.name.isNotBlank()) section.name else null) to groupsOf(ings)
                     }
                 }
                 val knownSectionIds = recipe.sections.map { it.id }.toSet()
@@ -820,7 +820,7 @@ fun RecipeDetailScreen(
                 // a "＋ Add ingredient" affordance right below it.
                 val multiSection = recipe.sections.size > 1
                 recipe.sections.forEach { section ->
-                    if (multiSection) ingredientSubHeader(section.name)
+                    if (section.name.isNotBlank()) ingredientSubHeader(section.name)
                     val ings = recipe.ingredients.filter { it.sectionId == section.id }.sortedBy { it.orderIndex }
                     ings.groupBy { it.groupLabel ?: "" }.forEach { (label, gings) ->
                         if (label.isNotBlank()) groupLabel(label)
@@ -840,7 +840,7 @@ fun RecipeDetailScreen(
                         .sortedBy { anchorIndex(it) }
                     val secOptionals = recipe.ingredients.filter { it.sectionId == section.id && it.isOptional }
                     if (secVisible.isEmpty() && secOptionals.isEmpty()) return@forEach
-                    if (multiSection) ingredientSubHeader(section.name)
+                    if (section.name.isNotBlank()) ingredientSubHeader(section.name)
                     if (secOptionals.isNotEmpty()) optionalChips(secOptionals)
                     secVisible.groupBy { it.groupLabel ?: "" }.forEach { (label, ings) ->
                         if (label.isNotBlank()) groupLabel(label)

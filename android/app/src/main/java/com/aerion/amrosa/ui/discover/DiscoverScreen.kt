@@ -240,6 +240,11 @@ private fun SearchResultRow(recipe: DiscoverRecipe, onClick: () -> Unit) {
                     Text(" ${compactCount(recipe.saveCount)}", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                Spacer(Modifier.width(10.dp))
+                Icon(Icons.Default.Favorite, contentDescription = null, modifier = Modifier.size(13.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(" ${compactCount(recipe.likeCount)}", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -286,7 +291,7 @@ private fun DiscoverCard(recipe: DiscoverRecipe, onClick: () -> Unit) {
                     Text(" ${compactCount(recipe.saveCount)}", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (recipe.likeCount > 0) {
+                run {
                     Spacer(Modifier.width(6.dp))
                     Icon(Icons.Default.Favorite, contentDescription = null, modifier = Modifier.size(13.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant)

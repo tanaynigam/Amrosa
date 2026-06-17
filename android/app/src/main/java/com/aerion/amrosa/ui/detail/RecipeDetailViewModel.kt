@@ -120,9 +120,11 @@ data class RecipeDetailUiState(
     val isReceived: Boolean get() = recipe?.isReceived == true
 
     /** A recipe can be hearted when it isn't the user's own (those live in "My Recipes"), the user
-     *  is signed in, and the recipe is mirrored to the cloud (so a like target exists). */
+     *  is signed in, and the recipe is mirrored to the cloud (so a like target exists). Received
+     *  recipes (Tab 2) always qualify — they came from a shared_recipes mirror, even though they're
+     *  cached locally with visibility "private". */
     val canLike: Boolean get() =
-        recipe != null && currentUid != null && !isOwner && recipe.visibility != "private"
+        recipe != null && currentUid != null && !isOwner && (isReceived || recipe.visibility != "private")
 
     val visibleIngredients: List<Ingredient> get() {
         val recipe = recipe ?: return emptyList()
@@ -261,9 +263,27 @@ class RecipeDetailViewModel(
      */
     fun reload() = loadRecipe(preserveSelections = true)
 
+    /**
+     * Ensure every ingredient/step belongs to a real section (when the recipe has any). Imported
+     * recipes often have steps in a "Main"/"Cookie Dough" section but ingredients with a null
+     * section — without this they'd render under their own (header-less) block, mismatched with the
+     * steps. Orphans (null/unknown section) are folded into the first section for display; an edit
+     * + save makes it permanent.
+     */
+    private fun normalizeSections(recipe: Recipe): Recipe {
+        if (recipe.sections.isEmpty()) return recipe
+        val known = recipe.sections.map { it.id }.toSet()
+        val firstId = recipe.sections.sortedBy { it.orderIndex }.first().id
+        fun eff(sid: String?) = if (sid != null && sid in known) sid else firstId
+        return recipe.copy(
+            ingredients = recipe.ingredients.map { if (eff(it.sectionId) != it.sectionId) it.copy(sectionId = eff(it.sectionId)) else it },
+            steps = recipe.steps.map { if (eff(it.sectionId) != it.sectionId) it.copy(sectionId = eff(it.sectionId)) else it },
+        )
+    }
+
     private fun loadRecipe(preserveSelections: Boolean = false) {
         viewModelScope.launch {
-            val recipe = repository.getRecipeWithDetails(recipeId)
+            val recipe = repository.getRecipeWithDetails(recipeId)?.let(::normalizeSections)
             val currentUid = authRepository.uid
             // Owned = authored by me AND not a received reference. Received recipes
             // (Tab 2) are read-only references to another user's canonical instance.
@@ -343,8 +363,9 @@ class RecipeDetailViewModel(
             // counts only when published. Record ownership on the notes doc so the owner can moderate.
             if (recipe != null && !recipe.needsReview) {
                 startObservingComments()
-                // Counts + like-state exist for any cloud-mirrored tier (shared/friends/public).
-                if (recipe.visibility != "private") startObservingCounts()
+                // Counts + like-state exist for any cloud-mirrored recipe: shared/friends/public,
+                // or a received recipe (its source mirror still exists).
+                if (recipe.isReceived || recipe.visibility != "private") startObservingCounts()
                 if (isOwner) sharedRecipeService.ensureNotesParent(recipeId)
                 _uiState.update { it.copy(notesLocked = sharedRecipeService.getNotesLocked(recipeId)) }
             }

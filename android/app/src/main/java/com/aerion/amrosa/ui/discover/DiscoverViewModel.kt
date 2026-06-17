@@ -73,13 +73,17 @@ class DiscoverViewModel(
             val topCuisines = explicit.ifEmpty { DiscoverRanker.topCuisines(ownTags) }
             val cookedAt = repository.cookedLogFlow().first()
             val localIds = local.map { it.id }.toSet()
+            // Like counts for my own published recipes, so own cards show real numbers (not 0).
+            val ownLikes = myUid?.let {
+                runCatching { sharedRecipeService.getAuthorLikeCounts(it) }.getOrDefault(emptyMap())
+            } ?: emptyMap()
 
             val ownCandidates = local.map { r ->
                 DiscoverRecipe(
                     recipeId = r.id, title = r.title, tags = r.tags,
                     prepTimeMinutes = r.prepTimeMinutes, cookTimeMinutes = r.cookTimeMinutes,
                     source = RecipeSource.OWN, authorUid = r.authorId, authorName = r.authorDisplayName,
-                    isLocal = true,
+                    isLocal = true, likeCount = ownLikes[r.id] ?: 0,
                 )
             }
 
@@ -122,7 +126,8 @@ class DiscoverViewModel(
                 .sortedByDescending { cookedAt[it.id] }
                 .map { r ->
                     DiscoverRecipe(r.id, r.title, r.tags, r.prepTimeMinutes, r.cookTimeMinutes,
-                        RecipeSource.OWN, r.authorId, r.authorDisplayName, isLocal = true)
+                        RecipeSource.OWN, r.authorId, r.authorDisplayName, isLocal = true,
+                        likeCount = ownLikes[r.id] ?: 0)
                 }
 
             val popularShelf = publicCandidates
