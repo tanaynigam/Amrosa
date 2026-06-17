@@ -102,6 +102,35 @@ extension RecipeDetailViewModel {
         editSections[s].ingredients[g] = updated
     }
 
+    /// Link `ingredientId` as a substitute for `targetId` (they share a substitute group), or
+    /// unlink it when `targetId` is nil. Mirrors Android `linkSubstitute`.
+    func linkSubstitute(ingredientId: String, targetId: String?) {
+        guard let targetId else {
+            mutateIngredient(ingredientId) { $0.substituteGroupId = nil }
+            return
+        }
+        let target = editSections.flatMap { $0.ingredients }.first { $0.id == targetId }
+        let groupId = target?.substituteGroupId ?? "subgrp-\(UUID().uuidString)"
+        for s in editSections.indices {
+            for i in editSections[s].ingredients.indices {
+                let id = editSections[s].ingredients[i].id
+                if id == ingredientId {
+                    editSections[s].ingredients[i].substituteGroupId = groupId
+                } else if id == targetId, editSections[s].ingredients[i].substituteGroupId == nil {
+                    editSections[s].ingredients[i].substituteGroupId = groupId
+                }
+            }
+        }
+    }
+
+    private func mutateIngredient(_ id: String, _ change: (inout EditorIngredient) -> Void) {
+        for s in editSections.indices {
+            if let i = editSections[s].ingredients.firstIndex(where: { $0.id == id }) {
+                change(&editSections[s].ingredients[i]); return
+            }
+        }
+    }
+
     func deleteIngredient(in sectionId: String, _ ingredientId: String) {
         guard let s = editSections.firstIndex(where: { $0.id == sectionId }) else { return }
         editSections[s].ingredients.removeAll { $0.id == ingredientId }
@@ -171,10 +200,13 @@ extension RecipeDetailViewModel {
                     deletedIngredientIds: Array(deletedIngredientIds),
                     deletedStepIds: Array(deletedStepIds)
                 )
-                // Push + re-publish the mirror if shared (SwiftData @Model updates the view in place).
+                // Push + reconcile the mirror (SwiftData @Model updates the view in place):
+                // re-publish when shared (shared/friends/public), unpublish when private — so a
+                // recipe flipped to Private can never linger in the public mirror / Discovery.
                 if let updated = try repository.fetchRecipe(id: recipeId) {
                     if !updated.isImported { await syncService?.pushPersonalRecipe(updated) }
                     if updated.visibility != "private" { _ = await sharedRecipeService.publish(updated) }
+                    else { _ = await sharedRecipeService.unpublish(updated.id) }
                 }
                 isSavingEdit = false
                 isEditMode = false
@@ -228,22 +260,23 @@ extension RecipeDetailViewModel {
 
     func deleteRecipe() {
         let id = recipe.id
-        let wasPublic = recipe.visibility == "public"
+        // Unpublish any shared tier (shared/friends/public), not just public, so no mirror lingers.
+        let wasShared = recipe.visibility != "private"
         let isBase = recipe.parentRecipeId == nil
         isDeleting = true
         Task {
             if isBase, let variations = try? repository.getVariants(parentId: id) {
                 for v in variations {
                     let vId = v.id
-                    let vPublic = v.visibility == "public"
+                    let vShared = v.visibility != "private"
                     try? repository.deleteRecipe(id: vId)
                     await syncService?.deletePersonalRecipe(vId)
-                    if vPublic { _ = await sharedRecipeService.unpublish(vId) }
+                    if vShared { _ = await sharedRecipeService.unpublish(vId) }
                 }
             }
             try? repository.deleteRecipe(id: id)
             await syncService?.deletePersonalRecipe(id)
-            if wasPublic { _ = await sharedRecipeService.unpublish(id) }
+            if wasShared { _ = await sharedRecipeService.unpublish(id) }
             isDeleting = false
             recipeDeleted = true
         }

@@ -12,6 +12,8 @@ struct EditorIngredient: Identifiable {
     var quantityDisplay: String
     var groupLabel: String
     var isOptional: Bool
+    /// Substitute link (F4): ingredients sharing a group id are interchangeable.
+    var substituteGroupId: String? = nil
     // F6 conversion fields — carried so editing doesn't wipe them and the
     // "Update unit conversions" button can populate them.
     var quantityValueMetric: Double? = nil
@@ -51,6 +53,7 @@ struct EditorIngredient: Identifiable {
         self.quantityDisplay = model.quantityDisplay ?? ""
         self.groupLabel = model.groupLabel ?? ""
         self.isOptional = model.isOptional
+        self.substituteGroupId = model.substituteGroupId
         self.quantityValueMetric = model.quantityValueMetric
         self.quantityUnitMetric = model.quantityUnitMetric
         self.quantityDisplayMetric = model.quantityDisplayMetric
@@ -350,9 +353,12 @@ final class RecipeEditorViewModel {
                 // Push to Firestore
                 if let updated = try repository.fetchRecipe(id: existing.id) {
                     await syncService?.pushPersonalRecipe(updated)
-                    // If public, re-publish the canonical mirror so receivers pick up edits.
-                    if updated.visibility == "public" {
+                    // Reconcile the mirror: re-publish any shared tier so receivers pick up edits;
+                    // unpublish when private so it can't linger in the public mirror / Discovery.
+                    if updated.visibility != "private" {
                         _ = await sharedRecipeService?.publish(updated)
+                    } else {
+                        _ = await sharedRecipeService?.unpublish(updated.id)
                     }
                 }
             } else {
@@ -425,7 +431,8 @@ final class RecipeEditorViewModel {
 
     func deleteRecipe() {
         guard let existing = existingRecipe else { return }
-        let wasPublic = existing.visibility == "public"
+        // Unpublish any shared tier (shared/friends/public), not just public.
+        let wasShared = existing.visibility != "private"
         let id = existing.id
         let isBase = existing.parentRecipeId == nil
         isDeleting = true
@@ -434,17 +441,17 @@ final class RecipeEditorViewModel {
             if isBase, let variations = try? repository.getVariants(parentId: id) {
                 for v in variations {
                     let vId = v.id
-                    let vPublic = v.visibility == "public"
+                    let vShared = v.visibility != "private"
                     try? repository.deleteRecipe(id: vId)
                     await syncService?.deletePersonalRecipe(vId)
-                    if vPublic { _ = await sharedRecipeService?.unpublish(vId) }
+                    if vShared { _ = await sharedRecipeService?.unpublish(vId) }
                 }
             }
             try? repository.deleteRecipe(id: id)
             // Remove the cloud copy too, otherwise the next pull resurrects it.
             await syncService?.deletePersonalRecipe(id)
-            // If it was public, take down the shared mirror so receivers lose access.
-            if wasPublic { _ = await sharedRecipeService?.unpublish(id) }
+            // Take down the shared mirror so receivers lose access.
+            if wasShared { _ = await sharedRecipeService?.unpublish(id) }
             isDeleting = false
             deleteComplete = true
         }

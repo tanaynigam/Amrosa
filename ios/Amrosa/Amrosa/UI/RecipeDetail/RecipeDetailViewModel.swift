@@ -82,8 +82,9 @@ final class RecipeDetailViewModel {
     private let socialRepository: SocialRepository
     let syncService: RecipeSyncService?
     let cloudFunctions: CloudFunctionsService?
+    let userPreferences: UserPreferences?
 
-    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService, socialRepository: SocialRepository, syncService: RecipeSyncService? = nil, cloudFunctions: CloudFunctionsService? = nil) {
+    init(recipe: RecipeModel, repository: RecipeRepository, authRepository: AuthRepository, sharedRecipeService: SharedRecipeService, socialRepository: SocialRepository, syncService: RecipeSyncService? = nil, cloudFunctions: CloudFunctionsService? = nil, userPreferences: UserPreferences? = nil) {
         self.recipe = recipe
         self.repository = repository
         self.authRepository = authRepository
@@ -91,6 +92,7 @@ final class RecipeDetailViewModel {
         self.socialRepository = socialRepository
         self.syncService = syncService
         self.cloudFunctions = cloudFunctions
+        self.userPreferences = userPreferences
         self.selectedServings = recipe.baseServings
         // Seed anchor quantity from the anchor ingredient's base value
         if let anchorId = recipe.scaleIngredientId,
@@ -99,6 +101,31 @@ final class RecipeDetailViewModel {
             self.scaleAnchorQty = baseValue
         } else {
             self.scaleAnchorQty = 0
+        }
+        seedSelections()
+    }
+
+    /// Restore remembered substitute + optional choices for this recipe (validated against the
+    /// current recipe so stale ids are ignored); falls back to the "include optionals" default.
+    private func seedSelections() {
+        let optionalIds = Set(recipe.ingredients.filter { $0.isOptional }.map { $0.id })
+
+        // Substitutes: keep only groupId→ingredientId pairs whose ingredient still exists in that group.
+        if let prefs = userPreferences {
+            let saved = prefs.recipeSubstitutes(recipe.id)
+            var valid: [String: String] = [:]
+            for (gid, ingId) in saved where recipe.ingredients.contains(where: { $0.id == ingId && $0.substituteGroupId == gid }) {
+                valid[gid] = ingId
+            }
+            selectedSubstitutes = valid
+
+            if let savedOpts = prefs.recipeEnabledOptionals(recipe.id) {
+                enabledOptionals = savedOpts.intersection(optionalIds)
+            } else {
+                enabledOptionals = prefs.includeOptionalsByDefault() ? optionalIds : []
+            }
+        } else {
+            enabledOptionals = optionalIds
         }
     }
 
@@ -256,7 +283,27 @@ final class RecipeDetailViewModel {
             }
             result[firstStepId] = list
         }
-        return result
+
+        // Resolve substitute groups to the selected member (one per group) and drop disabled
+        // optionals, so cooking mode matches the reading view's choices.
+        return result.mapValues { ings in
+            var seenGroups = Set<String>()
+            var out: [IngredientModel] = []
+            for ing in ings {
+                let resolved: IngredientModel
+                if let gid = ing.substituteGroupId {
+                    if !seenGroups.insert(gid).inserted { continue }
+                    let selectedId = selectedSubstitutes[gid]
+                        ?? recipe.ingredients.first { $0.substituteGroupId == gid }?.id
+                    resolved = recipe.ingredients.first { $0.id == selectedId } ?? ing
+                } else {
+                    resolved = ing
+                }
+                if resolved.isOptional && !enabledOptionals.contains(resolved.id) { continue }
+                if !out.contains(where: { $0.id == resolved.id }) { out.append(resolved) }
+            }
+            return out
+        }
     }
 
     /// Substitute groups — used to render "Options" selectors above ingredients.
@@ -266,12 +313,14 @@ final class RecipeDetailViewModel {
         return grouped.map { (groupId: $0.key, options: $0.value.sorted { $0.orderIndex < $1.orderIndex }) }
     }
 
-    /// ALL visible ingredients as a flat list — collapses substitute groups to the selected option
-    /// and always shows optional ingredients (they are individually togglable, like Android).
+    /// Visible ingredients as a flat list — collapses substitute groups to the selected option and
+    /// drops optionals the user hasn't included (they're added back via the per-section chip row).
     var visibleIngredients: [IngredientModel] {
         recipe.ingredients
             .sorted { $0.orderIndex < $1.orderIndex }
             .filter { ing in
+                // Optional ingredients are opt-in: only show when included via the chip row.
+                if ing.isOptional && !enabledOptionals.contains(ing.id) { return false }
                 // Substitute group: show only the selected option
                 if let gid = ing.substituteGroupId {
                     let groupMembers = recipe.ingredients.filter { $0.substituteGroupId == gid }
@@ -279,8 +328,16 @@ final class RecipeDetailViewModel {
                     if let s = selected { return ing.id == s }
                     return groupMembers.sorted { $0.orderIndex < $1.orderIndex }.first?.id == ing.id
                 }
-                return true // show all including optionals (they get a toggle UI)
+                return true
             }
+    }
+
+    /// Optional ingredients per section id (incl. nil → "__other__"), for the chip rows. These show
+    /// regardless of whether the optional is currently included, so you can always toggle them.
+    func optionalChips(forSectionId sectionId: String?) -> [IngredientModel] {
+        recipe.ingredients
+            .filter { $0.isOptional && ($0.section?.id ?? "__other__") == (sectionId ?? "__other__") }
+            .sorted { $0.orderIndex < $1.orderIndex }
     }
 
     struct IngredientGroup: Identifiable {
@@ -337,10 +394,12 @@ final class RecipeDetailViewModel {
         } else {
             enabledOptionals.insert(ingredientId)
         }
+        userPreferences?.setRecipeEnabledOptionals(recipe.id, enabledOptionals)
     }
 
     func selectSubstitute(_ groupId: String, _ ingredientId: String) {
         selectedSubstitutes[groupId] = ingredientId
+        userPreferences?.setRecipeSubstitutes(recipe.id, selectedSubstitutes)
     }
 
     // MARK: - Notes
@@ -399,6 +458,8 @@ final class RecipeDetailViewModel {
             try? repository.updateVisibility(recipeId: recipe.id, visibility: visibility)
             recipe.visibility = visibility   // update in-memory so the chip reflects immediately
             if visibility == "private" {
+                recipe.sharedWith = []
+                sharedRecipients = []
                 _ = await sharedRecipeService.unpublish(recipe.id)
                 stopCommentListener()
                 comments = []
@@ -407,6 +468,50 @@ final class RecipeDetailViewModel {
                 startCommentListener()
             }
         }
+    }
+
+    // MARK: - F17: Shared with specific people (per-recipient ACL)
+
+    /// Resolved recipient profiles for the recipe's `sharedWith` UIDs (drives the recipients sheet).
+    var sharedRecipients: [UserProfile] = []
+
+    /// Load recipient names for the current share list (call when opening the recipients sheet).
+    func loadSharedRecipients() {
+        let uids = recipe.sharedWith
+        guard !uids.isEmpty else { sharedRecipients = []; return }
+        Task { sharedRecipients = await socialRepository.getUsers(uids) }
+    }
+
+    /// Replace the share list. Empty → private; otherwise the "shared" tier + republish the mirror.
+    func setSharedRecipients(_ profiles: [UserProfile]) {
+        let uids = profiles.map { $0.uid }
+        sharedRecipients = profiles
+        Task {
+            try? repository.updateSharedRecipients(recipeId: recipe.id, sharedWith: uids)
+            recipe.sharedWith = uids
+            recipe.visibility = uids.isEmpty ? "private" : "shared"
+            if uids.isEmpty {
+                _ = await sharedRecipeService.unpublish(recipe.id)
+                stopCommentListener(); comments = []
+            } else {
+                _ = await sharedRecipeService.publish(recipe)
+                startCommentListener()
+            }
+        }
+    }
+
+    func addSharedRecipient(_ user: UserProfile) {
+        guard !sharedRecipients.contains(where: { $0.uid == user.uid }) else { return }
+        setSharedRecipients(sharedRecipients + [user])
+    }
+
+    func removeSharedRecipient(_ uid: String) {
+        setSharedRecipients(sharedRecipients.filter { $0.uid != uid })
+    }
+
+    /// User search for the recipients sheet.
+    func searchUsers(_ query: String) async -> [UserProfile] {
+        await socialRepository.searchUsers(query: query)
     }
 
     // MARK: - Direct sharing to followers
@@ -429,20 +534,27 @@ final class RecipeDetailViewModel {
         Task { await shareToFollowerInternal(uid: uid, name: name) }
     }
 
-    /// Make the recipe Public (publishes the canonical mirror), then share it.
-    /// Used when the user confirms the "make public to share" prompt for a private recipe.
-    /// F12: direct-share a private recipe → publish at the **Co-Chefs** tier (not Public).
-    /// An already-public recipe is left Public. Used by the "share makes this visible to co-chefs" prompt.
+    /// Direct-share a recipe to a specific person. F17: instead of bumping a private recipe to the
+    /// Co-Chefs tier, add the recipient to the per-recipient `sharedWith` ACL ("shared" tier) and
+    /// publish the mirror — so only that person (plus any already-listed) can read it.
     func makeSharableAndShareToFollower(uid: String, name: String) {
         Task {
-            if recipe.visibility == "private" {
-                try? repository.updateVisibility(recipeId: recipe.id, visibility: "friends")
-                recipe.visibility = "friends"
-                _ = await sharedRecipeService.publish(recipe)
-                startCommentListener()
-            }
+            await ensureSharedWith(uid)
             await shareToFollowerInternal(uid: uid, name: name)
         }
+    }
+
+    /// Ensure `recipientUid` is in the share list (publishing at the "shared" tier if needed).
+    /// An already-public/friends recipe is left at its tier.
+    private func ensureSharedWith(_ recipientUid: String) async {
+        if recipe.visibility == "public" || recipe.visibility == "friends" { return }
+        guard !recipe.sharedWith.contains(recipientUid) else { return }
+        let uids = (recipe.sharedWith + [recipientUid])
+        try? repository.updateSharedRecipients(recipeId: recipe.id, sharedWith: uids)
+        recipe.sharedWith = uids
+        recipe.visibility = "shared"
+        _ = await sharedRecipeService.publish(recipe)
+        startCommentListener()
     }
 
     private func shareToFollowerInternal(uid: String, name: String) async {

@@ -19,6 +19,9 @@ final class AccountViewModel {
     var availableCuisines: [String] = []
     var selectedCuisines: Set<String> = []
 
+    // Ingredients — whether optional ingredients start included on a recipe
+    var includeOptionalsByDefault: Bool = true
+
     private static let curatedCuisines = [
         "Indian", "Italian", "Mexican", "Chinese", "Thai", "Japanese",
         "American", "Mediterranean", "French", "Korean", "Middle Eastern"
@@ -48,6 +51,12 @@ final class AccountViewModel {
         let ts = UserDefaults.standard.double(forKey: "amrosa_last_sync")
         lastSyncDate = ts > 0 ? Date(timeIntervalSince1970: ts) : nil
         loadCuisinePrefs()
+        includeOptionalsByDefault = container.userPreferences.includeOptionalsByDefault()
+    }
+
+    func setIncludeOptionalsByDefault(_ value: Bool) {
+        includeOptionalsByDefault = value
+        container.userPreferences.setIncludeOptionalsByDefault(value)
     }
 
     /// Available chips = curated list ∪ the user's own tags (minus meal words); current selection.

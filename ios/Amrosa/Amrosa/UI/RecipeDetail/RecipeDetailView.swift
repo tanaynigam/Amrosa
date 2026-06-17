@@ -59,7 +59,9 @@ struct RecipeDetailView: View {
                     viewModel: vm,
                     onOpenVariant: { openVariant = $0 },
                     onAddVariant: { newVariantName = ""; showAddVariant = true },
-                    onCookFromSection: { cookFromSectionId = $0; showCookingMode = true }
+                    onCookFromSection: { cookFromSectionId = $0; showCookingMode = true },
+                    onShare: { vm.loadFollowing(); showShareOptions = true },
+                    onShoppingList: { showShoppingList = true }
                 )
             } else {
                 ProgressView()
@@ -163,7 +165,8 @@ struct RecipeDetailView: View {
                 sharedRecipeService: container.sharedRecipeService,
                 socialRepository: container.socialRepository,
                 syncService: container.syncService,
-                cloudFunctions: container.cloudFunctions
+                cloudFunctions: container.cloudFunctions,
+                userPreferences: container.userPreferences
             )
             viewModel?.startCommentListener()
             viewModel?.loadVariants()
@@ -213,30 +216,23 @@ struct RecipeDetailView: View {
             }
         } else {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
+            // Slimmed down to free up title space: Share moved to the visibility row, cart to the
+            // Ingredients header. Smaller icons leave more room for the recipe title.
             if viewModel?.isReceived == true {
                 Button(role: .destructive) { showRemoveConfirm = true } label: {
-                    Image(systemName: "trash")
-                }
-                Button { showShoppingList = true } label: {
-                    Image(systemName: "cart")
+                    Image(systemName: "trash").imageScale(.small)
                 }
                 Button { cookFromSectionId = nil; showCookingMode = true } label: {
-                    Image(systemName: "book.closed")
+                    Image(systemName: "book.closed").imageScale(.small)
                 }
             } else {
                 if viewModel?.isOwner == true {
-                    Button { viewModel?.loadFollowing(); showShareOptions = true } label: {
-                        Image(systemName: "square.and.arrow.up")
-                    }
                     Button { viewModel?.enterEdit() } label: {
-                        Image(systemName: "pencil")
+                        Image(systemName: "pencil").imageScale(.small)
                     }
-                }
-                Button { showShoppingList = true } label: {
-                    Image(systemName: "cart")
                 }
                 Button { cookFromSectionId = nil; showCookingMode = true } label: {
-                    Image(systemName: "book.closed")
+                    Image(systemName: "book.closed").imageScale(.small)
                 }
             }
         }
@@ -275,7 +271,7 @@ private struct SentAndRemoveDialogs: ViewModifier {
                 }
                 Button("Cancel", role: .cancel) { pendingShareRecipient = nil }
             } message: {
-                Text("Sharing makes this recipe visible to your co-chefs so they can view it. You can make it private again later.")
+                Text("Sharing adds this person to the recipe so they can view it. Only people you pick can see it. You can change this any time.")
             }
             .confirmationDialog("Remove this recipe?", isPresented: $showRemoveConfirm, titleVisibility: .visible) {
                 Button("Remove", role: .destructive) { viewModel?.removeReceivedRecipe() }
@@ -302,6 +298,8 @@ private struct RecipeDetailContent: View {
     var onOpenVariant: (RecipeModel) -> Void = { _ in }
     var onAddVariant: () -> Void = {}
     var onCookFromSection: (String) -> Void = { _ in }
+    var onShare: () -> Void = {}
+    var onShoppingList: () -> Void = {}
 
     var body: some View {
         // F16: edit mode renders the IDENTICAL body — only `.editable` (outline + jiggle + tap)
@@ -312,6 +310,13 @@ private struct RecipeDetailContent: View {
         ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+
+                // ── Recipe title (prominent; the nav-bar title is small). Editable in edit mode. ──
+                Text(viewModel.displayTitle.isEmpty ? "Untitled recipe" : viewModel.displayTitle)
+                    .font(.title).fontWeight(.bold)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.top, 12)
+                    .editable(active: editing, phase: 0) { viewModel.editTarget = .details }
 
                 // ── Variation chips (F10) ──
                 if viewModel.variants.count > 1 || viewModel.canAddVariant {
@@ -355,8 +360,18 @@ private struct RecipeDetailContent: View {
                 }
                 if viewModel.isOwner {
                     // Kept in both modes (not an editable field) so the layout never reflows.
-                    VisibilityChip(viewModel: viewModel)
-                        .padding(.horizontal, 16).padding(.top, 8)
+                    // Share lives here now (moved off the crowded title bar); hidden while editing.
+                    HStack {
+                        VisibilityChip(viewModel: viewModel)
+                        Spacer()
+                        if !editing {
+                            Button(action: onShare) {
+                                Image(systemName: "square.and.arrow.up")
+                            }
+                            .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.top, 8)
                 }
 
                 // ── Time + Yield row (unchanged in both modes) ──
@@ -402,29 +417,24 @@ private struct RecipeDetailContent: View {
                     Divider().padding(.horizontal, 16).padding(.vertical, 8)
                 }
 
-                // ── Substitute selectors ("Options") — view interactions only ──
-                let subGroups = viewModel.substituteGroups
-                if !subGroups.isEmpty {
-                    SectionHeader("Options")
-                    ForEach(subGroups, id: \.groupId) { group in
-                        SubstituteSelector(
-                            options: group.options,
-                            selectedId: viewModel.selectedSubstitutes[group.groupId] ?? group.options.first?.id ?? "",
-                            viewModel: viewModel, groupId: group.groupId
-                        )
-                    }
-                    Divider().padding(.horizontal, 16).padding(.vertical, 8)
-                }
+                // (Substitutes are shown inline as swap chips under the ingredient — no "Options" section.)
 
                 // ── Ingredients ──
-                HStack {
+                HStack(spacing: 10) {
                     Text("Ingredients").font(.title2).fontWeight(.semibold)
                     Spacer()
                     if viewModel.hasConversionData {
                         Picker("Units", selection: Binding(get: { viewModel.unitMode }, set: { viewModel.unitMode = $0 })) {
                             ForEach(UnitMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                         }
-                        .pickerStyle(.segmented).frame(width: 180)
+                        .pickerStyle(.segmented).frame(width: 170)
+                    }
+                    // Shopping list lives here now (moved off the title bar); hidden while editing.
+                    if !editing {
+                        Button(action: onShoppingList) {
+                            Image(systemName: "cart")
+                        }
+                        .buttonStyle(.plain).foregroundStyle(Color.accentColor)
                     }
                 }
                 .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
@@ -438,6 +448,11 @@ private struct RecipeDetailContent: View {
                                 if let sid = block.sectionId { viewModel.editTarget = .section(sectionId: sid) }
                             }
                     }
+                    // Optional ingredients: one-line chip row per section (view mode). Selecting a
+                    // chip drops the ingredient into the list; unselecting hides it.
+                    if !editing, !block.optionalChips.isEmpty {
+                        OptionalChipsRow(chips: block.optionalChips) { viewModel.toggleOptional($0) }
+                    }
                     ForEach(block.groups) { group in
                         if !group.label.isEmpty {
                             Text(group.label)
@@ -445,11 +460,21 @@ private struct RecipeDetailContent: View {
                                 .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 2)
                         }
                         ForEach(Array(group.items.enumerated()), id: \.element.id) { idx, ing in
-                            IngredientRow(ingredient: ing, editing: editing,
-                                          onToggleOptional: { viewModel.toggleOptional(ing.id) })
+                            IngredientRow(ingredient: ing, editing: editing)
                                 .editable(active: editing, phase: idx) {
                                     viewModel.editTarget = .ingredient(sectionId: block.sectionId ?? "", ingredientId: ing.id)
                                 }
+                            // Substitute swap chips inline under the selected member (view mode).
+                            if !editing, let gid = ing.substituteGroupId, !ing.substituteOptions.isEmpty {
+                                SubstituteChipsRow(options: ing.substituteOptions) { viewModel.selectSubstitute(gid, $0) }
+                            }
+                        }
+                    }
+                    // In-context "＋ Add ingredient" (edit); view reserves the same height so the
+                    // toggle never shifts (F16 intent: in-context adds without reflow).
+                    if let sid = block.sectionId {
+                        AddRowSlot(editing: editing, title: "Add ingredient") {
+                            viewModel.editTarget = .ingredient(sectionId: sid, ingredientId: nil)
                         }
                     }
                 }
@@ -483,6 +508,11 @@ private struct RecipeDetailContent: View {
                                 viewModel.editTarget = .step(sectionId: section.id, stepId: step.id)
                             }
                     }
+                    if !steps.isEmpty {
+                        AddRowSlot(editing: editing, title: "Add step") {
+                            viewModel.editTarget = .step(sectionId: section.id, stepId: nil)
+                        }
+                    }
                 }
 
                 // Flat (no-section) steps — both modes
@@ -493,46 +523,60 @@ private struct RecipeDetailContent: View {
                             viewModel.editTarget = .step(sectionId: viewModel.flatStepsSectionId ?? "", stepId: step.id)
                         }
                 }
-
-                Divider().padding(.horizontal, 16).padding(.vertical, 8)
-
-                // ── Notes ──
-                HStack {
-                    Text("Notes").font(.title2).fontWeight(.semibold)
-                    Spacer()
-                    Button { viewModel.newNoteText = viewModel.newNoteText.isEmpty ? " " : "" } label: {
-                        Image(systemName: "plus.bubble")
+                if !flatSteps.isEmpty, let sid = viewModel.flatStepsSectionId {
+                    AddRowSlot(editing: editing, title: "Add step") {
+                        viewModel.editTarget = .step(sectionId: sid, stepId: nil)
                     }
-                    .buttonStyle(.plain).foregroundStyle(Color.accentColor)
                 }
-                .padding(.horizontal, 16).padding(.bottom, 4)
 
-                if !viewModel.newNoteText.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField("Add a note, tweak, or observation…", text: Binding(
-                            get: { viewModel.newNoteText.trimmingCharacters(in: .whitespaces) == "" ? "" : viewModel.newNoteText },
-                            set: { viewModel.newNoteText = $0 }
-                        ), axis: .vertical)
-                        .textFieldStyle(.roundedBorder).lineLimit(3...6)
-                        if !viewModel.newNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Button("Save Note") { viewModel.addNote() }
-                                .buttonStyle(.borderedProminent).font(.subheadline)
+                // In-context "＋ Add section" footer (edit); reserved in view.
+                AddRowSlot(editing: editing, title: "Add section") {
+                    viewModel.editTarget = .section(sectionId: nil)
+                }
+
+                // Notes + Comments are hidden while editing (they sit below the fold, so hiding
+                // them doesn't shift the content you're editing above).
+                if !editing {
+                    Divider().padding(.horizontal, 16).padding(.vertical, 8)
+
+                    // ── Notes ──
+                    HStack {
+                        Text("Notes").font(.title2).fontWeight(.semibold)
+                        Spacer()
+                        Button { viewModel.newNoteText = viewModel.newNoteText.isEmpty ? " " : "" } label: {
+                            Image(systemName: "plus.bubble")
                         }
+                        .buttonStyle(.plain).foregroundStyle(Color.accentColor)
                     }
-                    .padding(.horizontal, 16).padding(.bottom, 8)
-                }
+                    .padding(.horizontal, 16).padding(.bottom, 4)
 
-                ForEach(viewModel.sortedNotes) { note in
-                    NoteRow(note: note, viewModel: viewModel)
-                }
-                if viewModel.sortedNotes.isEmpty && viewModel.newNoteText.isEmpty {
-                    Text("No notes yet. Tap + to add one.")
-                        .font(.body).foregroundStyle(.secondary)
-                        .padding(.horizontal, 16).padding(.vertical, 8)
-                }
+                    if !viewModel.newNoteText.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            TextField("Add a note, tweak, or observation…", text: Binding(
+                                get: { viewModel.newNoteText.trimmingCharacters(in: .whitespaces) == "" ? "" : viewModel.newNoteText },
+                                set: { viewModel.newNoteText = $0 }
+                            ), axis: .vertical)
+                            .textFieldStyle(.roundedBorder).lineLimit(3...6)
+                            if !viewModel.newNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Button("Save Note") { viewModel.addNote() }
+                                    .buttonStyle(.borderedProminent).font(.subheadline)
+                            }
+                        }
+                        .padding(.horizontal, 16).padding(.bottom, 8)
+                    }
 
-                if viewModel.isPublished {
-                    CommentsSection(viewModel: viewModel)
+                    ForEach(viewModel.sortedNotes) { note in
+                        NoteRow(note: note, viewModel: viewModel)
+                    }
+                    if viewModel.sortedNotes.isEmpty && viewModel.newNoteText.isEmpty {
+                        Text("No notes yet. Tap + to add one.")
+                            .font(.body).foregroundStyle(.secondary)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                    }
+
+                    if viewModel.isPublished {
+                        CommentsSection(viewModel: viewModel)
+                    }
                 }
 
                 Spacer(minLength: 32)
@@ -597,21 +641,77 @@ private struct SectionHeader: View {
     }
 }
 
-// MARK: - Ingredient row (matches Android IngredientRow with per-ingredient optional toggle)
+// MARK: - Add-row slot (F16) — ghost "＋ Add" row in edit; equal reserved height in view
+
+private let kAddRowHeight: CGFloat = 44
+
+private struct AddRowSlot: View {
+    let editing: Bool
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Group {
+            if editing {
+                Button(action: action) {
+                    Label(title, systemImage: "plus")
+                        .font(.subheadline).foregroundStyle(Color.accentColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .frame(height: kAddRowHeight - 8)
+                        .overlay(RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.accentColor.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [4])))
+                        .padding(.horizontal, 16)
+                }
+                .buttonStyle(.plain)
+            } else {
+                // Reserve identical height so toggling Edit never shifts the layout.
+                Color.clear
+            }
+        }
+        .frame(height: kAddRowHeight)
+    }
+}
+
+// MARK: - Optional chip row (view mode) — opt-in optional ingredients per section
+
+private struct OptionalChipsRow: View {
+    let chips: [DisplayOptionalChip]
+    let onToggle: (String) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(chips) { chip in
+                    Button { onToggle(chip.id) } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: chip.isEnabled ? "checkmark.circle.fill" : "plus.circle")
+                                .font(.caption2)
+                            Text(chip.name).font(.caption).fontWeight(.medium)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(chip.isEnabled ? Color.accentColor.opacity(0.15) : Color(.secondarySystemBackground))
+                        .foregroundStyle(chip.isEnabled ? Color.accentColor : Color.secondary)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 4)
+        }
+    }
+}
+
+// MARK: - Ingredient row
 
 private struct IngredientRow: View {
     let ingredient: DisplayIngredient
     var editing: Bool = false
-    var onToggleOptional: () -> Void = {}
 
-    private var isDimmed: Bool { ingredient.isOptional && !ingredient.isOptionalEnabled && !editing }
-
-    // Display-only row (F11): the checkable list lives on the Shopping List screen. In edit mode
-    // the whole row is tapped (via `.editable`) to open its sheet, so the optional toggle is hidden.
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "circle.fill")
-                .foregroundStyle(isDimmed ? Color.secondary.opacity(0.3) : Color.accentColor.opacity(0.5))
+                .foregroundStyle(Color.accentColor.opacity(0.5))
                 .font(.system(size: 8))
                 .padding(.top, 7)
 
@@ -621,19 +721,12 @@ private struct IngredientRow: View {
                         Text(ingredient.scaledQuantity).fontWeight(.medium)
                     }
                     Text(ingredient.name.isEmpty ? "Tap to edit" : ingredient.name)
-                }
-                .font(.body)
-                .foregroundStyle(isDimmed ? Color.secondary : Color.primary)
-
-                if ingredient.isOptional {
-                    if editing {
-                        Text("Optional").font(.caption).foregroundStyle(.tertiary)
-                    } else {
-                        Button(ingredient.isOptionalEnabled ? "Optional (tap to disable)" : "Optional — tap to add",
-                               action: onToggleOptional)
-                            .font(.caption).foregroundStyle(Color.accentColor).buttonStyle(.plain)
+                    if ingredient.isOptional {
+                        Text("· optional").font(.caption).foregroundStyle(.tertiary)
                     }
                 }
+                .font(.body)
+
                 if editing, let note = ingredient.shoppingNote {
                     Label(note, systemImage: "lightbulb").font(.caption).foregroundStyle(.tertiary)
                 }
@@ -691,34 +784,29 @@ private struct StepRow: View {
     }
 }
 
-// MARK: - Substitute selector
+// MARK: - Substitute swap chips (inline under the selected ingredient)
 
-private struct SubstituteSelector: View {
-    let options: [IngredientModel]
-    let selectedId: String
-    @Bindable var viewModel: RecipeDetailViewModel
-    let groupId: String
+private struct SubstituteChipsRow: View {
+    let options: [DisplaySubstituteChip]
+    let onSelect: (String) -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                Image(systemName: "arrow.left.arrow.right").font(.caption2).foregroundStyle(.tertiary)
                 ForEach(options) { option in
-                    Button {
-                        viewModel.selectSubstitute(groupId, option.id)
-                    } label: {
+                    Button { onSelect(option.id) } label: {
                         Text(option.name)
-                            .font(.subheadline)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(option.id == selectedId ? Color.accentColor : Color(.secondarySystemBackground))
-                            .foregroundStyle(option.id == selectedId ? Color.white : Color.primary)
+                            .font(.caption).fontWeight(.medium)
+                            .padding(.horizontal, 12).padding(.vertical, 5)
+                            .background(option.isSelected ? Color.accentColor : Color(.secondarySystemBackground))
+                            .foregroundStyle(option.isSelected ? Color.white : Color.primary)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
+            .padding(.leading, 38).padding(.trailing, 16).padding(.bottom, 6)
         }
     }
 }
@@ -728,13 +816,24 @@ private struct SubstituteSelector: View {
 private struct VisibilityChip: View {
     @Bindable var viewModel: RecipeDetailViewModel
     @State private var showChooser = false
+    @State private var showRecipients = false
 
     private var tier: String { viewModel.recipe.visibility }
     private var label: String {
-        switch tier { case "public": return "Public"; case "friends": return "Co-Chefs"; default: return "Private" }
+        switch tier {
+        case "public": return "Public"
+        case "friends": return "Co-Chefs"
+        case "shared": return "Specific people"
+        default: return "Private"
+        }
     }
     private var icon: String {
-        switch tier { case "public": return "globe"; case "friends": return "person.2"; default: return "lock" }
+        switch tier {
+        case "public": return "globe"
+        case "friends": return "person.2"
+        case "shared": return "person.crop.circle.badge.checkmark"
+        default: return "lock"
+        }
     }
     private var isShared: Bool { tier != "private" }
 
@@ -750,12 +849,78 @@ private struct VisibilityChip: View {
         .buttonStyle(.plain)
         .confirmationDialog("Who can see this recipe?", isPresented: $showChooser, titleVisibility: .visible) {
             Button("🔒 Private") { viewModel.setVisibility("private") }
+            Button("👤 Specific people") { viewModel.loadSharedRecipients(); showRecipients = true }
             Button("👥 Co-Chefs only") { viewModel.setVisibility("friends") }
             Button("🌐 Public (anyone with the link)") { viewModel.setVisibility("public") }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Private: only you. Co-Chefs: people you follow each other with. Public: anyone with the link.")
+            Text("Private: only you. Specific people: only the people you pick. Co-Chefs: people you follow each other with. Public: anyone with the link.")
         }
+        .sheet(isPresented: $showRecipients) {
+            RecipientsSheet(viewModel: viewModel)
+        }
+    }
+}
+
+// MARK: - Recipients sheet (F17 — share with specific people)
+
+private struct RecipientsSheet: View {
+    @Bindable var viewModel: RecipeDetailViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var results: [UserProfile] = []
+    @State private var searchTask: Task<Void, Never>?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Shared with") {
+                    if viewModel.sharedRecipients.isEmpty {
+                        Text("No one yet — search below to add people.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(viewModel.sharedRecipients) { person in
+                            HStack {
+                                Text(person.displayName)
+                                Spacer()
+                                Button(role: .destructive) { viewModel.removeSharedRecipient(person.uid) } label: {
+                                    Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                if !results.isEmpty {
+                    Section("Results") {
+                        ForEach(results.filter { r in !viewModel.sharedRecipients.contains { $0.uid == r.uid } }) { person in
+                            Button { viewModel.addSharedRecipient(person); query = ""; results = [] } label: {
+                                HStack {
+                                    Text(person.displayName).foregroundStyle(.primary)
+                                    Spacer()
+                                    Image(systemName: "plus.circle.fill").foregroundStyle(Color.accentColor)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "Add by name or email")
+            .onChange(of: query) { _, q in
+                searchTask?.cancel()
+                let trimmed = q.trimmingCharacters(in: .whitespaces)
+                guard trimmed.count >= 2 else { results = []; return }
+                searchTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    if Task.isCancelled { return }
+                    results = await viewModel.searchUsers(trimmed)
+                }
+            }
+            .navigationTitle("Specific people")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .onAppear { viewModel.loadSharedRecipients() }
     }
 }
 

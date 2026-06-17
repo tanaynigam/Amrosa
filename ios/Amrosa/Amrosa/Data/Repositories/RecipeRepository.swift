@@ -562,6 +562,7 @@ final class RecipeRepository {
                     existing.quantityValueMax = edIng.quantityValueMax
                     existing.quantityValueMaxMetric = edIng.quantityValueMaxMetric
                     existing.quantityValueMaxImperial = edIng.quantityValueMaxImperial
+                    existing.substituteGroupId = edIng.substituteGroupId
                 } else {
                     let ing = IngredientModel(
                         id: edIng.id,
@@ -571,6 +572,7 @@ final class RecipeRepository {
                         quantityDisplay: edIng.quantityDisplay.isEmpty ? nil : edIng.quantityDisplay,
                         groupLabel: edIng.groupLabel.isEmpty ? nil : edIng.groupLabel,
                         isOptional: edIng.isOptional,
+                        substituteGroupId: edIng.substituteGroupId,
                         orderIndex: idx,
                         quantityValueMetric: edIng.quantityValueMetric,
                         quantityUnitMetric: edIng.quantityUnitMetric,
@@ -656,6 +658,7 @@ final class RecipeRepository {
             if let v = data["isImported"] as? Bool { existing.isImported = v }
             if let v = data["version"] as? Int { existing.version = v }
             if let v = data["visibility"] as? String { existing.visibility = v }
+            existing.sharedWith = (data["sharedWith"] as? [String]) ?? []   // F17
             existing.parentRecipeId = data["parentRecipeId"] as? String   // F10: preserve grouping
             existing.variantName = data["variantName"] as? String
             // Refresh tags / source URLs (the metadata block above doesn't cover them).
@@ -688,6 +691,7 @@ final class RecipeRepository {
             // F10: preserve variation grouping on multi-device personal pull
             recipe.parentRecipeId = data["parentRecipeId"] as? String
             recipe.variantName = data["variantName"] as? String
+            recipe.sharedWith = (data["sharedWith"] as? [String]) ?? []   // F17
             try context.save()
             return
         }
@@ -712,6 +716,16 @@ final class RecipeRepository {
     func updateVisibility(recipeId: String, visibility: String) throws {
         guard let recipe = try fetchRecipe(id: recipeId) else { return }
         recipe.visibility = visibility
+        if visibility == "private" { recipe.sharedWith = [] }   // F17: clear ACL when going private
+        recipe.updatedAt = Date()
+        try context.save()
+    }
+
+    /// F17: set the "shared" tier with an explicit recipient list (per-recipient ACL).
+    func updateSharedRecipients(recipeId: String, sharedWith: [String]) throws {
+        guard let recipe = try fetchRecipe(id: recipeId) else { return }
+        recipe.visibility = sharedWith.isEmpty ? "private" : "shared"
+        recipe.sharedWith = sharedWith
         recipe.updatedAt = Date()
         try context.save()
     }

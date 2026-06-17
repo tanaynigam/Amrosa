@@ -78,17 +78,27 @@ extension RecipeDetailViewModel {
         return DisplayIngredient(
             id: ing.id, sectionId: nil, name: ing.name,
             scaledQuantity: scaled, isOptional: ing.isOptional, isOptionalEnabled: false,
-            shoppingNote: ing.shoppingNote.trimmed.isEmpty ? nil : ing.shoppingNote
+            shoppingNote: ing.shoppingNote.trimmed.isEmpty ? nil : ing.shoppingNote,
+            substituteGroupId: nil, substituteOptions: []   // substitutes edited via the sheet, not chips
         )
     }
 
     private func displayViewIngredient(_ ing: IngredientModel) -> DisplayIngredient {
-        DisplayIngredient(
+        // Inline swap chips for a substitute group (the row IS the selected member).
+        var chips: [DisplaySubstituteChip] = []
+        if let gid = ing.substituteGroupId {
+            let members = recipe.ingredients.filter { $0.substituteGroupId == gid }.sorted { $0.orderIndex < $1.orderIndex }
+            if members.count > 1 {
+                chips = members.map { DisplaySubstituteChip(id: $0.id, name: $0.name, isSelected: $0.id == ing.id) }
+            }
+        }
+        return DisplayIngredient(
             id: ing.id, sectionId: ing.section?.id, name: ing.name,
             scaledQuantity: QuantityScaler.scale(ingredient: ing, scaleFactor: effScale, unitMode: effUnit),
             isOptional: ing.isOptional,
             isOptionalEnabled: enabledOptionals.contains(ing.id),
-            shoppingNote: ing.shoppingNote?.trimmed.isEmpty == false ? ing.shoppingNote : nil
+            shoppingNote: ing.shoppingNote?.trimmed.isEmpty == false ? ing.shoppingNote : nil,
+            substituteGroupId: ing.substituteGroupId, substituteOptions: chips
         )
     }
 
@@ -110,8 +120,28 @@ extension RecipeDetailViewModel {
         return result
     }
 
-    /// Ingredient blocks for the body. Mirrors the read-only grouping in BOTH modes (empty sections
-    /// hidden, sub-header only when multi-section) so flipping into edit doesn't reflow the layout.
+    private func groupView(_ ings: [IngredientModel]) -> [DisplayIngredientGroup] {
+        guard !ings.isEmpty else { return [] }
+        var result: [DisplayIngredientGroup] = []
+        let ungrouped = ings.filter { ($0.groupLabel ?? "").isEmpty }
+        if !ungrouped.isEmpty {
+            result.append(DisplayIngredientGroup(id: "__ungrouped__", label: "", items: ungrouped.map(displayViewIngredient)))
+        }
+        var seen = Set<String>()
+        for ing in ings {
+            guard let label = ing.groupLabel, !label.isEmpty, !seen.contains(label) else { continue }
+            seen.insert(label)
+            result.append(DisplayIngredientGroup(id: label, label: label,
+                items: ings.filter { $0.groupLabel == label }.map(displayViewIngredient)))
+        }
+        return result
+    }
+
+    /// Ingredient blocks for the body.
+    /// - Edit mode: every draft section's ingredients (no optional filtering / chips — optionals are
+    ///   plain editable rows). Empty sections hidden so the layout matches view mode.
+    /// - View mode: built per section so the **optional chip row shows even when every optional is
+    ///   currently hidden**; non-included optionals are dropped from the list (opt-in model).
     var displayIngredientBlocks: [DisplayIngredientBlock] {
         if isEditMode {
             let multi = !editIsSingleUnnamed && editSections.count > 1
@@ -119,19 +149,40 @@ extension RecipeDetailViewModel {
                 let groups = groupEdit(sec.ingredients)
                 guard !groups.isEmpty else { return nil }
                 return DisplayIngredientBlock(id: sec.id, sectionId: sec.id,
-                    title: multi ? (sec.name.isEmpty ? "Section" : sec.name) : nil, groups: groups)
+                    title: multi ? (sec.name.isEmpty ? "Section" : sec.name) : nil,
+                    optionalChips: [], groups: groups)
             }
         }
-        return ingredientSectionBlocks.map { block in
-            DisplayIngredientBlock(
-                id: block.id,
-                sectionId: block.id == "__other__" ? nil : block.id,
-                title: block.title,
-                groups: block.groups.map { g in
-                    DisplayIngredientGroup(id: g.label.isEmpty ? "__ungrouped__" : g.label, label: g.label,
-                        items: g.ingredients.map(displayViewIngredient))
-                })
+
+        let visible = visibleIngredients
+        let multiSection = sortedSections.count > 1
+        let hasSectionless = recipe.ingredients.contains { $0.section == nil }
+        var blocks: [DisplayIngredientBlock] = []
+
+        func chips(_ sectionId: String?) -> [DisplayOptionalChip] {
+            optionalChips(forSectionId: sectionId).map {
+                DisplayOptionalChip(id: $0.id, name: $0.name, isEnabled: enabledOptionals.contains($0.id))
+            }
         }
+
+        for section in sortedSections {
+            let groups = groupView(visible.filter { $0.section?.id == section.id })
+            let sectionChips = chips(section.id)
+            guard !groups.isEmpty || !sectionChips.isEmpty else { continue }
+            blocks.append(DisplayIngredientBlock(
+                id: section.id, sectionId: section.id,
+                title: (multiSection || hasSectionless) ? section.name : nil,
+                optionalChips: sectionChips, groups: groups))
+        }
+        let otherGroups = groupView(visible.filter { $0.section == nil })
+        let otherChips = chips(nil)
+        if !otherGroups.isEmpty || !otherChips.isEmpty {
+            blocks.append(DisplayIngredientBlock(
+                id: "__other__", sectionId: nil,
+                title: blocks.isEmpty ? nil : "Other",
+                optionalChips: otherChips, groups: otherGroups))
+        }
+        return blocks
     }
 
     // ── Steps ──
@@ -153,11 +204,31 @@ extension RecipeDetailViewModel {
         let steps = recipe.steps.filter { $0.section?.id == sectionId }.sorted { $0.orderIndex < $1.orderIndex }
         return steps.enumerated().map { idx, step in
             DisplayStep(id: step.id, number: idx + 1, instruction: step.instruction,
-                refs: step.ingredientRefs.compactMap { ref in
-                    guard let ing = ref.ingredient else { return nil }
-                    let disp = ref.quantityDisplay ?? ing.quantityDisplay ?? ""
-                    return DisplayStepRef(id: ing.id, text: "\(disp) \(ing.name)".trimmed)
-                })
+                refs: resolvedStepRefs(step))
         }
+    }
+
+    /// Step ingredient refs resolved for display: a ref to any substitute-group member shows the
+    /// **selected** member (one row per group), and disabled optionals are dropped — so a step that
+    /// "uses Butter" shows "Ghee" when chosen, and never goes blank. Mirrors Android `visibleStepRefs`.
+    private func resolvedStepRefs(_ step: StepModel) -> [DisplayStepRef] {
+        var seenGroups = Set<String>()
+        var out: [DisplayStepRef] = []
+        for ref in step.ingredientRefs {
+            guard let ing = ref.ingredient else { continue }
+            let resolved: IngredientModel
+            if let gid = ing.substituteGroupId {
+                if !seenGroups.insert(gid).inserted { continue }   // one row per group
+                let selectedId = selectedSubstitutes[gid]
+                    ?? recipe.ingredients.first { $0.substituteGroupId == gid }?.id
+                resolved = recipe.ingredients.first { $0.id == selectedId } ?? ing
+            } else {
+                resolved = ing
+            }
+            if resolved.isOptional && !enabledOptionals.contains(resolved.id) { continue }
+            let disp = (ing.substituteGroupId == nil ? ref.quantityDisplay : nil) ?? resolved.quantityDisplay ?? ""
+            out.append(DisplayStepRef(id: resolved.id, text: "\(disp) \(resolved.name)".trimmed))
+        }
+        return out
     }
 }
