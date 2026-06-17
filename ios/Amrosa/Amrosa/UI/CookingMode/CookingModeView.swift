@@ -7,6 +7,14 @@ struct CookingModeView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var currentStepIndex = 0
     @State private var didApplyStart = false
+    @State private var finishing = false   // true → play the "All done!" animation, then exit
+
+    private func goNext() {
+        if currentStepIndex < allSteps.count - 1 { currentStepIndex += 1 } else { finishing = true }
+    }
+    private func goPrev() {
+        if currentStepIndex > 0 { currentStepIndex -= 1 }
+    }
 
     private var allSteps: [StepModel] {
         viewModel.recipe.steps.sorted { $0.orderIndex < $1.orderIndex }
@@ -136,6 +144,17 @@ struct CookingModeView: View {
                             }
                         }
                         .padding(24)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        // Tap anywhere (not on a checkbox) advances; swipe ← next / → previous.
+                        .contentShape(Rectangle())
+                        .onTapGesture { goNext() }
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 24).onEnded { v in
+                                guard abs(v.translation.width) > abs(v.translation.height),
+                                      abs(v.translation.width) > 50 else { return }
+                                if v.translation.width < 0 { goNext() } else { goPrev() }
+                            }
+                        )
                     }
 
                     Spacer(minLength: 0)
@@ -143,9 +162,7 @@ struct CookingModeView: View {
 
                 // Navigation
                 HStack(spacing: 20) {
-                    Button {
-                        if currentStepIndex > 0 { currentStepIndex -= 1 }
-                    } label: {
+                    Button(action: goPrev) {
                         Image(systemName: "arrow.left")
                             .font(.title2)
                             .frame(maxWidth: .infinity)
@@ -155,10 +172,7 @@ struct CookingModeView: View {
                     .disabled(currentStepIndex == 0)
 
                     if currentStepIndex == allSteps.count - 1 {
-                        Button {
-                            viewModel.markCooked()   // F13: record for recency + "Recently cooked"
-                            dismiss()
-                        } label: {
+                        Button { finishing = true } label: {
                             Text("Done!")
                                 .font(.headline)
                                 .frame(maxWidth: .infinity)
@@ -166,9 +180,7 @@ struct CookingModeView: View {
                         }
                         .buttonStyle(.borderedProminent)
                     } else {
-                        Button {
-                            if currentStepIndex < allSteps.count - 1 { currentStepIndex += 1 }
-                        } label: {
+                        Button(action: goNext) {
                             Image(systemName: "arrow.right")
                                 .font(.title2)
                                 .frame(maxWidth: .infinity)
@@ -179,6 +191,11 @@ struct CookingModeView: View {
                 }
                 .padding()
                 .background(Color(.secondarySystemBackground))
+            }
+
+            // ── "All done!" finish animation, then mark cooked + exit ──
+            if finishing {
+                CookDoneOverlay { viewModel.markCooked(); dismiss() }
             }
         }
         .onAppear {
@@ -191,6 +208,33 @@ struct CookingModeView: View {
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
+        }
+    }
+}
+
+// MARK: - "All done!" finish overlay
+
+private struct CookDoneOverlay: View {
+    let onFinished: () -> Void
+    @State private var shown = false
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+            VStack(spacing: 16) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 110))
+                    .foregroundStyle(Color.accentColor)
+                    .scaleEffect(shown ? 1 : 0.3)
+                Text("All done!")
+                    .font(.title).fontWeight(.semibold)
+                    .foregroundStyle(.white)
+            }
+            .opacity(shown ? 1 : 0)
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.55)) { shown = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { onFinished() }
         }
     }
 }
