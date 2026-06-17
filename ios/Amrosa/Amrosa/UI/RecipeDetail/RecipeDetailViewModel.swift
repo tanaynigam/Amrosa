@@ -463,7 +463,6 @@ final class RecipeDetailViewModel {
             try? repository.updateVisibility(recipeId: recipe.id, visibility: "public")
             recipe.visibility = "public"    // update in-memory
             isPublishing = false
-            startCommentListener()
             openShareSheet()
         }
     }
@@ -478,11 +477,9 @@ final class RecipeDetailViewModel {
                 recipe.sharedWith = []
                 sharedRecipients = []
                 _ = await sharedRecipeService.unpublish(recipe.id)
-                stopCommentListener()
-                comments = []
+                // Notes are visibility-independent (F18) — keep the thread observed.
             } else {
                 _ = await sharedRecipeService.publish(recipe)
-                startCommentListener()
             }
         }
     }
@@ -509,10 +506,8 @@ final class RecipeDetailViewModel {
             recipe.visibility = uids.isEmpty ? "private" : "shared"
             if uids.isEmpty {
                 _ = await sharedRecipeService.unpublish(recipe.id)
-                stopCommentListener(); comments = []
             } else {
                 _ = await sharedRecipeService.publish(recipe)
-                startCommentListener()
             }
         }
     }
@@ -571,7 +566,6 @@ final class RecipeDetailViewModel {
         recipe.sharedWith = uids
         recipe.visibility = "shared"
         _ = await sharedRecipeService.publish(recipe)
-        startCommentListener()
     }
 
     private func shareToFollowerInternal(uid: String, name: String) async {
@@ -661,10 +655,16 @@ final class RecipeDetailViewModel {
         }
     }
 
-    // MARK: - Comments
+    // MARK: - Notes (F18 — one cloud thread on every recipe)
 
-    func startCommentListener() {
-        guard isPublic else { return }
+    /// Notes show on every real recipe (not a pending import). Visibility-independent.
+    var notesVisible: Bool { !recipe.needsReview }
+    var notesLocked: Bool = false
+
+    /// Start the notes thread for this recipe (every recipe, not just shared); record ownership so
+    /// the owner can moderate, and load the lock state.
+    func loadNotes() {
+        guard notesVisible else { return }
         commentListenerTask?.cancel()
         commentListenerTask = Task {
             for await batch in sharedRecipeService.commentsStream(recipeId: recipe.id) {
@@ -672,11 +672,25 @@ final class RecipeDetailViewModel {
                 comments = batch
             }
         }
+        Task {
+            if isOwner { await sharedRecipeService.ensureNotesParent(recipeId: recipe.id) }
+            notesLocked = await sharedRecipeService.getNotesLocked(recipeId: recipe.id)
+        }
     }
 
     func stopCommentListener() {
         commentListenerTask?.cancel()
         commentListenerTask = nil
+    }
+
+    /// Owner-only: freeze / unfreeze new notes on this recipe (existing notes are kept).
+    func toggleNotesLock() {
+        let locked = !notesLocked
+        notesLocked = locked   // optimistic
+        Task {
+            let ok = await sharedRecipeService.setNotesLocked(recipeId: recipe.id, locked: locked)
+            if !ok { notesLocked = !locked }   // revert on failure
+        }
     }
 
     func postComment() {
