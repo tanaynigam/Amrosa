@@ -393,6 +393,9 @@ private struct StepSheet: View {
                 }
                 .disabled(instruction.trimmed.isEmpty)
             } else if let e = existing {
+                let cur = viewModel.sectionId(ofStep: e.id) ?? sectionId
+                Button { viewModel.moveStep(in: cur, e.id, by: -1) } label: { Label("Move up", systemImage: "arrow.up") }
+                Button { viewModel.moveStep(in: cur, e.id, by: 1) } label: { Label("Move down", systemImage: "arrow.down") }
                 Button(role: .destructive) { viewModel.deleteStepAnywhere(e.id); dismiss() } label: {
                     Label("Delete step", systemImage: "trash")
                 }

@@ -158,6 +158,21 @@ extension RecipeDetailViewModel {
                 }
             }
         }
+        // F19: move the substitute to sit immediately after its target within that section, so the
+        // group reads together in the list.
+        guard let ts = editSections.firstIndex(where: { $0.ingredients.contains { $0.id == targetId } }) else { return }
+        var moved: EditorIngredient?
+        for s in editSections.indices {
+            if let ii = editSections[s].ingredients.firstIndex(where: { $0.id == ingredientId }) {
+                moved = editSections[s].ingredients.remove(at: ii); break
+            }
+        }
+        guard let item = moved else { return }
+        if let ti = editSections[ts].ingredients.firstIndex(where: { $0.id == targetId }) {
+            editSections[ts].ingredients.insert(item, at: ti + 1)
+        } else {
+            editSections[ts].ingredients.append(item)
+        }
     }
 
     // F21: section-agnostic ops — locate an item by id across all sections so changing its section
@@ -236,6 +251,15 @@ extension RecipeDetailViewModel {
         let j = i + delta
         guard editSections[s].ingredients.indices.contains(j) else { return }
         editSections[s].ingredients.swapAt(i, j)
+    }
+
+    /// Reorder a step within its section (Up/Down in the step sheet).
+    func moveStep(in sectionId: String, _ stepId: String, by delta: Int) {
+        guard let s = editSections.firstIndex(where: { $0.id == sectionId }),
+              let i = editSections[s].steps.firstIndex(where: { $0.id == stepId }) else { return }
+        let j = i + delta
+        guard editSections[s].steps.indices.contains(j) else { return }
+        editSections[s].steps.swapAt(i, j)
     }
 
     private func mutateIngredient(_ id: String, _ change: (inout EditorIngredient) -> Void) {
