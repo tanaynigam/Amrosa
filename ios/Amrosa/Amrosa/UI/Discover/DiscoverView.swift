@@ -372,9 +372,16 @@ private struct DiscoverCard: View {
                     .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
             }
             Spacer(minLength: 0)
-            if let src = sourceLabel {
-                Label(src, systemImage: recipe.source == .friend ? "person.2" : "globe")
-                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            HStack(spacing: 6) {
+                if let src = sourceLabel {
+                    Label(src, systemImage: recipe.source == .friend ? "person.2" : "globe")
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if recipe.likeCount > 0 {
+                    Label(recipe.likeCount.compactCount, systemImage: "heart.fill")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
             }
         }
         .padding(12)

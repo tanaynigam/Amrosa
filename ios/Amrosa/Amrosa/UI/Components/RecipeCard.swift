@@ -3,6 +3,8 @@ import SwiftUI
 struct RecipeCard: View {
     let recipe: RecipeModel
     var showNeedsReviewBanner: Bool = false
+    /// F20: published like count for this recipe (from `getAuthorLikeCounts`); shown when > 0.
+    var likeCount: Int = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -44,6 +46,12 @@ struct RecipeCard: View {
                         Label(recipe.displayYield, systemImage: "person.2")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+
+                        if likeCount > 0 {
+                            Label(likeCount.compactCount, systemImage: "heart.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .padding(.top, 2)
 

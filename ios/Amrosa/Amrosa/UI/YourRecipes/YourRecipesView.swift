@@ -54,7 +54,11 @@ struct YourRecipesView: View {
         }
         .onAppear {
             if viewModel == nil {
-                viewModel = YourRecipesViewModel(repository: container.recipeRepository)
+                viewModel = YourRecipesViewModel(
+                    repository: container.recipeRepository,
+                    sharedRecipeService: container.sharedRecipeService,
+                    authRepository: container.authRepository
+                )
             }
             viewModel?.load()
         }
@@ -185,7 +189,8 @@ private struct YourRecipesContent: View {
                                 if recipe.needsReview { onTapNeedsReview(recipe) }
                                 else { selectedRecipe = recipe }
                             } label: {
-                                RecipeCard(recipe: recipe, showNeedsReviewBanner: true)
+                                RecipeCard(recipe: recipe, showNeedsReviewBanner: true,
+                                           likeCount: viewModel.likeCounts[recipe.id] ?? 0)
                             }
                             .buttonStyle(.plain)
                             .padding(.horizontal, 16)
