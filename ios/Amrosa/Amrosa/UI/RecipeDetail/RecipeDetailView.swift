@@ -420,14 +420,20 @@ private struct RecipeDetailContent: View {
                 // (Substitutes are shown inline as swap chips under the ingredient — no "Options" section.)
 
                 // ── Ingredients ──
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
                     Text("Ingredients").font(.title2).fontWeight(.semibold)
                     Spacer()
+                    // Compact unit cycler — one chip that rotates Original → Metric → Imperial
+                    // (replaces the wide 3-segment toggle so this row isn't crowded).
                     if viewModel.hasConversionData {
-                        Picker("Units", selection: Binding(get: { viewModel.unitMode }, set: { viewModel.unitMode = $0 })) {
-                            ForEach(UnitMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        Button { viewModel.cycleUnitMode() } label: {
+                            Label(viewModel.unitMode.shortLabel, systemImage: "arrow.left.arrow.right")
+                                .font(.caption).fontWeight(.medium)
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Color(.secondarySystemBackground))
+                                .clipShape(Capsule())
                         }
-                        .pickerStyle(.segmented).frame(width: 170)
+                        .buttonStyle(.plain)
                     }
                     // Shopping list lives here now (moved off the title bar); hidden while editing.
                     if !editing {

@@ -207,6 +207,13 @@ final class RecipeDetailViewModel {
         recipe.ingredients.contains { $0.hasConversionData }
     }
 
+    /// Cycle Original → Metric → Imperial → Original (compact unit chip in the Ingredients header).
+    func cycleUnitMode() {
+        let all = UnitMode.allCases
+        let next = (all.firstIndex(of: unitMode).map { $0 + 1 } ?? 0) % all.count
+        unitMode = all[next]
+    }
+
     func scaledQuantity(for ingredient: IngredientModel) -> String {
         QuantityScaler.scale(ingredient: ingredient, scaleFactor: scaleFactor, unitMode: unitMode)
     }
