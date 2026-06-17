@@ -48,16 +48,16 @@ struct CookingModeView: View {
 
                     Spacer()
 
-                    // Unit toggle (shared with detail) — only when conversions exist
+                    // Unit cycler chip (matches the detail screen) — only when conversions exist
                     if viewModel.hasConversionData {
-                        Picker("Units", selection: Binding(
-                            get: { viewModel.unitMode },
-                            set: { viewModel.unitMode = $0 }
-                        )) {
-                            ForEach(UnitMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        Button { viewModel.cycleUnitMode() } label: {
+                            Label(viewModel.unitMode.shortLabel, systemImage: "arrow.left.arrow.right")
+                                .font(.caption).fontWeight(.medium)
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Color(.tertiarySystemBackground))
+                                .clipShape(Capsule())
                         }
-                        .pickerStyle(.segmented)
-                        .frame(width: 160)
+                        .buttonStyle(.plain)
                     }
 
                     // Section jump menu — only when >1 section has steps
@@ -193,9 +193,10 @@ struct CookingModeView: View {
                 .background(Color(.secondarySystemBackground))
             }
 
-            // ── "All done!" finish animation, then mark cooked + exit ──
+            // ── "All done!" page — its own page with a Back button (an accidental tap on the last
+            //    step no longer auto-exits) + a heart prompt for recipes you don't own. ──
             if finishing {
-                CookDoneOverlay { viewModel.markCooked(); dismiss() }
+                CookDonePage(viewModel: viewModel) { dismiss() }
             }
         }
         .onAppear {
@@ -212,29 +213,50 @@ struct CookingModeView: View {
     }
 }
 
-// MARK: - "All done!" finish overlay
+// MARK: - "All done!" page (its own page; Back button + heart prompt for non-owned recipes)
 
-private struct CookDoneOverlay: View {
-    let onFinished: () -> Void
+private struct CookDonePage: View {
+    @Bindable var viewModel: RecipeDetailViewModel
+    let onBack: () -> Void
     @State private var shown = false
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.55).ignoresSafeArea()
-            VStack(spacing: 16) {
+            Color(.systemBackground).ignoresSafeArea()
+            VStack(spacing: 20) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 110))
                     .foregroundStyle(Color.accentColor)
                     .scaleEffect(shown ? 1 : 0.3)
                 Text("All done!")
-                    .font(.title).fontWeight(.semibold)
-                    .foregroundStyle(.white)
+                    .font(.largeTitle).fontWeight(.bold)
+
+                // Heart prompt — only for recipes you don't own (F20).
+                if viewModel.canLike {
+                    VStack(spacing: 8) {
+                        Text("Enjoyed this recipe?").font(.subheadline).foregroundStyle(.secondary)
+                        Button { viewModel.toggleLike() } label: {
+                            Label(viewModel.isLiked ? "Liked" : "Like",
+                                  systemImage: viewModel.isLiked ? "heart.fill" : "heart")
+                                .font(.subheadline).fontWeight(.medium)
+                                .foregroundStyle(viewModel.isLiked ? Color.red : Color.accentColor)
+                                .padding(.horizontal, 18).padding(.vertical, 10)
+                                .overlay(Capsule().stroke(Color.accentColor.opacity(0.4)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.top, 8)
+                }
+
+                Button("Back to recipe", action: onBack)
+                    .buttonStyle(.borderedProminent)
+                    .padding(.top, 12)
             }
             .opacity(shown ? 1 : 0)
         }
         .onAppear {
             withAnimation(.spring(response: 0.45, dampingFraction: 0.55)) { shown = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { onFinished() }
+            viewModel.markCooked()   // record once on reaching the done page
         }
     }
 }

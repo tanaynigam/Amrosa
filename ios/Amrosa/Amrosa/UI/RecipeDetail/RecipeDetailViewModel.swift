@@ -41,6 +41,10 @@ final class RecipeDetailViewModel {
     var newCommentText = ""
     var commentListenerTask: Task<Void, Never>? = nil
 
+    // F20 — likes on non-owned recipes (you can't like your own / your imports).
+    var likeState = SharedRecipeService.LikeState()
+    private var likeListenerTask: Task<Void, Never>? = nil
+
     // Variations (F10)
     static let maxVariants = 4
     static let maxVariantNameLen = 20
@@ -653,6 +657,34 @@ final class RecipeDetailViewModel {
                 Task { await syncService?.pushPersonalRecipe(model) }
             }
         }
+    }
+
+    // MARK: - Likes (F20)
+
+    /// You can like any recipe you don't own (received, or someone else's). Your own recipes and
+    /// your imports live in "My Recipes" and aren't likeable (the count is read-only there).
+    var canLike: Bool {
+        guard let uid = authRepository.uid, let authorId = recipe.authorId else { return false }
+        return authorId != uid
+    }
+    var isLiked: Bool { likeState.isLiked }
+    var likeCount: Int { likeState.likeCount }
+
+    /// Observe the live like state for this recipe's mirror (count shows even when you can't like).
+    func loadLikes() {
+        likeListenerTask?.cancel()
+        likeListenerTask = Task {
+            for await ls in sharedRecipeService.likeStateStream(recipeId: recipe.id) {
+                guard !Task.isCancelled else { break }
+                likeState = ls
+            }
+        }
+    }
+
+    func toggleLike() {
+        guard canLike else { return }
+        let nowLiked = !likeState.isLiked
+        Task { await sharedRecipeService.setLiked(recipeId: recipe.id, liked: nowLiked) }
     }
 
     // MARK: - Notes (F18 — one cloud thread on every recipe)

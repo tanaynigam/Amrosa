@@ -169,6 +169,7 @@ struct RecipeDetailView: View {
                 userPreferences: container.userPreferences
             )
             viewModel?.loadNotes()
+            viewModel?.loadLikes()
             viewModel?.loadVariants()
         } else {
             viewModel?.reload()
@@ -372,6 +373,19 @@ private struct RecipeDetailContent: View {
                             .buttonStyle(.plain).foregroundStyle(Color.accentColor)
                         }
                     }
+                    .padding(.horizontal, 16).padding(.top, 8)
+                } else if viewModel.canLike {
+                    // F20: heart + count for a recipe you don't own (e.g. received).
+                    Button { viewModel.toggleLike() } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: viewModel.isLiked ? "heart.fill" : "heart")
+                                .foregroundStyle(viewModel.isLiked ? Color.red : Color.secondary)
+                            if viewModel.likeCount > 0 {
+                                Text(viewModel.likeCount.compactCount).font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
                     .padding(.horizontal, 16).padding(.top, 8)
                 }
 
