@@ -670,19 +670,27 @@ class RecipeDetailViewModel(
         editSharedWith = recipe.sharedWith
         editParentRecipeId = recipe.parentRecipeId
 
-        val sections = if (recipe.sections.isEmpty()) {
+        // Normalize sections: there is always ≥1 section, and every ingredient/step belongs to a
+        // real one. Imported recipes often have steps in a "Main" section but ingredients with a
+        // null section — those orphans get assigned to the first section here (and stamped with a
+        // real sectionId on save), so steps & ingredients always share the same section set.
+        val sortedSections = recipe.sections.sortedBy { it.orderIndex }
+        val sections = if (sortedSections.isEmpty()) {
             listOf(EditorSection(
                 id = "sec-default-${UUID.randomUUID()}", name = "",
                 ingredients = recipe.ingredients.sortedBy { it.orderIndex }.map { it.toEditor() },
                 steps = recipe.steps.sortedBy { it.orderIndex }.map { it.toEditor() }
             ))
         } else {
-            recipe.sections.sortedBy { it.orderIndex }.map { section ->
+            val knownIds = sortedSections.map { it.id }.toSet()
+            val firstId = sortedSections.first().id
+            fun effId(sid: String?) = if (sid != null && sid in knownIds) sid else firstId
+            sortedSections.map { section ->
                 EditorSection(
                     id = section.id, name = section.name,
-                    ingredients = recipe.ingredients.filter { it.sectionId == section.id }
+                    ingredients = recipe.ingredients.filter { effId(it.sectionId) == section.id }
                         .sortedBy { it.orderIndex }.map { it.toEditor() },
-                    steps = recipe.steps.filter { it.sectionId == section.id }
+                    steps = recipe.steps.filter { effId(it.sectionId) == section.id }
                         .sortedBy { it.orderIndex }.map { it.toEditor() }
                 )
             }
@@ -739,6 +747,9 @@ class RecipeDetailViewModel(
     fun addSection() = updateDraft { it.copy(sections = it.sections + EditorSection(name = "New Section")) }
     /** Add a section with a given name (used by the section edit sheet's "Add"). */
     fun addSection(name: String) = updateDraft { it.copy(sections = it.sections + EditorSection(name = name.trim().ifBlank { "New Section" })) }
+    /** Add a section with a caller-chosen id (so the edit sheets can immediately target it). */
+    fun addSectionWithId(id: String, name: String) =
+        updateDraft { it.copy(sections = it.sections + EditorSection(id = id, name = name.trim().ifBlank { "New Section" })) }
     fun updateSectionName(sectionId: String, name: String) = transformSection(sectionId) { it.copy(name = name) }
     fun deleteSection(sectionId: String) = updateDraft { d ->
         val section = d.sections.find { it.id == sectionId } ?: return@updateDraft d
@@ -774,14 +785,32 @@ class RecipeDetailViewModel(
     fun moveIngredientUp(sectionId: String, id: String) = transformSection(sectionId) { it.copy(ingredients = it.ingredients.moved(id, { i -> i.id }, -1)) }
     fun moveIngredientDown(sectionId: String, id: String) = transformSection(sectionId) { it.copy(ingredients = it.ingredients.moved(id, { i -> i.id }, +1)) }
 
-    /** Drag-reorder: move ingredient [fromId] to the position of [toId] within its section. */
+    /**
+     * Drag-reorder ingredient [fromId] to [toId]'s position. If they're in different sections the
+     * ingredient is **reassigned** to the target's section (drag across sections = move).
+     */
     fun reorderIngredient(fromId: String, toId: String) {
         if (fromId == toId) return
         updateDraft { d ->
-            d.copy(sections = d.sections.map { s ->
-                if (s.ingredients.none { it.id == fromId } || s.ingredients.none { it.id == toId }) s
-                else s.copy(ingredients = s.ingredients.movedTo(fromId, toId) { it.id })
-            })
+            val fromSec = d.sections.firstOrNull { s -> s.ingredients.any { it.id == fromId } } ?: return@updateDraft d
+            val toSec = d.sections.firstOrNull { s -> s.ingredients.any { it.id == toId } } ?: return@updateDraft d
+            if (fromSec.id == toSec.id) {
+                d.copy(sections = d.sections.map { s ->
+                    if (s.id == fromSec.id) s.copy(ingredients = s.ingredients.movedTo(fromId, toId) { it.id }) else s
+                })
+            } else {
+                val moving = fromSec.ingredients.first { it.id == fromId }
+                d.copy(sections = d.sections.map { s ->
+                    when (s.id) {
+                        fromSec.id -> s.copy(ingredients = s.ingredients.filterNot { it.id == fromId })
+                        toSec.id -> {
+                            val at = s.ingredients.indexOfFirst { it.id == toId }.coerceAtLeast(0)
+                            s.copy(ingredients = s.ingredients.toMutableList().also { it.add(at, moving) })
+                        }
+                        else -> s
+                    }
+                })
+            }
         }
     }
 
@@ -798,15 +827,96 @@ class RecipeDetailViewModel(
         if (isIngredient) reorderIngredient(from, to) else reorderStep(from, to)
     }
 
-    /** Drag-reorder: move step [fromId] to the position of [toId] within its section. */
+    /** Drag-reorder step [fromId] to [toId]'s position; cross-section drag reassigns the section. */
     fun reorderStep(fromId: String, toId: String) {
         if (fromId == toId) return
         updateDraft { d ->
-            d.copy(sections = d.sections.map { s ->
-                if (s.steps.none { it.id == fromId } || s.steps.none { it.id == toId }) s
-                else s.copy(steps = s.steps.movedTo(fromId, toId) { it.id })
-            })
+            val fromSec = d.sections.firstOrNull { s -> s.steps.any { it.id == fromId } } ?: return@updateDraft d
+            val toSec = d.sections.firstOrNull { s -> s.steps.any { it.id == toId } } ?: return@updateDraft d
+            if (fromSec.id == toSec.id) {
+                d.copy(sections = d.sections.map { s ->
+                    if (s.id == fromSec.id) s.copy(steps = s.steps.movedTo(fromId, toId) { it.id }) else s
+                })
+            } else {
+                val moving = fromSec.steps.first { it.id == fromId }
+                d.copy(sections = d.sections.map { s ->
+                    when (s.id) {
+                        fromSec.id -> s.copy(steps = s.steps.filterNot { it.id == fromId })
+                        toSec.id -> {
+                            val at = s.steps.indexOfFirst { it.id == toId }.coerceAtLeast(0)
+                            s.copy(steps = s.steps.toMutableList().also { it.add(at, moving) })
+                        }
+                        else -> s
+                    }
+                })
+            }
         }
+    }
+
+    // ── Section assignment (edit sheets) + section-agnostic edits ──────────────────
+    // The edit sheets locate items by id across all sections (so changing an item's section
+    // mid-edit doesn't break the open sheet), and use these to mutate.
+
+    /** Which section currently holds this ingredient (for the sheet's section selector). */
+    fun sectionIdOfIngredient(id: String): String? =
+        _uiState.value.draft?.sections?.firstOrNull { s -> s.ingredients.any { it.id == id } }?.id
+    fun sectionIdOfStep(id: String): String? =
+        _uiState.value.draft?.sections?.firstOrNull { s -> s.steps.any { it.id == id } }?.id
+
+    fun moveIngredientToSection(ingredientId: String, targetSectionId: String) = updateDraft { d ->
+        val moving = d.sections.flatMap { it.ingredients }.find { it.id == ingredientId } ?: return@updateDraft d
+        if (d.sections.firstOrNull { it.ingredients.any { i -> i.id == ingredientId } }?.id == targetSectionId) return@updateDraft d
+        d.copy(sections = d.sections.map { s ->
+            if (s.id == targetSectionId) s.copy(ingredients = s.ingredients + moving)
+            else s.copy(ingredients = s.ingredients.filterNot { it.id == ingredientId })
+        })
+    }
+    fun moveStepToSection(stepId: String, targetSectionId: String) = updateDraft { d ->
+        val moving = d.sections.flatMap { it.steps }.find { it.id == stepId } ?: return@updateDraft d
+        if (d.sections.firstOrNull { it.steps.any { s2 -> s2.id == stepId } }?.id == targetSectionId) return@updateDraft d
+        d.copy(sections = d.sections.map { s ->
+            if (s.id == targetSectionId) s.copy(steps = s.steps + moving)
+            else s.copy(steps = s.steps.filterNot { it.id == stepId })
+        })
+    }
+    /** Create a new section (named) and move the item into it. */
+    fun moveIngredientToNewSection(ingredientId: String, name: String) {
+        val id = "sec-new-${UUID.randomUUID()}"
+        updateDraft { d -> d.copy(sections = d.sections + EditorSection(id = id, name = name.trim().ifBlank { "New Section" })) }
+        moveIngredientToSection(ingredientId, id)
+    }
+    fun moveStepToNewSection(stepId: String, name: String) {
+        val id = "sec-new-${UUID.randomUUID()}"
+        updateDraft { d -> d.copy(sections = d.sections + EditorSection(id = id, name = name.trim().ifBlank { "New Section" })) }
+        moveStepToSection(stepId, id)
+    }
+
+    fun updateIngredientAnywhere(updated: EditorIngredient) = updateDraft { d ->
+        d.copy(sections = d.sections.map { s -> s.copy(ingredients = s.ingredients.map { if (it.id == updated.id) updated else it }) })
+    }
+    fun deleteIngredientAnywhere(id: String) = updateDraft { d ->
+        d.copy(
+            sections = d.sections.map { s -> s.copy(
+                ingredients = s.ingredients.filterNot { it.id == id },
+                steps = s.steps.map { st -> st.copy(ingredientIds = st.ingredientIds - id) },
+            ) },
+            deletedIngredientIds = d.deletedIngredientIds + id,
+        )
+    }
+    fun updateStepAnywhere(updated: EditorStep) = updateDraft { d ->
+        d.copy(sections = d.sections.map { s -> s.copy(steps = s.steps.map { if (it.id == updated.id) updated else it }) })
+    }
+    fun deleteStepAnywhere(id: String) = updateDraft { d ->
+        d.copy(
+            sections = d.sections.map { s -> s.copy(steps = s.steps.filterNot { it.id == id }) },
+            deletedStepIds = d.deletedStepIds + id,
+        )
+    }
+    fun toggleStepIngredientAnywhere(stepId: String, ingredientId: String) = updateDraft { d ->
+        d.copy(sections = d.sections.map { s -> s.copy(steps = s.steps.map { st ->
+            if (st.id != stepId) st
+            else st.copy(ingredientIds = if (ingredientId in st.ingredientIds) st.ingredientIds - ingredientId else st.ingredientIds + ingredientId)
+        }) })
     }
 
     // Steps

@@ -40,6 +40,7 @@ import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.domain.model.*
 import com.aerion.amrosa.ui.util.QuantityScaler
 import com.aerion.amrosa.ui.util.UnitMode
+import com.aerion.amrosa.ui.util.compactCount
 import com.aerion.amrosa.ui.util.editable
 import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
@@ -551,6 +552,28 @@ fun RecipeDetailScreen(
                                 ) {
                                     Icon(Icons.Default.Share, contentDescription = "Share recipe")
                                 }
+                            }
+                        }
+                    }
+                    // Non-owner: heart + like count (recipes you don't own, e.g. received).
+                    if (!state.isOwner && (state.canLike || state.likeCount > 0)) {
+                        Spacer(Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (state.canLike) {
+                                FilledTonalButton(onClick = { viewModel.toggleLike() }) {
+                                    Icon(
+                                        if (state.isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = null, modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(compactCount(state.likeCount))
+                                }
+                            } else {
+                                Icon(Icons.Default.Favorite, contentDescription = "Likes",
+                                    modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.width(6.dp))
+                                Text(compactCount(state.likeCount), style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }

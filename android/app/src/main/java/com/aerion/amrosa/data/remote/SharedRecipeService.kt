@@ -206,6 +206,20 @@ class SharedRecipeService(
         }
     }
 
+    /** Like counts for the current user's own published recipes — id → likeCount. One query
+     *  (allowed by rules since each doc's authorId matches the requester). Best-effort. */
+    suspend fun getAuthorLikeCounts(uid: String): Map<String, Int> {
+        return try {
+            firestore.collection(COLLECTION_SHARED)
+                .whereEqualTo("authorId", uid)
+                .get().await()
+                .documents.associate { it.id to ((it.get("likeCount") as? Number)?.toInt() ?: 0) }
+        } catch (e: Exception) {
+            Log.e(TAG, "getAuthorLikeCounts failed", e)
+            emptyMap()
+        }
+    }
+
     // ─── Likes (Discover Phase 2) ─────────────────────────────────────────────
 
     data class LikeState(val isLiked: Boolean = false, val likeCount: Int = 0, val saveCount: Int = 0)

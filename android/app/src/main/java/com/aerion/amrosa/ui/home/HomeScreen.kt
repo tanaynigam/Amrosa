@@ -23,6 +23,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.data.RecipeSaveTracker
 import com.aerion.amrosa.domain.model.Recipe
+import com.aerion.amrosa.ui.util.compactCount
 import com.aerion.amrosa.domain.model.ReceivedRecipeSummary
 import com.aerion.amrosa.ui.components.AmrosaTopBar
 import java.text.SimpleDateFormat
@@ -43,6 +44,8 @@ fun HomeScreen(
         key = "home-${filter.name}",
         factory = HomeViewModel.factory(
             repository = app.container.repository,
+            sharedRecipeService = app.container.sharedRecipeService,
+            authRepository = app.container.authRepository,
             filter = filter
         )
     )
@@ -194,6 +197,7 @@ fun HomeScreen(
                                 RecipeCard(
                                     recipe = recipe,
                                     isUpdating = recipe.id in savingIds,
+                                    likeCount = state.likeCounts[recipe.id] ?: 0,
                                     onClick = {
                                         if (recipe.needsReview) onNeedsReviewClick(recipe.id)
                                         else onRecipeClick(recipe.id)
@@ -267,7 +271,7 @@ fun HomeScreen(
 // ── My Recipes card ───────────────────────────────────────────────────────────
 
 @Composable
-private fun RecipeCard(recipe: Recipe, isUpdating: Boolean = false, onClick: () -> Unit) {
+private fun RecipeCard(recipe: Recipe, isUpdating: Boolean = false, likeCount: Int = 0, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
@@ -320,6 +324,16 @@ private fun RecipeCard(recipe: Recipe, isUpdating: Boolean = false, onClick: () 
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(modifier = Modifier.width(3.dp))
                         Text(if (recipe.isImported) "Imported by me" else "me",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    // Like count — shown on every card (0 until someone hearts it).
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Favorite, contentDescription = "Likes",
+                            modifier = Modifier.size(12.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(compactCount(likeCount),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

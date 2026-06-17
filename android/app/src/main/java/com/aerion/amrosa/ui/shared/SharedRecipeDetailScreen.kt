@@ -322,8 +322,8 @@ fun SharedRecipeDetailScreen(
                 }
             }
 
-            // ── Like (heart) ──────────────────────────────────────────
-            if (state.canLike || state.likeCount > 0) {
+            // ── Like (heart) — always shown for shared recipes (toggle if you can like it). ──
+            run {
                 item {
                     Row(
                         modifier = Modifier.padding(horizontal = 8.dp),

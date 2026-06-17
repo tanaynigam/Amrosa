@@ -166,9 +166,13 @@ private fun SectionSheet(target: EditTarget.Section, draft: EditDraft, vm: Recip
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun IngredientSheet(target: EditTarget.Ingredient, draft: EditDraft, vm: RecipeDetailViewModel, onDismiss: () -> Unit) {
-    val section = draft.sections.find { it.id == target.sectionId }
-    val existing = section?.ingredients?.find { it.id == target.ingredientId }
+    // Locate by id across all sections (the item's section can change while the sheet is open).
+    val existing = draft.sections.flatMap { it.ingredients }.find { it.id == target.ingredientId }
     val base = existing ?: EditorIngredient()
+    // Which section this item lives in / will be added to.
+    var sectionId by remember(target) {
+        mutableStateOf(existing?.let { vm.sectionIdOfIngredient(it.id) } ?: target.sectionId)
+    }
 
     var name by remember(target) { mutableStateOf(base.name) }
     var qty by remember(target) { mutableStateOf(base.quantityValue?.let { plain(it) } ?: "") }
@@ -202,8 +206,8 @@ private fun IngredientSheet(target: EditTarget.Ingredient, draft: EditDraft, vm:
             shoppingNote = note,
         )
     }
-    // Live-update the row behind the sheet for existing ingredients.
-    fun push() { if (existing != null) vm.updateIngredient(target.sectionId, build()) }
+    // Live-update the row behind the sheet for existing ingredients (section-agnostic).
+    fun push() { if (existing != null) vm.updateIngredientAnywhere(build()) }
 
     SheetTitle(if (existing == null) "Add ingredient" else "Edit ingredient")
     OutlinedTextField(name, { name = it; push() }, label = { Text("Ingredient") },
@@ -254,6 +258,19 @@ private fun IngredientSheet(target: EditTarget.Ingredient, draft: EditDraft, vm:
     OutlinedTextField(note, { note = it; push() }, label = { Text("Shopping note (e.g. Amul)") },
         modifier = Modifier.fillMaxWidth(), singleLine = true)
 
+    // Section — move this ingredient between sections (or create one). Reflected in steps too,
+    // since sections are shared. For a new ingredient this picks where it lands.
+    SectionSelector(
+        sections = draft.sections,
+        currentId = sectionId,
+        onSelect = { id -> sectionId = id; if (existing != null) vm.moveIngredientToSection(existing.id, id) },
+        onCreate = { name ->
+            val id = "sec-new-${java.util.UUID.randomUUID()}"
+            vm.addSectionWithId(id, name); sectionId = id
+            if (existing != null) vm.moveIngredientToSection(existing.id, id)
+        },
+    )
+
     // ── Substitute linking — mark this as an alternative of another ingredient (they share a
     // group and offer a swap chip on the detail view). For a new ingredient the link is on Add. ──
     if (others.isNotEmpty()) {
@@ -282,7 +299,7 @@ private fun IngredientSheet(target: EditTarget.Ingredient, draft: EditDraft, vm:
 
     if (existing == null) {
         Button(onClick = {
-            vm.addIngredient(target.sectionId, build())
+            vm.addIngredient(sectionId, build())
             subTargetId?.let { vm.linkSubstitute(base.id, it) }
             onDismiss()
         },
@@ -291,25 +308,27 @@ private fun IngredientSheet(target: EditTarget.Ingredient, draft: EditDraft, vm:
         }
     } else {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { vm.moveIngredientUp(target.sectionId, existing.id) }, modifier = Modifier.weight(1f)) {
+            OutlinedButton(onClick = { vm.moveIngredientUp(sectionId, existing.id) }, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Default.KeyboardArrowUp, "Move up"); Text("Up")
             }
-            OutlinedButton(onClick = { vm.moveIngredientDown(target.sectionId, existing.id) }, modifier = Modifier.weight(1f)) {
+            OutlinedButton(onClick = { vm.moveIngredientDown(sectionId, existing.id) }, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Default.KeyboardArrowDown, "Move down"); Text("Down")
             }
         }
-        DeleteButton("Delete ingredient") { vm.deleteIngredient(target.sectionId, existing.id); onDismiss() }
+        DeleteButton("Delete ingredient") { vm.deleteIngredientAnywhere(existing.id); onDismiss() }
         DoneButton(onDismiss)
     }
 }
 
 // ── Step ──
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun StepSheet(target: EditTarget.Step, draft: EditDraft, vm: RecipeDetailViewModel, onDismiss: () -> Unit) {
-    val section = draft.sections.find { it.id == target.sectionId }
-    val existing = section?.steps?.find { it.id == target.stepId }
+    val existing = draft.sections.flatMap { it.steps }.find { it.id == target.stepId }
     val base = existing ?: EditorStep()
+    var sectionId by remember(target) {
+        mutableStateOf(existing?.let { vm.sectionIdOfStep(it.id) } ?: target.sectionId)
+    }
 
     var instruction by remember(target) { mutableStateOf(base.instruction) }
     // For a new step the chosen ingredient ids are held locally until "Add".
@@ -319,7 +338,7 @@ private fun StepSheet(target: EditTarget.Step, draft: EditDraft, vm: RecipeDetai
     SheetTitle(if (existing == null) "Add step" else "Edit step")
     OutlinedTextField(
         value = instruction,
-        onValueChange = { instruction = it; if (existing != null) vm.updateStep(target.sectionId, existing.copy(instruction = it, ingredientIds = ids.toList())) },
+        onValueChange = { instruction = it; if (existing != null) vm.updateStepAnywhere(existing.copy(instruction = it, ingredientIds = ids.toList())) },
         label = { Text("Instruction") }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 8,
     )
     if (allIngredients.isNotEmpty()) {
@@ -332,21 +351,74 @@ private fun StepSheet(target: EditTarget.Step, draft: EditDraft, vm: RecipeDetai
                     selected = selected,
                     onClick = {
                         ids = if (selected) ids - ing.id else ids + ing.id
-                        if (existing != null) vm.toggleStepIngredient(target.sectionId, existing.id, ing.id)
+                        if (existing != null) vm.toggleStepIngredientAnywhere(existing.id, ing.id)
                     },
                     label = { Text(ing.name, style = MaterialTheme.typography.labelMedium) },
                 )
             }
         }
     }
+
+    // Section — move this step between sections (or create one). Shared with ingredients.
+    SectionSelector(
+        sections = draft.sections,
+        currentId = sectionId,
+        onSelect = { id -> sectionId = id; if (existing != null) vm.moveStepToSection(existing.id, id) },
+        onCreate = { name ->
+            val id = "sec-new-${java.util.UUID.randomUUID()}"
+            vm.addSectionWithId(id, name); sectionId = id
+            if (existing != null) vm.moveStepToSection(existing.id, id)
+        },
+    )
+
     if (existing == null) {
-        Button(onClick = { vm.addStep(target.sectionId, base.copy(instruction = instruction, ingredientIds = ids.toList())); onDismiss() },
+        Button(onClick = { vm.addStep(sectionId, base.copy(instruction = instruction, ingredientIds = ids.toList())); onDismiss() },
             modifier = Modifier.fillMaxWidth(), enabled = instruction.isNotBlank()) {
             Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add step")
         }
     } else {
-        DeleteButton("Delete step") { vm.deleteStep(target.sectionId, existing.id); onDismiss() }
+        DeleteButton("Delete step") { vm.deleteStepAnywhere(existing.id); onDismiss() }
         DoneButton(onDismiss)
+    }
+}
+
+// ── Section selector — pick an existing section or create a new one. Shared by the ingredient
+//    and step sheets so sections stay consistent across both. A blank section name shows as "Main". ──
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SectionSelector(
+    sections: List<EditorSection>,
+    currentId: String?,
+    onSelect: (String) -> Unit,
+    onCreate: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var newMode by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
+    fun label(s: EditorSection) = s.name.ifBlank { "Main" }
+    val currentLabel = sections.firstOrNull { it.id == currentId }?.let { label(it) } ?: "Main"
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = currentLabel, onValueChange = {}, readOnly = true, label = { Text("Section") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(expanded, { expanded = false }) {
+            sections.forEach { s ->
+                DropdownMenuItem(text = { Text(label(s)) }, onClick = { expanded = false; onSelect(s.id) })
+            }
+            DropdownMenuItem(
+                text = { Text("＋ New section…") },
+                onClick = { expanded = false; newMode = true; newName = "" },
+            )
+        }
+    }
+    if (newMode) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(newName, { newName = it }, label = { Text("New section name") },
+                modifier = Modifier.weight(1f), singleLine = true)
+            Button(onClick = { onCreate(newName); newMode = false }, enabled = newName.isNotBlank()) { Text("Add") }
+        }
     }
 }
 

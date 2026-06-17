@@ -3,6 +3,8 @@ package com.aerion.amrosa.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.aerion.amrosa.data.auth.AuthRepository
+import com.aerion.amrosa.data.remote.SharedRecipeService
 import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.domain.model.Recipe
 import kotlinx.coroutines.flow.*
@@ -18,7 +20,9 @@ data class HomeUiState(
     val searchQuery: String = "",
     val selectedCategory: String? = null,
     val yourRecipesFilter: YourRecipesFilter = YourRecipesFilter.ALL,
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    /** Like counts for the user's own published recipes (id → count), shown on cards. */
+    val likeCounts: Map<String, Int> = emptyMap(),
 ) {
     val categories: List<String> get() =
         allRecipes.flatMap { it.tags }.distinct().sorted()
@@ -45,6 +49,8 @@ data class HomeUiState(
 
 class HomeViewModel(
     private val repository: RecipeRepository,
+    private val sharedRecipeService: SharedRecipeService,
+    private val authRepository: AuthRepository,
     private val filter: RecipeFilter = RecipeFilter.ALL
 ) : ViewModel() {
 
@@ -60,6 +66,13 @@ class HomeViewModel(
             }
             flow.collect { recipes ->
                 _uiState.update { it.copy(allRecipes = recipes, isLoading = false) }
+            }
+        }
+        // Like counts for the user's own published recipes, so cards can show a heart + count.
+        viewModelScope.launch {
+            authRepository.uid?.let { uid ->
+                val counts = sharedRecipeService.getAuthorLikeCounts(uid)
+                if (counts.isNotEmpty()) _uiState.update { it.copy(likeCounts = counts) }
             }
         }
     }
@@ -79,12 +92,14 @@ class HomeViewModel(
     companion object {
         fun factory(
             repository: RecipeRepository,
+            sharedRecipeService: SharedRecipeService,
+            authRepository: AuthRepository,
             filter: RecipeFilter = RecipeFilter.ALL
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    HomeViewModel(repository, filter) as T
+                    HomeViewModel(repository, sharedRecipeService, authRepository, filter) as T
             }
     }
 }
