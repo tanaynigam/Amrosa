@@ -89,6 +89,9 @@ dependencies {
     // Google Sign-In
     implementation(libs.play.services.auth)
 
+    // Drag-to-reorder lists (Compose)
+    implementation(libs.reorderable)
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

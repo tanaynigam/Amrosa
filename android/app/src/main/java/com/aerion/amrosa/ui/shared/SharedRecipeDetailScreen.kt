@@ -29,6 +29,7 @@ import com.aerion.amrosa.data.repository.RecipeRepository
 import com.aerion.amrosa.domain.model.*
 import com.aerion.amrosa.ui.util.QuantityScaler
 import com.aerion.amrosa.ui.util.UnitMode
+import com.aerion.amrosa.ui.util.compactCount
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -42,8 +43,13 @@ data class SharedDetailUiState(
     val selectedServings: Int = 0,
     val comments: List<Comment> = emptyList(),
     val isCopied: Boolean = false,
-    val currentUid: String? = null
+    val currentUid: String? = null,
+    val isLiked: Boolean = false,
+    val likeCount: Int = 0,
 ) {
+    /** Anyone signed in who isn't the author can heart a shared recipe. */
+    val canLike: Boolean get() = currentUid != null && recipe != null && currentUid != recipe.authorId
+
     val scaleFactor: Double get() {
         val recipe = recipe ?: return 1.0
         if (recipe.baseServings == 0) return 1.0
@@ -81,6 +87,20 @@ class SharedDetailViewModel(
                 _uiState.update { it.copy(comments = comments) }
             }
         }
+        viewModelScope.launch {
+            sharedRecipeService.likeStateFlow(recipeId).collect { ls ->
+                _uiState.update { it.copy(isLiked = ls.isLiked, likeCount = ls.likeCount) }
+            }
+        }
+    }
+
+    /** Heart / un-heart this recipe. No-op for the author (it's their own recipe). */
+    fun toggleLike() {
+        val s = _uiState.value
+        if (!s.canLike) return
+        val liked = !s.isLiked
+        _uiState.update { it.copy(isLiked = liked) }   // optimistic; the count flow corrects it
+        viewModelScope.launch { sharedRecipeService.setLiked(recipeId, liked) }
     }
 
     fun adjustServings(delta: Int) {
@@ -299,6 +319,39 @@ fun SharedRecipeDetailScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
+                }
+            }
+
+            // ── Like (heart) ──────────────────────────────────────────
+            if (state.canLike || state.likeCount > 0) {
+                item {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (state.canLike) {
+                            IconButton(onClick = viewModel::toggleLike) {
+                                Icon(
+                                    if (state.isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = if (state.isLiked) "Unlike" else "Like",
+                                    tint = if (state.isLiked) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
+                            Spacer(Modifier.width(12.dp))
+                            Icon(Icons.Default.Favorite, contentDescription = "Likes",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text(
+                            if (state.likeCount > 0) "${compactCount(state.likeCount)} ${if (state.likeCount == 1) "like" else "likes"}"
+                            else "Be the first to like",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 

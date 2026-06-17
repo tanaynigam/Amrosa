@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
+import com.aerion.amrosa.data.RecipeSaveTracker
 import com.aerion.amrosa.domain.model.Recipe
 import com.aerion.amrosa.domain.model.ReceivedRecipeSummary
 import com.aerion.amrosa.ui.components.AmrosaTopBar
@@ -46,6 +47,7 @@ fun HomeScreen(
         )
     )
     val state by viewModel.uiState.collectAsState()
+    val savingIds by RecipeSaveTracker.saving.collectAsState()
     var showAddSheet by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -191,6 +193,7 @@ fun HomeScreen(
                             items(state.filteredRecipes, key = { it.id }) { recipe ->
                                 RecipeCard(
                                     recipe = recipe,
+                                    isUpdating = recipe.id in savingIds,
                                     onClick = {
                                         if (recipe.needsReview) onNeedsReviewClick(recipe.id)
                                         else onRecipeClick(recipe.id)
@@ -264,7 +267,7 @@ fun HomeScreen(
 // ── My Recipes card ───────────────────────────────────────────────────────────
 
 @Composable
-private fun RecipeCard(recipe: Recipe, onClick: () -> Unit) {
+private fun RecipeCard(recipe: Recipe, isUpdating: Boolean = false, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
@@ -272,8 +275,15 @@ private fun RecipeCard(recipe: Recipe, onClick: () -> Unit) {
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(recipe.title, style = MaterialTheme.typography.titleLarge,
-                maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(recipe.title, style = MaterialTheme.typography.titleLarge,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                // Background-save indicator — the recipe just got an edit and is still persisting.
+                if (isUpdating) {
+                    Spacer(Modifier.width(8.dp))
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                }
+            }
             Spacer(modifier = Modifier.height(6.dp))
 
             val timeLabel = buildString {

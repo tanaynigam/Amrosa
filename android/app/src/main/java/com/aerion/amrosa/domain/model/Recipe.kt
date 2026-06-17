@@ -31,4 +31,5 @@ data class Recipe(
     val parentRecipeId: String? = null,     // null = base; else id of the base this varies
     val variantName: String? = null,        // e.g. "Spicy" — only set on variations
     val sharedWith: List<String> = emptyList(), // recipient UIDs when visibility == "shared"
+    val likeCount: Int = 0,                  // popularity (only populated for cloud-read shared recipes)
 )

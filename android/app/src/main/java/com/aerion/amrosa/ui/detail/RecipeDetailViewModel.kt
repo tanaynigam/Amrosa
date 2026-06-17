@@ -3,6 +3,7 @@ package com.aerion.amrosa.ui.detail
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.aerion.amrosa.data.RecipeSaveTracker
 import com.aerion.amrosa.data.UserPreferences
 import com.aerion.amrosa.data.auth.AuthRepository
 import com.aerion.amrosa.data.local.entity.*
@@ -63,6 +64,11 @@ data class RecipeDetailUiState(
     val isLoading: Boolean = true,
     // Ownership + visibility
     val isOwner: Boolean = false,
+    val currentUid: String? = null,
+    /** True while this recipe is persisting in the background (after the user left edit mode). */
+    val isSavingInBackground: Boolean = false,
+    /** Whether the current user has liked this (published) recipe. */
+    val isLiked: Boolean = false,
     // Notes — the community thread (populated when the recipe is shared). `notesLocked` = author
     // froze new notes. (Backed by the comments subcollection on the mirror.)
     val comments: List<Comment> = emptyList(),
@@ -112,6 +118,11 @@ data class RecipeDetailUiState(
 
     /** True when this is a received recipe (Tab 2) — read-only, "Remove" instead of edit/delete. */
     val isReceived: Boolean get() = recipe?.isReceived == true
+
+    /** A recipe can be hearted when it isn't the user's own (those live in "My Recipes"), the user
+     *  is signed in, and the recipe is mirrored to the cloud (so a like target exists). */
+    val canLike: Boolean get() =
+        recipe != null && currentUid != null && !isOwner && recipe.visibility != "private"
 
     val visibleIngredients: List<Ingredient> get() {
         val recipe = recipe ?: return emptyList()
@@ -215,6 +226,16 @@ class RecipeDetailViewModel(
         loadRecipe()
         observeNotes()
         observeRecipeChanges()
+        observeSaveStatus()
+    }
+
+    /** Reflect background-save status for this recipe so the screen can show a small spinner. */
+    private fun observeSaveStatus() {
+        viewModelScope.launch {
+            RecipeSaveTracker.saving.collect { ids ->
+                _uiState.update { it.copy(isSavingInBackground = recipeId in ids) }
+            }
+        }
     }
 
     /**
@@ -312,6 +333,7 @@ class RecipeDetailViewModel(
                         prev.enabledOptionals else initialOptionals,
                     isLoading = false,
                     isOwner = isOwner,
+                    currentUid = currentUid,
                     variants = variantRefs,
                     canAddVariant = canAdd
                 )
@@ -321,7 +343,8 @@ class RecipeDetailViewModel(
             // counts only when published. Record ownership on the notes doc so the owner can moderate.
             if (recipe != null && !recipe.needsReview) {
                 startObservingComments()
-                if (recipe.visibility == "friends" || recipe.visibility == "public") startObservingCounts()
+                // Counts + like-state exist for any cloud-mirrored tier (shared/friends/public).
+                if (recipe.visibility != "private") startObservingCounts()
                 if (isOwner) sharedRecipeService.ensureNotesParent(recipeId)
                 _uiState.update { it.copy(notesLocked = sharedRecipeService.getNotesLocked(recipeId)) }
             }
@@ -340,7 +363,7 @@ class RecipeDetailViewModel(
         countsJob?.cancel()
         countsJob = viewModelScope.launch {
             sharedRecipeService.likeStateFlow(recipeId).collect { ls ->
-                _uiState.update { it.copy(saveCount = ls.saveCount, likeCount = ls.likeCount) }
+                _uiState.update { it.copy(saveCount = ls.saveCount, likeCount = ls.likeCount, isLiked = ls.isLiked) }
             }
         }
     }
@@ -348,7 +371,15 @@ class RecipeDetailViewModel(
     private fun stopObservingCounts() {
         countsJob?.cancel()
         countsJob = null
-        _uiState.update { it.copy(saveCount = 0, likeCount = 0) }
+        _uiState.update { it.copy(saveCount = 0, likeCount = 0, isLiked = false) }
+    }
+
+    /** Heart / un-heart this recipe (only meaningful when [RecipeDetailUiState.canLike]). */
+    fun toggleLike() {
+        if (!_uiState.value.canLike) return
+        val liked = !_uiState.value.isLiked
+        _uiState.update { it.copy(isLiked = liked) }   // optimistic; the count flow corrects it
+        viewModelScope.launch { sharedRecipeService.setLiked(recipeId, liked) }
     }
 
     private fun observeNotes() {
@@ -743,6 +774,41 @@ class RecipeDetailViewModel(
     fun moveIngredientUp(sectionId: String, id: String) = transformSection(sectionId) { it.copy(ingredients = it.ingredients.moved(id, { i -> i.id }, -1)) }
     fun moveIngredientDown(sectionId: String, id: String) = transformSection(sectionId) { it.copy(ingredients = it.ingredients.moved(id, { i -> i.id }, +1)) }
 
+    /** Drag-reorder: move ingredient [fromId] to the position of [toId] within its section. */
+    fun reorderIngredient(fromId: String, toId: String) {
+        if (fromId == toId) return
+        updateDraft { d ->
+            d.copy(sections = d.sections.map { s ->
+                if (s.ingredients.none { it.id == fromId } || s.ingredients.none { it.id == toId }) s
+                else s.copy(ingredients = s.ingredients.movedTo(fromId, toId) { it.id })
+            })
+        }
+    }
+
+    /**
+     * Drag-reorder dispatch from the reorderable list: figures out whether the dragged key is an
+     * ingredient or a step in the current draft and reorders accordingly. Cross-type or unknown
+     * targets are no-ops (the per-section guards in reorderIngredient/reorderStep handle it).
+     */
+    fun onDragMove(fromKey: Any?, toKey: Any?) {
+        val from = fromKey as? String ?: return
+        val to = toKey as? String ?: return
+        val draft = _uiState.value.draft ?: return
+        val isIngredient = draft.sections.any { s -> s.ingredients.any { it.id == from } }
+        if (isIngredient) reorderIngredient(from, to) else reorderStep(from, to)
+    }
+
+    /** Drag-reorder: move step [fromId] to the position of [toId] within its section. */
+    fun reorderStep(fromId: String, toId: String) {
+        if (fromId == toId) return
+        updateDraft { d ->
+            d.copy(sections = d.sections.map { s ->
+                if (s.steps.none { it.id == fromId } || s.steps.none { it.id == toId }) s
+                else s.copy(steps = s.steps.movedTo(fromId, toId) { it.id })
+            })
+        }
+    }
+
     // Steps
     fun addStep(sectionId: String) = transformSection(sectionId) { it.copy(steps = it.steps + EditorStep()) }
     /** Append a fully-specified step (used by the step edit sheet in "new" mode). */
@@ -775,13 +841,23 @@ class RecipeDetailViewModel(
             val target = d.sections.flatMap { it.ingredients }.find { it.id == targetId }
             val groupId = target?.substituteGroupId ?: "subgrp-${UUID.randomUUID()}"
             d.copy(sections = d.sections.map { s ->
-                s.copy(ingredients = s.ingredients.map { ing ->
+                val tagged = s.ingredients.map { ing ->
                     when (ing.id) {
                         ingredientId -> ing.copy(substituteGroupId = groupId)
                         targetId -> if (ing.substituteGroupId == null) ing.copy(substituteGroupId = groupId) else ing
                         else -> ing
                     }
-                })
+                }
+                // Keep substitutes next to what they replace: if both live in this section, move the
+                // substitute to sit immediately after its target so editing the pair is easy.
+                val hasBoth = tagged.any { it.id == ingredientId } && tagged.any { it.id == targetId }
+                if (!hasBoth) s.copy(ingredients = tagged)
+                else {
+                    val moving = tagged.first { it.id == ingredientId }
+                    val without = tagged.filterNot { it.id == ingredientId }
+                    val at = without.indexOfFirst { it.id == targetId } + 1
+                    s.copy(ingredients = without.toMutableList().also { it.add(at, moving) })
+                }
             })
         }
     }
@@ -802,11 +878,16 @@ class RecipeDetailViewModel(
      * by first-mention order (unmentioned ones keep their relative order at the end). Explicit action
      * (edit-mode ＋ menu) so it never silently overrides a manual reorder.
      */
-    fun autoArrangeFromSteps() = updateDraft { d ->
+    fun autoArrangeFromSteps() {
+        updateDraft { d -> autoArrangeDraft(d) }
+        _uiState.update { it.copy(conversionMessage = "Ingredients arranged in step order") }
+    }
+
+    private fun autoArrangeDraft(d: EditDraft): EditDraft {
         val stop = setOf("the","and","for","with","to","of","an","into","until","then","your","you",
             "add","stir","cook","heat","mix","over","from","this","that","each","about","minutes","minute")
         fun tokens(s: String) = s.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length >= 3 && it !in stop }
-        d.copy(sections = d.sections.map { sec ->
+        return d.copy(sections = d.sections.map { sec ->
             val firstMention = HashMap<String, Int>()
             sec.steps.forEachIndexed { si, step ->
                 val words = step.instruction.lowercase().split(Regex("[^a-z0-9]+")).toHashSet()
@@ -829,11 +910,13 @@ class RecipeDetailViewModel(
         val draft = _uiState.value.draft ?: return
         val title = draft.title.trim()
         if (title.isBlank()) { _uiState.update { it.copy(editError = "Title cannot be empty") }; return }
-        _uiState.update { it.copy(isSavingEdit = true, editError = null) }
         val now = System.currentTimeMillis()
         val newVersion = editVersion + 1
         val newChangeLog = editChangeLog + RecipeChange(newVersion, now, "Edited recipe")
-        viewModelScope.launch {
+        // Exit edit mode immediately so the user is never locked in while the save persists.
+        // The actual write runs on an app-scoped tracker (below) so it survives leaving the recipe.
+        _uiState.update { it.copy(isSavingEdit = false, isEditMode = false, draft = null, editError = null) }
+        RecipeSaveTracker.launchSave(recipeId) {
             try {
                 // #8 — auto-update conversions ONLY for ingredients whose name/quantity changed
                 // (or were added) this session. Best-effort: a convert failure doesn't block save.
@@ -924,21 +1007,18 @@ class RecipeDetailViewModel(
                     )
                 }
                 if (!editIsImported) {
-                    viewModelScope.launch(Dispatchers.IO) { syncService.pushPersonalRecipe(recipeId) }
+                    syncService.pushPersonalRecipe(recipeId)
                 }
                 // Reconcile the mirror with the recipe's visibility: publish for any shared tier
                 // (shared/friends/public) so recipients get the edit; remove it for private.
-                viewModelScope.launch(Dispatchers.IO) {
-                    if (editVisibility == "shared" || editVisibility == "friends" || editVisibility == "public") {
-                        repository.getRecipeWithDetails(recipeId)?.let { sharedRecipeService.publish(it) }
-                    } else {
-                        sharedRecipeService.unpublish(recipeId)
-                    }
+                if (editVisibility == "shared" || editVisibility == "friends" || editVisibility == "public") {
+                    repository.getRecipeWithDetails(recipeId)?.let { sharedRecipeService.publish(it) }
+                } else {
+                    sharedRecipeService.unpublish(recipeId)
                 }
-                // Exit edit mode; the Room-Flow observer reloads the fresh recipe into view.
-                _uiState.update { it.copy(isSavingEdit = false, isEditMode = false, draft = null) }
+                // The Room-Flow observer reloads the fresh recipe into view automatically.
             } catch (e: Exception) {
-                _uiState.update { it.copy(isSavingEdit = false, editError = "Save failed: ${e.message}") }
+                _uiState.update { it.copy(editError = "Save failed: ${e.message}") }
             }
         }
     }
@@ -1038,6 +1118,14 @@ class RecipeDetailViewModel(
         val newIdx = idx + direction
         if (idx < 0 || newIdx !in indices) return this
         return toMutableList().also { val item = it.removeAt(idx); it.add(newIdx, item) }
+    }
+
+    /** Move the item with [fromId] to where [toId] currently sits (drag-reorder). */
+    private fun <T> List<T>.movedTo(fromId: String, toId: String, idOf: (T) -> String): List<T> {
+        val from = indexOfFirst { idOf(it) == fromId }
+        val to = indexOfFirst { idOf(it) == toId }
+        if (from < 0 || to < 0 || from == to) return this
+        return toMutableList().also { val item = it.removeAt(from); it.add(to, item) }
     }
 
     companion object {

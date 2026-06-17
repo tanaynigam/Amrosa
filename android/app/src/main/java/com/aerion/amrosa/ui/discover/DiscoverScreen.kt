@@ -23,6 +23,7 @@ import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.domain.model.DiscoverRecipe
 import com.aerion.amrosa.domain.model.RecipeSource
 import com.aerion.amrosa.ui.components.CompactSearchField
+import com.aerion.amrosa.ui.util.compactCount
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -236,7 +237,7 @@ private fun SearchResultRow(recipe: DiscoverRecipe, onClick: () -> Unit) {
                     Spacer(Modifier.width(10.dp))
                     Icon(Icons.Default.BookmarkAdd, contentDescription = null, modifier = Modifier.size(13.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(" ${recipe.saveCount}", style = MaterialTheme.typography.labelSmall,
+                    Text(" ${compactCount(recipe.saveCount)}", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -282,14 +283,14 @@ private fun DiscoverCard(recipe: DiscoverRecipe, onClick: () -> Unit) {
                     Spacer(Modifier.width(8.dp))
                     Icon(Icons.Default.BookmarkAdd, contentDescription = null, modifier = Modifier.size(13.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(" ${recipe.saveCount}", style = MaterialTheme.typography.labelSmall,
+                    Text(" ${compactCount(recipe.saveCount)}", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (recipe.likeCount > 0) {
                     Spacer(Modifier.width(6.dp))
                     Icon(Icons.Default.Favorite, contentDescription = null, modifier = Modifier.size(13.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(" ${recipe.likeCount}", style = MaterialTheme.typography.labelSmall,
+                    Text(" ${compactCount(recipe.likeCount)}", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }

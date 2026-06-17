@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.amrosa.AmrosaApplication
 import com.aerion.amrosa.domain.model.Recipe
+import com.aerion.amrosa.ui.util.compactCount
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -215,6 +216,18 @@ private fun SharedRecipeCard(
                             label = { Text(tag, style = MaterialTheme.typography.labelSmall) }
                         )
                     }
+                }
+            }
+
+            // Likes
+            if (recipe.likeCount > 0) {
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Favorite, contentDescription = null,
+                        modifier = Modifier.size(13.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(" ${compactCount(recipe.likeCount)}", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

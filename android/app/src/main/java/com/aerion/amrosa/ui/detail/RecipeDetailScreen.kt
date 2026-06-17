@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import android.content.Intent
 import androidx.compose.ui.platform.LocalContext
@@ -41,6 +42,8 @@ import com.aerion.amrosa.ui.util.QuantityScaler
 import com.aerion.amrosa.ui.util.UnitMode
 import com.aerion.amrosa.ui.util.editable
 import kotlinx.coroutines.launch
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -237,7 +240,10 @@ fun RecipeDetailScreen(
                 if (id in cookingChecked) cookingChecked.remove(id) else cookingChecked.add(id)
             },
             onExit = { showCookingMode = false },
-            onDone = { viewModel.markCooked(); showCookingMode = false }
+            onDone = { viewModel.markCooked(); showCookingMode = false },
+            canLike = state.canLike,
+            isLiked = state.isLiked,
+            onToggleLike = { viewModel.toggleLike() },
         )
         return
     }
@@ -259,6 +265,11 @@ fun RecipeDetailScreen(
                     }
                 },
                 actions = {
+                    // Background-save indicator — the edit was saved and is still persisting; the
+                    // user is free to navigate away meanwhile.
+                    if (!state.isEditMode && state.isSavingInBackground) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp).padding(end = 4.dp), strokeWidth = 2.dp)
+                    }
                     if (state.isEditMode) {
                         // Edit mode — ＋ add menu + Save (Cancel is the nav X). Pinned as you scroll.
                         val draft = state.draft
@@ -344,6 +355,11 @@ fun RecipeDetailScreen(
 
         val listState = rememberLazyListState()
         val coroutineScope = rememberCoroutineScope()
+        // Drag-to-reorder (edit mode): dispatches to the VM, which figures out ingredient vs step
+        // and reorders within the relevant section. Reads live draft, so no stale capture.
+        val reorderState = rememberReorderableLazyListState(listState) { from, to ->
+            viewModel.onDragMove(from.key, to.key)
+        }
 
         // A substitute group renders at a STABLE position (the lowest orderIndex among its members),
         // so switching the selected substitute doesn't make the row jump up/down the list.
@@ -720,21 +736,39 @@ fun RecipeDetailScreen(
                         recipe.ingredients.filter { it.substituteGroupId == ing.substituteGroupId }
                             .sortedBy { it.orderIndex }
                     else emptyList()
-                    Box(
-                        Modifier.editable(editing, idx) {
-                            editTarget = EditTarget.Ingredient(ing.sectionId ?: fallbackSectionId ?: "", ing.id)
+                    @Composable
+                    fun rowBody(jiggle: Boolean = editing) {
+                        Box(
+                            Modifier.editable(jiggle, idx) {
+                                editTarget = EditTarget.Ingredient(ing.sectionId ?: fallbackSectionId ?: "", ing.id)
+                            }
+                        ) {
+                            IngredientRow(
+                                ingredient = ing,
+                                scaledQty = QuantityScaler.scale(ing, effScale, effUnit),
+                                isOptional = ing.isOptional,
+                                editing = editing,
+                                substituteOptions = subOptions,
+                                onSelectSubstitute = { id ->
+                                    ing.substituteGroupId?.let { viewModel.selectSubstitute(it, id) }
+                                },
+                            )
                         }
-                    ) {
-                        IngredientRow(
-                            ingredient = ing,
-                            scaledQty = QuantityScaler.scale(ing, effScale, effUnit),
-                            isOptional = ing.isOptional,
-                            editing = editing,
-                            substituteOptions = subOptions,
-                            onSelectSubstitute = { id ->
-                                ing.substituteGroupId?.let { viewModel.selectSubstitute(it, id) }
-                            },
-                        )
+                    }
+                    if (editing) {
+                        // Edit mode: a drag handle reorders; the rest of the row taps to edit.
+                        ReorderableItem(reorderState, key = ing.id) { isDragging ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.DragHandle, contentDescription = "Drag to reorder",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.draggableHandle().padding(start = 12.dp, end = 4.dp),
+                                )
+                                Box(Modifier.weight(1f)) { rowBody(jiggle = !isDragging) }
+                            }
+                        }
+                    } else {
+                        rowBody()
                     }
                 }
             }
@@ -846,17 +880,36 @@ fun RecipeDetailScreen(
                 }
 
                 itemsIndexed(sectionSteps, key = { _, it -> it.id }) { idx, step ->
-                    Box(
-                        Modifier.editable(editing, idx) {
-                            editTarget = EditTarget.Step(section.id, step.id)
+                    if (editing) {
+                        ReorderableItem(reorderState, key = step.id) { isDragging ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.DragHandle, contentDescription = "Drag to reorder",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.draggableHandle().padding(start = 12.dp, end = 4.dp),
+                                )
+                                Box(Modifier.weight(1f).editable(!isDragging, idx) {
+                                    editTarget = EditTarget.Step(section.id, step.id)
+                                }) {
+                                    // Compact the box while dragging so long steps are easy to move.
+                                    if (isDragging) CompactStepRow(step.orderIndex + 1, step.instruction)
+                                    else StepRow(step = step, stepNumber = step.orderIndex + 1, recipe = recipe, state = state)
+                                }
+                            }
                         }
-                    ) {
-                        StepRow(
-                            step = step,
-                            stepNumber = step.orderIndex + 1,
-                            recipe = recipe,
-                            state = state,
-                        )
+                    } else {
+                        Box(
+                            Modifier.editable(editing, idx) {
+                                editTarget = EditTarget.Step(section.id, step.id)
+                            }
+                        ) {
+                            StepRow(
+                                step = step,
+                                stepNumber = step.orderIndex + 1,
+                                recipe = recipe,
+                                state = state,
+                            )
+                        }
                     }
                 }
                 if (editing) {
@@ -1378,7 +1431,11 @@ internal fun CookingModeScreen(
     checkedIngredients: List<String>,
     onToggleIngredient: (String) -> Unit,
     onExit: () -> Unit,
-    onDone: () -> Unit = onExit
+    onDone: () -> Unit = onExit,
+    // Heart prompt on the "all done" page — only for recipes the cook doesn't own.
+    canLike: Boolean = false,
+    isLiked: Boolean = false,
+    onToggleLike: () -> Unit = {},
 ) {
     val steps = recipe.sections
         .flatMap { section -> recipe.steps.filter { it.sectionId == section.id }.sortedBy { it.orderIndex } }
@@ -1419,6 +1476,19 @@ internal fun CookingModeScreen(
     DisposableEffect(Unit) {
         view.keepScreenOn = true
         onDispose { view.keepScreenOn = false }
+    }
+
+    // "All done" is its own page (not an overlay over the last step) so a stray tap on the last
+    // step can be undone with Back instead of exiting immediately.
+    if (finishing) {
+        CookDonePage(
+            canLike = canLike,
+            isLiked = isLiked,
+            onToggleLike = onToggleLike,
+            onBack = { finishing = false },
+            onFinish = onDone,
+        )
+        return
     }
 
     Scaffold(
@@ -1481,31 +1551,28 @@ internal fun CookingModeScreen(
                     ) { goNext() }
                     .verticalScroll(rememberScrollState())
             ) {
-                // Unit toggle — only when conversions exist; shared with the detail screen
+                // Compact unit cycler — one chip that rotates Original → Metric → Imperial,
+                // matching the detail screen (only when conversions exist).
                 if (hasConversions) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        SingleChoiceSegmentedButtonRow {
-                            UnitMode.entries.forEachIndexed { index, mode ->
-                                SegmentedButton(
-                                    selected = selectedUnit == mode,
-                                    onClick = { onUnitChange(mode) },
-                                    shape = SegmentedButtonDefaults.itemShape(index = index, count = UnitMode.entries.size),
-                                    label = {
-                                        Text(
-                                            when (mode) {
-                                                UnitMode.ORIGINAL -> "Orig"
-                                                UnitMode.METRIC   -> "Metric"
-                                                UnitMode.IMPERIAL -> "Imp"
-                                            },
-                                            style = MaterialTheme.typography.labelSmall
-                                        )
-                                    }
+                        val units = UnitMode.entries
+                        AssistChip(
+                            onClick = { onUnitChange(units[(units.indexOf(selectedUnit) + 1) % units.size]) },
+                            leadingIcon = { Icon(Icons.Default.SwapHoriz, contentDescription = "Change units", modifier = Modifier.size(16.dp)) },
+                            label = {
+                                Text(
+                                    when (selectedUnit) {
+                                        UnitMode.ORIGINAL -> "Orig"
+                                        UnitMode.METRIC   -> "Metric"
+                                        UnitMode.IMPERIAL -> "Imp"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium
                                 )
-                            }
-                        }
+                            },
+                        )
                     }
                     Spacer(Modifier.height(12.dp))
                 }
@@ -1579,33 +1646,39 @@ internal fun CookingModeScreen(
                 }
             }
         }
-        // Done celebration → then exit + mark cooked.
-        if (finishing) CookDoneOverlay(onFinished = onDone)
       }
     }
 }
 
-/** Brief "all done" celebration shown when cooking finishes, then calls [onFinished]. */
+/**
+ * The "all done" page shown after the last cooking step. A dedicated page (not an overlay) so an
+ * accidental tap on the last step lands here and can be reversed with **Back** — it never exits
+ * cooking mode on its own. For recipes the cook doesn't own, offers a one-tap heart.
+ */
 @Composable
-private fun CookDoneOverlay(onFinished: () -> Unit) {
+private fun CookDonePage(
+    canLike: Boolean,
+    isLiked: Boolean,
+    onToggleLike: () -> Unit,
+    onBack: () -> Unit,
+    onFinish: () -> Unit,
+) {
     var shown by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (shown) 1f else 0.3f,
         animationSpec = spring(dampingRatio = 0.45f, stiffness = 220f), label = "doneScale"
     )
-    val alpha by animateFloatAsState(if (shown) 1f else 0f, label = "doneAlpha")
-    LaunchedEffect(Unit) {
-        shown = true
-        kotlinx.coroutines.delay(1200)
-        onFinished()
-    }
-    Box(
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.55f)),
-        contentAlignment = Alignment.Center
-    ) {
+    LaunchedEffect(Unit) { shown = true }
+
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+        // Back returns to the last step (undoes an accidental "Done").
+        IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to last step")
+        }
         Column(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.graphicsLayer { this.alpha = alpha }
+            verticalArrangement = Arrangement.Center
         ) {
             Icon(
                 Icons.Default.CheckCircle, contentDescription = null,
@@ -1614,7 +1687,34 @@ private fun CookDoneOverlay(onFinished: () -> Unit) {
             )
             Spacer(Modifier.height(16.dp))
             Text("All done!", style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.inverseOnSurface)
+                color = MaterialTheme.colorScheme.onSurface)
+
+            // Heart prompt — only when this isn't the cook's own recipe.
+            if (canLike) {
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    if (isLiked) "Thanks for the love!" else "Enjoyed this recipe?",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                if (isLiked) {
+                    FilledTonalButton(onClick = onToggleLike) {
+                        Icon(Icons.Default.Favorite, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp)); Text("Liked")
+                    }
+                } else {
+                    Button(onClick = onToggleLike) {
+                        Icon(Icons.Default.FavoriteBorder, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp)); Text("Like this recipe")
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(32.dp))
+            Button(onClick = onFinish, modifier = Modifier.fillMaxWidth()) { Text("Finish") }
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onBack) { Text("Back to last step") }
         }
     }
 }
@@ -1830,6 +1930,32 @@ private fun IngredientRow(
                 }
             }
         }
+    }
+}
+
+/** A one-line step summary used while a step is being dragged, so a long step doesn't tower over
+ *  the list and is easy to drop in place. */
+@Composable
+private fun CompactStepRow(stepNumber: Int, instruction: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(50)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("$stepNumber",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onPrimaryContainer)
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(instruction, style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

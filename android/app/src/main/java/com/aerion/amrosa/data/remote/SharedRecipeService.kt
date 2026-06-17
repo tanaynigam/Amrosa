@@ -490,6 +490,7 @@ class SharedRecipeService(
             authorDisplayName = data["authorDisplayName"] as? String,
             visibility = data["visibility"] as? String ?: "public",
             sharedWith = (data["sharedWith"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+            likeCount = (data["likeCount"] as? Number)?.toInt() ?: 0,
         )
     }
 
