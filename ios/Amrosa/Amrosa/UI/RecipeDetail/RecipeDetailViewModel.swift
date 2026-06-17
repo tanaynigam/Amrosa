@@ -353,7 +353,7 @@ final class RecipeDetailViewModel {
     /// regardless of whether the optional is currently included, so you can always toggle them.
     func optionalChips(forSectionId sectionId: String?) -> [IngredientModel] {
         recipe.ingredients
-            .filter { $0.isOptional && ($0.section?.id ?? "__other__") == (sectionId ?? "__other__") }
+            .filter { $0.isOptional && normalizedSectionId($0.section?.id) == sectionId }
             .sorted { $0.orderIndex < $1.orderIndex }
     }
 

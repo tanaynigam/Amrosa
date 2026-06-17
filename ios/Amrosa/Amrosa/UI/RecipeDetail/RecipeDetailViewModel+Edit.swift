@@ -36,13 +36,23 @@ extension RecipeDetailViewModel {
         let sorted = recipe.sections.sorted { $0.orderIndex < $1.orderIndex }
         if sorted.isEmpty {
             // No sections — wrap everything in a single unnamed section.
-            let ings = recipe.ingredients.filter { $0.section == nil }
+            let ings = recipe.ingredients
                 .sorted { $0.orderIndex < $1.orderIndex }.map { EditorIngredient(from: $0) }
-            let steps = recipe.steps.filter { $0.section == nil }
+            let steps = recipe.steps
                 .sorted { $0.orderIndex < $1.orderIndex }.map { EditorStep(from: $0) }
             editSections = [EditorSection(id: UUID().uuidString, name: "", ingredients: ings, steps: steps)]
         } else {
             editSections = sorted.map { EditorSection(from: $0) }
+            // F21: orphan ingredients/steps (null/unknown section) would otherwise be dropped on
+            // edit — assign them to the first section so they line up with everything else.
+            let knownIngIds = Set(editSections.flatMap { $0.ingredients.map(\.id) })
+            let orphanIngs = recipe.ingredients.filter { !knownIngIds.contains($0.id) }
+                .sorted { $0.orderIndex < $1.orderIndex }.map { EditorIngredient(from: $0) }
+            let knownStepIds = Set(editSections.flatMap { $0.steps.map(\.id) })
+            let orphanSteps = recipe.steps.filter { !knownStepIds.contains($0.id) }
+                .sorted { $0.orderIndex < $1.orderIndex }.map { EditorStep(from: $0) }
+            if !orphanIngs.isEmpty { editSections[0].ingredients.append(contentsOf: orphanIngs) }
+            if !orphanSteps.isEmpty { editSections[0].steps.append(contentsOf: orphanSteps) }
         }
         deletedSectionIds = []; deletedIngredientIds = []; deletedStepIds = []
         editIngredientSig = Dictionary(uniqueKeysWithValues:
