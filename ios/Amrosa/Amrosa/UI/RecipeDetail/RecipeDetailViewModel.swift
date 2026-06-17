@@ -320,11 +320,18 @@ final class RecipeDetailViewModel {
         return grouped.map { (groupId: $0.key, options: $0.value.sorted { $0.orderIndex < $1.orderIndex }) }
     }
 
+    /// Effective sort position: a substitute group is anchored at its MIN orderIndex so switching
+    /// the selected member never makes the row jump up/down the list (#7).
+    private func effectiveOrderIndex(_ ing: IngredientModel) -> Int {
+        guard let gid = ing.substituteGroupId else { return ing.orderIndex }
+        return recipe.ingredients.filter { $0.substituteGroupId == gid }.map { $0.orderIndex }.min() ?? ing.orderIndex
+    }
+
     /// Visible ingredients as a flat list — collapses substitute groups to the selected option and
     /// drops optionals the user hasn't included (they're added back via the per-section chip row).
     var visibleIngredients: [IngredientModel] {
         recipe.ingredients
-            .sorted { $0.orderIndex < $1.orderIndex }
+            .sorted { effectiveOrderIndex($0) < effectiveOrderIndex($1) }
             .filter { ing in
                 // Optional ingredients are opt-in: only show when included via the chip row.
                 if ing.isOptional && !enabledOptionals.contains(ing.id) { return false }
