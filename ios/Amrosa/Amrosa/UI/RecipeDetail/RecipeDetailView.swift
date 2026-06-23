@@ -490,6 +490,7 @@ private struct RecipeDetailContent: View {
                                 .editable(active: editing, phase: idx) {
                                     viewModel.editTarget = .ingredient(sectionId: block.sectionId ?? "", ingredientId: ing.id)
                                 }
+                                .dragReorder(active: editing, id: ing.id) { viewModel.reorderIngredient($0, onto: ing.id) }
                             // Substitute swap chips inline under the selected member (view mode).
                             if !editing, let gid = ing.substituteGroupId, !ing.substituteOptions.isEmpty {
                                 SubstituteChipsRow(options: ing.substituteOptions) { viewModel.selectSubstitute(gid, $0) }
@@ -499,7 +500,8 @@ private struct RecipeDetailContent: View {
                     // In-context "＋ Add ingredient" (edit); view reserves the same height so the
                     // toggle never shifts (F16 intent: in-context adds without reflow).
                     if let sid = block.sectionId {
-                        AddRowSlot(editing: editing, title: "Add ingredient") {
+                        AddRowSlot(editing: editing, title: "Add ingredient",
+                                   onDropReorder: { viewModel.moveIngredientToSection($0, to: sid) }) {
                             viewModel.editTarget = .ingredient(sectionId: sid, ingredientId: nil)
                         }
                     }
@@ -529,13 +531,15 @@ private struct RecipeDetailContent: View {
                         .id(section.id)
                     }
                     ForEach(steps) { step in
-                        StepRow(step: step)
+                        StepRow(step: step, editing: editing)
                             .editable(active: editing, phase: step.number) {
                                 viewModel.editTarget = .step(sectionId: section.id, stepId: step.id)
                             }
+                            .dragReorder(active: editing, id: step.id) { viewModel.reorderStep($0, onto: step.id) }
                     }
                     if !steps.isEmpty {
-                        AddRowSlot(editing: editing, title: "Add step") {
+                        AddRowSlot(editing: editing, title: "Add step",
+                                   onDropReorder: { viewModel.moveStepToSection($0, to: section.id) }) {
                             viewModel.editTarget = .step(sectionId: section.id, stepId: nil)
                         }
                     }
@@ -544,10 +548,11 @@ private struct RecipeDetailContent: View {
                 // Flat (no-section) steps — both modes
                 let flatSteps = viewModel.displaySteps(forSectionId: nil)
                 ForEach(flatSteps) { step in
-                    StepRow(step: step)
+                    StepRow(step: step, editing: editing)
                         .editable(active: editing, phase: step.number) {
                             viewModel.editTarget = .step(sectionId: viewModel.flatStepsSectionId ?? "", stepId: step.id)
                         }
+                        .dragReorder(active: editing, id: step.id) { viewModel.reorderStep($0, onto: step.id) }
                 }
                 if !flatSteps.isEmpty, let sid = viewModel.flatStepsSectionId {
                     AddRowSlot(editing: editing, title: "Add step") {
@@ -636,6 +641,8 @@ private let kAddRowHeight: CGFloat = 44
 private struct AddRowSlot: View {
     let editing: Bool
     let title: String
+    /// F19: dropping a dragged row's id here moves that item into this section (empty/other section).
+    var onDropReorder: ((String) -> Void)? = nil
     let action: () -> Void
 
     var body: some View {
@@ -652,6 +659,10 @@ private struct AddRowSlot: View {
                         .padding(.horizontal, 16)
                 }
                 .buttonStyle(.plain)
+                .dropDestination(for: String.self) { items, _ in
+                    if let d = items.first, let h = onDropReorder { h(d); return true }
+                    return false
+                }
             } else {
                 // Reserve identical height so toggling Edit never shifts the layout.
                 Color.clear
@@ -698,6 +709,10 @@ private struct IngredientRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
+            if editing {
+                Image(systemName: "line.3.horizontal")
+                    .font(.caption).foregroundStyle(.tertiary).padding(.top, 4)
+            }
             Image(systemName: "circle.fill")
                 .foregroundStyle(Color.accentColor.opacity(0.5))
                 .font(.system(size: 8))
@@ -731,9 +746,14 @@ private struct IngredientRow: View {
 
 private struct StepRow: View {
     let step: DisplayStep
+    var editing: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
+            if editing {
+                Image(systemName: "line.3.horizontal")
+                    .font(.caption).foregroundStyle(.tertiary).padding(.top, 8)
+            }
             ZStack {
                 Circle()
                     .fill(Color.accentColor.opacity(0.15))

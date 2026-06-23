@@ -253,6 +253,38 @@ extension RecipeDetailViewModel {
         editSections[s].ingredients.swapAt(i, j)
     }
 
+    // F19: true drag-and-drop reorder — drop a dragged item onto a target item. Moves the dragged
+    // to the target's index (within or across sections), mirroring Android's reorderIngredient/Step.
+    // Cross-type or unknown ids are no-ops (so dropping a step on an ingredient does nothing).
+
+    private func locateIngredient(_ id: String) -> (Int, Int)? {
+        for s in editSections.indices {
+            if let i = editSections[s].ingredients.firstIndex(where: { $0.id == id }) { return (s, i) }
+        }
+        return nil
+    }
+    private func locateStep(_ id: String) -> (Int, Int)? {
+        for s in editSections.indices {
+            if let i = editSections[s].steps.firstIndex(where: { $0.id == id }) { return (s, i) }
+        }
+        return nil
+    }
+
+    func reorderIngredient(_ fromId: String, onto toId: String) {
+        guard fromId != toId,
+              let (fs, fi) = locateIngredient(fromId),
+              let (ts, ti) = locateIngredient(toId) else { return }
+        let item = editSections[fs].ingredients.remove(at: fi)
+        editSections[ts].ingredients.insert(item, at: min(ti, editSections[ts].ingredients.count))
+    }
+    func reorderStep(_ fromId: String, onto toId: String) {
+        guard fromId != toId,
+              let (fs, fi) = locateStep(fromId),
+              let (ts, ti) = locateStep(toId) else { return }
+        let item = editSections[fs].steps.remove(at: fi)
+        editSections[ts].steps.insert(item, at: min(ti, editSections[ts].steps.count))
+    }
+
     /// Reorder a step within its section (Up/Down in the step sheet).
     func moveStep(in sectionId: String, _ stepId: String, by delta: Int) {
         guard let s = editSections.firstIndex(where: { $0.id == sectionId }),

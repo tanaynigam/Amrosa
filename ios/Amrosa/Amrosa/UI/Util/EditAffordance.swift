@@ -39,4 +39,20 @@ extension View {
     func editable(active: Bool, phase: Int = 0, onTap: @escaping () -> Void) -> some View {
         modifier(EditableModifier(active: active, phase: phase, onTap: onTap))
     }
+
+    /// F19 drag-and-drop reorder (edit mode only): the row is a drag source carrying `id` and a drop
+    /// target — dropping another row's id here calls `onDrop(draggedId)`. A no-op when inactive, so
+    /// the read-only view is unaffected. Long-press to drag; a quick tap still opens the edit sheet.
+    @ViewBuilder
+    func dragReorder(active: Bool, id: String, onDrop: @escaping (String) -> Void) -> some View {
+        if active {
+            self.draggable(id)
+                .dropDestination(for: String.self) { items, _ in
+                    if let dragged = items.first, dragged != id { onDrop(dragged) }
+                    return true
+                }
+        } else {
+            self
+        }
+    }
 }
