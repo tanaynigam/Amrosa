@@ -41,35 +41,35 @@ let docCount = 0;
 
 /** Recursively copy a source collection ref into the matching dest collection ref. */
 async function copyCollection(srcColRef, dstColRef, depthLabel) {
-  const snap = await srcColRef.get();
-  if (snap.empty) return;
+  // Use listDocuments() (NOT .get()) so we also enumerate "missing ancestor" documents.
+  // The app writes e.g. personal_recipes/{uid}/recipes/{id} WITHOUT creating the
+  // personal_recipes/{uid} parent doc — so .get() returns nothing and the recipes underneath
+  // would be silently skipped. listDocuments() returns those phantom parents too.
+  const docRefs = await srcColRef.listDocuments();
+  if (docRefs.length === 0) return;
 
-  // Copy this level's documents in batches.
   let batch = dst.batch();
   let pending = 0;
-  for (const doc of snap.docs) {
-    if (!DRY_RUN) {
-      batch.set(dstColRef.doc(doc.id), doc.data());
-      pending++;
-      if (pending >= BATCH_LIMIT) {
-        await batch.commit();
-        batch = dst.batch();
-        pending = 0;
+  let copied = 0;
+  for (const srcDocRef of docRefs) {
+    const snap = await srcDocRef.get();
+    if (snap.exists) {
+      if (!DRY_RUN) {
+        batch.set(dstColRef.doc(srcDocRef.id), snap.data());
+        pending++;
+        if (pending >= BATCH_LIMIT) { await batch.commit(); batch = dst.batch(); pending = 0; }
       }
+      docCount++;
+      copied++;
     }
-    docCount++;
+    // Recurse into subcollections whether or not the parent document itself exists.
+    const subcols = await srcDocRef.listCollections();
+    for (const sub of subcols) {
+      await copyCollection(sub, dstColRef.doc(srcDocRef.id).collection(sub.id), depthLabel + "→");
+    }
   }
   if (!DRY_RUN && pending > 0) await batch.commit();
-
-  console.log(`  ${depthLabel} ${srcColRef.path}: ${snap.size} docs`);
-
-  // Recurse into each document's subcollections.
-  for (const doc of snap.docs) {
-    const subcols = await doc.ref.listCollections();
-    for (const sub of subcols) {
-      await copyCollection(sub, dstColRef.doc(doc.id).collection(sub.id), depthLabel + "→");
-    }
-  }
+  console.log(`  ${depthLabel} ${srcColRef.path}: ${copied} docs`);
 }
 
 async function main() {
