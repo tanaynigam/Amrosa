@@ -1,5 +1,5 @@
 /**
- * Amrosa recipe JSON schema — used in the Gemini prompt so the model
+ * ChefsList recipe JSON schema — used in the Gemini prompt so the model
  * returns data that maps directly onto the Firestore / Room data model.
  */
 
