@@ -32,8 +32,8 @@ ios/*.xcworkspace/xcuserdata/
 ios/DerivedData/
 ios/Amrosa/GoogleService-Info.plist
 
-# Backend — Firebase service account key (secret — never commit)
-backend/firestore/serviceAccountKey.json
+# Backend — Firebase service account keys (secret — never commit)
+backend/firestore/serviceAccountKey*.json
 backend/firestore/node_modules/
 
 # Backend — Cloud Functions
