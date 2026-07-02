@@ -28,9 +28,9 @@ android/app/google-services.json
 # iOS — machine-specific and build output
 ios/.build/
 ios/Pods/
-ios/*.xcworkspace/xcuserdata/
+ios/**/xcuserdata/
 ios/DerivedData/
-ios/Amrosa/GoogleService-Info.plist
+ios/ChefsList/ChefsList/GoogleService-Info.plist
 
 # Backend — Firebase service account keys (secret — never commit)
 backend/firestore/serviceAccountKey*.json
