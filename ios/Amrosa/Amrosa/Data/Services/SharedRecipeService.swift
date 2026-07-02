@@ -207,6 +207,18 @@ final class SharedRecipeService {
         (try? await notesDoc(recipeId).getDocument().get("locked") as? Bool) ?? false
     }
 
+    /// F20: like counts for all of a user's published recipes — one query, keyed by recipeId.
+    /// Lets My Recipes show the like count on the author's own cards (read-only there).
+    func getAuthorLikeCounts(_ uid: String) async -> [String: Int] {
+        guard let snapshot = try? await db.collection(sharedCollection)
+            .whereField("authorId", isEqualTo: uid).getDocuments() else { return [:] }
+        var result: [String: Int] = [:]
+        for doc in snapshot.documents {
+            if let c = doc.get("likeCount") as? Int, c > 0 { result[doc.documentID] = c }
+        }
+        return result
+    }
+
     func commentsStream(recipeId: String) -> AsyncStream<[SharedComment]> {
         AsyncStream { continuation in
             let listener = self.notesCol(recipeId)

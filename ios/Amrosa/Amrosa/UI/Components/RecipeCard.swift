@@ -3,6 +3,10 @@ import SwiftUI
 struct RecipeCard: View {
     let recipe: RecipeModel
     var showNeedsReviewBanner: Bool = false
+    /// F20: published like count for this recipe (from `getAuthorLikeCounts`); shown when > 0.
+    var likeCount: Int = 0
+    /// F19: a background save for this recipe is in flight → show a small spinner.
+    var isSaving: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -44,6 +48,12 @@ struct RecipeCard: View {
                         Label(recipe.displayYield, systemImage: "person.2")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+
+                        if likeCount > 0 {
+                            Label(likeCount.compactCount, systemImage: "heart.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .padding(.top, 2)
 
@@ -65,6 +75,10 @@ struct RecipeCard: View {
                         .padding(.top, 2)
                 }
                 Spacer(minLength: 0)
+
+                if isSaving {
+                    ProgressView()
+                }
 
                 if recipe.imageUrl != nil {
                     RoundedRectangle(cornerRadius: 8)

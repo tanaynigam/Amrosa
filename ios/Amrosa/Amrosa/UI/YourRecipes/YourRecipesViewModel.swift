@@ -9,11 +9,17 @@ final class YourRecipesViewModel {
     var searchText: String = ""
     var filterMode: RecipeFilter = .all
     var errorMessage: String? = nil
+    /// F20: like counts for the user's own published recipes (recipeId → count), shown on cards.
+    var likeCounts: [String: Int] = [:]
 
     private let repository: RecipeRepository
+    private let sharedRecipeService: SharedRecipeService?
+    private let authRepository: AuthRepository?
 
-    init(repository: RecipeRepository) {
+    init(repository: RecipeRepository, sharedRecipeService: SharedRecipeService? = nil, authRepository: AuthRepository? = nil) {
         self.repository = repository
+        self.sharedRecipeService = sharedRecipeService
+        self.authRepository = authRepository
     }
 
     enum RecipeFilter: String, CaseIterable {
@@ -56,6 +62,10 @@ final class YourRecipesViewModel {
             recipes = try repository.fetchMyRecipes()
         } catch {
             errorMessage = error.localizedDescription
+        }
+        // F20: pull the user's own published like counts (one query) for the cards.
+        if let uid = authRepository?.uid, let svc = sharedRecipeService {
+            Task { likeCounts = await svc.getAuthorLikeCounts(uid) }
         }
     }
 }

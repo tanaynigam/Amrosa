@@ -54,7 +54,11 @@ struct YourRecipesView: View {
         }
         .onAppear {
             if viewModel == nil {
-                viewModel = YourRecipesViewModel(repository: container.recipeRepository)
+                viewModel = YourRecipesViewModel(
+                    repository: container.recipeRepository,
+                    sharedRecipeService: container.sharedRecipeService,
+                    authRepository: container.authRepository
+                )
             }
             viewModel?.load()
         }
@@ -128,6 +132,7 @@ private struct AddRecipeSheet: View {
 }
 
 private struct YourRecipesContent: View {
+    @Environment(AppContainer.self) private var container
     @Bindable var viewModel: YourRecipesViewModel
     @Binding var selectedRecipe: RecipeModel?
     var onTapNeedsReview: (RecipeModel) -> Void
@@ -185,7 +190,9 @@ private struct YourRecipesContent: View {
                                 if recipe.needsReview { onTapNeedsReview(recipe) }
                                 else { selectedRecipe = recipe }
                             } label: {
-                                RecipeCard(recipe: recipe, showNeedsReviewBanner: true)
+                                RecipeCard(recipe: recipe, showNeedsReviewBanner: true,
+                                           likeCount: viewModel.likeCounts[recipe.id] ?? 0,
+                                           isSaving: container.saveTracker.isSaving(recipe.id))
                             }
                             .buttonStyle(.plain)
                             .padding(.horizontal, 16)

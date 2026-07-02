@@ -52,3 +52,16 @@ extension View {
             .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
     }
 }
+
+extension Int {
+    /// Compact like/save count: 1.2k / 3M (mirrors Android `compactCount`).
+    var compactCount: String {
+        if self < 1_000 { return "\(self)" }
+        if self < 1_000_000 {
+            let v = Double(self) / 1_000
+            return v.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(v))k" : String(format: "%.1fk", v)
+        }
+        let v = Double(self) / 1_000_000
+        return v.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(v))M" : String(format: "%.1fM", v)
+    }
+}

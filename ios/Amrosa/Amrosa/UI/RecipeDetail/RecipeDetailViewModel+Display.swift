@@ -58,6 +58,14 @@ extension RecipeDetailViewModel {
     /// Section id to target when editing a step rendered in the flat (nil-section) path.
     var flatStepsSectionId: String? { editIsSingleUnnamed ? editSections[0].id : nil }
 
+    /// F21 (view): normalize an item's raw section id — when the recipe has sections, an orphan
+    /// (null/unknown section) is folded onto the FIRST section so ingredients line up with steps.
+    func normalizedSectionId(_ rawId: String?) -> String? {
+        guard let first = sortedSections.first else { return nil }   // no sections → flat
+        if let id = rawId, sortedSections.contains(where: { $0.id == id }) { return id }
+        return first.id
+    }
+
     // ── Ingredient blocks ──
 
     private func displayEditIngredient(_ ing: EditorIngredient) -> DisplayIngredient {
@@ -144,19 +152,16 @@ extension RecipeDetailViewModel {
     ///   currently hidden**; non-included optionals are dropped from the list (opt-in model).
     var displayIngredientBlocks: [DisplayIngredientBlock] {
         if isEditMode {
-            let multi = !editIsSingleUnnamed && editSections.count > 1
             return editSections.compactMap { sec in
                 let groups = groupEdit(sec.ingredients)
                 guard !groups.isEmpty else { return nil }
                 return DisplayIngredientBlock(id: sec.id, sectionId: sec.id,
-                    title: multi ? (sec.name.isEmpty ? "Section" : sec.name) : nil,
+                    title: sec.name.trimmed.isEmpty ? nil : sec.name,
                     optionalChips: [], groups: groups)
             }
         }
 
         let visible = visibleIngredients
-        let multiSection = sortedSections.count > 1
-        let hasSectionless = recipe.ingredients.contains { $0.section == nil }
         var blocks: [DisplayIngredientBlock] = []
 
         func chips(_ sectionId: String?) -> [DisplayOptionalChip] {
@@ -165,22 +170,27 @@ extension RecipeDetailViewModel {
             }
         }
 
-        for section in sortedSections {
-            let groups = groupView(visible.filter { $0.section?.id == section.id })
-            let sectionChips = chips(section.id)
-            guard !groups.isEmpty || !sectionChips.isEmpty else { continue }
-            blocks.append(DisplayIngredientBlock(
-                id: section.id, sectionId: section.id,
-                title: (multiSection || hasSectionless) ? section.name : nil,
-                optionalChips: sectionChips, groups: groups))
+        // Recipe has sections → group by normalized section (orphans fold onto the first). The
+        // sub-header shows for any NAMED section (matching steps), nil for an unnamed one.
+        if !sortedSections.isEmpty {
+            for section in sortedSections {
+                let groups = groupView(visible.filter { normalizedSectionId($0.section?.id) == section.id })
+                let sectionChips = chips(section.id)
+                guard !groups.isEmpty || !sectionChips.isEmpty else { continue }
+                blocks.append(DisplayIngredientBlock(
+                    id: section.id, sectionId: section.id,
+                    title: section.name.trimmed.isEmpty ? nil : section.name,
+                    optionalChips: sectionChips, groups: groups))
+            }
+            return blocks
         }
-        let otherGroups = groupView(visible.filter { $0.section == nil })
-        let otherChips = chips(nil)
-        if !otherGroups.isEmpty || !otherChips.isEmpty {
-            blocks.append(DisplayIngredientBlock(
-                id: "__other__", sectionId: nil,
-                title: blocks.isEmpty ? nil : "Other",
-                optionalChips: otherChips, groups: otherGroups))
+
+        // No sections → a single flat block.
+        let groups = groupView(visible)
+        let flatChips = chips(nil)
+        if !groups.isEmpty || !flatChips.isEmpty {
+            blocks.append(DisplayIngredientBlock(id: "__other__", sectionId: nil,
+                title: nil, optionalChips: flatChips, groups: groups))
         }
         return blocks
     }
@@ -201,7 +211,9 @@ extension RecipeDetailViewModel {
                     })
             }
         }
-        let steps = recipe.steps.filter { $0.section?.id == sectionId }.sorted { $0.orderIndex < $1.orderIndex }
+        // F21: orphan steps (null/unknown section) fold onto the first section, matching ingredients.
+        let steps = recipe.steps.filter { normalizedSectionId($0.section?.id) == sectionId }
+            .sorted { $0.orderIndex < $1.orderIndex }
         return steps.enumerated().map { idx, step in
             DisplayStep(id: step.id, number: idx + 1, instruction: step.instruction,
                 refs: resolvedStepRefs(step))

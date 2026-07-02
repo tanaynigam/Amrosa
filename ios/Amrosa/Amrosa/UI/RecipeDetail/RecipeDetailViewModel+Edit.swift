@@ -36,13 +36,23 @@ extension RecipeDetailViewModel {
         let sorted = recipe.sections.sorted { $0.orderIndex < $1.orderIndex }
         if sorted.isEmpty {
             // No sections — wrap everything in a single unnamed section.
-            let ings = recipe.ingredients.filter { $0.section == nil }
+            let ings = recipe.ingredients
                 .sorted { $0.orderIndex < $1.orderIndex }.map { EditorIngredient(from: $0) }
-            let steps = recipe.steps.filter { $0.section == nil }
+            let steps = recipe.steps
                 .sorted { $0.orderIndex < $1.orderIndex }.map { EditorStep(from: $0) }
             editSections = [EditorSection(id: UUID().uuidString, name: "", ingredients: ings, steps: steps)]
         } else {
             editSections = sorted.map { EditorSection(from: $0) }
+            // F21: orphan ingredients/steps (null/unknown section) would otherwise be dropped on
+            // edit — assign them to the first section so they line up with everything else.
+            let knownIngIds = Set(editSections.flatMap { $0.ingredients.map(\.id) })
+            let orphanIngs = recipe.ingredients.filter { !knownIngIds.contains($0.id) }
+                .sorted { $0.orderIndex < $1.orderIndex }.map { EditorIngredient(from: $0) }
+            let knownStepIds = Set(editSections.flatMap { $0.steps.map(\.id) })
+            let orphanSteps = recipe.steps.filter { !knownStepIds.contains($0.id) }
+                .sorted { $0.orderIndex < $1.orderIndex }.map { EditorStep(from: $0) }
+            if !orphanIngs.isEmpty { editSections[0].ingredients.append(contentsOf: orphanIngs) }
+            if !orphanSteps.isEmpty { editSections[0].steps.append(contentsOf: orphanSteps) }
         }
         deletedSectionIds = []; deletedIngredientIds = []; deletedStepIds = []
         editIngredientSig = Dictionary(uniqueKeysWithValues:
@@ -148,6 +158,90 @@ extension RecipeDetailViewModel {
                 }
             }
         }
+        // F19: move the substitute to sit immediately after its target within that section, so the
+        // group reads together in the list.
+        guard let ts = editSections.firstIndex(where: { $0.ingredients.contains { $0.id == targetId } }) else { return }
+        var moved: EditorIngredient?
+        for s in editSections.indices {
+            if let ii = editSections[s].ingredients.firstIndex(where: { $0.id == ingredientId }) {
+                moved = editSections[s].ingredients.remove(at: ii); break
+            }
+        }
+        guard let item = moved else { return }
+        if let ti = editSections[ts].ingredients.firstIndex(where: { $0.id == targetId }) {
+            editSections[ts].ingredients.insert(item, at: ti + 1)
+        } else {
+            editSections[ts].ingredients.append(item)
+        }
+    }
+
+    // F21: section-agnostic ops — locate an item by id across all sections so changing its section
+    // mid-edit doesn't break the open sheet.
+
+    /// The section currently holding an ingredient / step.
+    func sectionId(ofIngredient id: String) -> String? {
+        editSections.first { $0.ingredients.contains { $0.id == id } }?.id
+    }
+    func sectionId(ofStep id: String) -> String? {
+        editSections.first { $0.steps.contains { $0.id == id } }?.id
+    }
+
+    func updateIngredientAnywhere(_ updated: EditorIngredient) {
+        for s in editSections.indices {
+            if let i = editSections[s].ingredients.firstIndex(where: { $0.id == updated.id }) {
+                editSections[s].ingredients[i] = updated; return
+            }
+        }
+    }
+    func updateStepAnywhere(_ updated: EditorStep) {
+        for s in editSections.indices {
+            if let i = editSections[s].steps.firstIndex(where: { $0.id == updated.id }) {
+                editSections[s].steps[i] = updated; return
+            }
+        }
+    }
+    func deleteIngredientAnywhere(_ id: String) {
+        for s in editSections.indices { editSections[s].ingredients.removeAll { $0.id == id } }
+        deletedIngredientIds.insert(id)
+        for s in editSections.indices {
+            for j in editSections[s].steps.indices { editSections[s].steps[j].ingredientIds.removeAll { $0 == id } }
+        }
+    }
+    func deleteStepAnywhere(_ id: String) {
+        for s in editSections.indices { editSections[s].steps.removeAll { $0.id == id } }
+        deletedStepIds.insert(id)
+    }
+
+    /// Move an ingredient / step to a different section (F21 — the sheet's Section selector).
+    func moveIngredientToSection(_ ingredientId: String, to newSectionId: String) {
+        guard let target = editSections.firstIndex(where: { $0.id == newSectionId }) else { return }
+        for s in editSections.indices {
+            if let i = editSections[s].ingredients.firstIndex(where: { $0.id == ingredientId }) {
+                guard s != target else { return }
+                let item = editSections[s].ingredients.remove(at: i)
+                editSections[target].ingredients.append(item)
+                return
+            }
+        }
+    }
+    func moveStepToSection(_ stepId: String, to newSectionId: String) {
+        guard let target = editSections.firstIndex(where: { $0.id == newSectionId }) else { return }
+        for s in editSections.indices {
+            if let i = editSections[s].steps.firstIndex(where: { $0.id == stepId }) {
+                guard s != target else { return }
+                let item = editSections[s].steps.remove(at: i)
+                editSections[target].steps.append(item)
+                return
+            }
+        }
+    }
+
+    /// Create a new section and return its id (for the sheet's "New section" option).
+    @discardableResult
+    func addSectionReturningId(name: String = "New Section") -> String {
+        let sec = EditorSection(name: name.trimmed.isEmpty ? "New Section" : name, ingredients: [], steps: [])
+        editSections.append(sec)
+        return sec.id
     }
 
     /// Reorder an ingredient within its section (Up/Down in the ingredient sheet).
@@ -157,6 +251,47 @@ extension RecipeDetailViewModel {
         let j = i + delta
         guard editSections[s].ingredients.indices.contains(j) else { return }
         editSections[s].ingredients.swapAt(i, j)
+    }
+
+    // F19: true drag-and-drop reorder — drop a dragged item onto a target item. Moves the dragged
+    // to the target's index (within or across sections), mirroring Android's reorderIngredient/Step.
+    // Cross-type or unknown ids are no-ops (so dropping a step on an ingredient does nothing).
+
+    private func locateIngredient(_ id: String) -> (Int, Int)? {
+        for s in editSections.indices {
+            if let i = editSections[s].ingredients.firstIndex(where: { $0.id == id }) { return (s, i) }
+        }
+        return nil
+    }
+    private func locateStep(_ id: String) -> (Int, Int)? {
+        for s in editSections.indices {
+            if let i = editSections[s].steps.firstIndex(where: { $0.id == id }) { return (s, i) }
+        }
+        return nil
+    }
+
+    func reorderIngredient(_ fromId: String, onto toId: String) {
+        guard fromId != toId,
+              let (fs, fi) = locateIngredient(fromId),
+              let (ts, ti) = locateIngredient(toId) else { return }
+        let item = editSections[fs].ingredients.remove(at: fi)
+        editSections[ts].ingredients.insert(item, at: min(ti, editSections[ts].ingredients.count))
+    }
+    func reorderStep(_ fromId: String, onto toId: String) {
+        guard fromId != toId,
+              let (fs, fi) = locateStep(fromId),
+              let (ts, ti) = locateStep(toId) else { return }
+        let item = editSections[fs].steps.remove(at: fi)
+        editSections[ts].steps.insert(item, at: min(ti, editSections[ts].steps.count))
+    }
+
+    /// Reorder a step within its section (Up/Down in the step sheet).
+    func moveStep(in sectionId: String, _ stepId: String, by delta: Int) {
+        guard let s = editSections.firstIndex(where: { $0.id == sectionId }),
+              let i = editSections[s].steps.firstIndex(where: { $0.id == stepId }) else { return }
+        let j = i + delta
+        guard editSections[s].steps.indices.contains(j) else { return }
+        editSections[s].steps.swapAt(i, j)
     }
 
     private func mutateIngredient(_ id: String, _ change: (inout EditorIngredient) -> Void) {
@@ -247,9 +382,19 @@ extension RecipeDetailViewModel {
     func saveEdit() {
         let title = editTitle.trimmingCharacters(in: .whitespaces)
         guard !title.isEmpty else { editError = "Title cannot be empty"; return }
-        isSavingEdit = true
+        let recipeId = recipe.id
+        // F19: exit edit mode IMMEDIATELY; the write runs on the app-scoped save tracker so it
+        // survives leaving the recipe (a spinner shows on the card + detail bar meanwhile).
         editError = nil
+        isEditMode = false
+        editTarget = nil
+        let work: () async -> Void = { [self] in await persistEdit(title: title, recipeId: recipeId) }
+        if let tracker = saveTracker { tracker.run(recipeId, work) } else { Task { await work() } }
+    }
 
+    /// The actual write (conversions + Room + push + mirror reconcile). Reads the frozen draft from
+    /// `self` (edit mode already exited, so the draft no longer mutates). Best-effort.
+    private func persistEdit(title: String, recipeId: String) async {
         let tags = editTagsText.split(separator: ",").map { String($0).trimmed }.filter { !$0.isEmpty }
         let urls = editSourceUrlsText.split(separator: "\n").map { String($0).trimmed }.filter { !$0.isEmpty }
         let prep = Int(editPrepTime)
@@ -257,58 +402,49 @@ extension RecipeDetailViewModel {
         let servings = Int(editBaseServings) ?? 1
         let servingsMin = editIsRangeYield ? Int(editServingsMin) : nil
         let servingsMax = editIsRangeYield ? Int(editServingsMax) : nil
-        let recipeId = recipe.id
 
-        Task {
-            do {
-                // #8 — auto-update conversions ONLY for ingredients whose name/quantity changed
-                // (or were added) this session. Best-effort: a convert failure doesn't block save.
-                let changed = editSections.flatMap { $0.ingredients }.filter {
-                    !$0.quantityDisplay.trimmed.isEmpty && editIngredientSig[$0.id] != Self.ingredientSig($0)
-                }
-                let converted = await convertRemote(changed)
-                let effectiveSections: [EditorSection] = converted.isEmpty ? editSections : editSections.map { sec in
-                    var s = sec
-                    s.ingredients = sec.ingredients.map { ing in
-                        converted[ing.id].map { withConversions(ing, $0) } ?? ing
-                    }
-                    return s
-                }
-
-                try repository.updateFullRecipe(
-                    recipeId: recipeId,
-                    title: title,
-                    recipeDescription: editDescription.trimmed.isEmpty ? nil : editDescription.trimmed,
-                    sourceUrls: urls,
-                    baseServings: servings,
-                    baseServingsMin: servingsMin,
-                    baseServingsMax: servingsMax,
-                    prepTimeMinutes: prep,
-                    cookTimeMinutes: cook,
-                    tags: tags,
-                    isImported: !editIsPersonalAuthor,
-                    authorDisplayName: editIsPersonalAuthor ? personalAuthorName : "Imported",
-                    variantName: editIsVariant ? (editVariantName.trimmed.isEmpty ? "Variation" : editVariantName.trimmed) : nil,
-                    sections: effectiveSections,
-                    deletedSectionIds: Array(deletedSectionIds),
-                    deletedIngredientIds: Array(deletedIngredientIds),
-                    deletedStepIds: Array(deletedStepIds)
-                )
-                // Push + reconcile the mirror (SwiftData @Model updates the view in place):
-                // re-publish when shared (shared/friends/public), unpublish when private — so a
-                // recipe flipped to Private can never linger in the public mirror / Discovery.
-                if let updated = try repository.fetchRecipe(id: recipeId) {
-                    if !updated.isImported { await syncService?.pushPersonalRecipe(updated) }
-                    if updated.visibility != "private" { _ = await sharedRecipeService.publish(updated) }
-                    else { _ = await sharedRecipeService.unpublish(updated.id) }
-                }
-                isSavingEdit = false
-                isEditMode = false
-                editTarget = nil
-            } catch {
-                isSavingEdit = false
-                editError = "Save failed: \(error.localizedDescription)"
+        // #8 — auto-update conversions ONLY for ingredients whose name/quantity changed (or were
+        // added) this session. Best-effort: a convert failure doesn't block the save.
+        let changed = editSections.flatMap { $0.ingredients }.filter {
+            !$0.quantityDisplay.trimmed.isEmpty && editIngredientSig[$0.id] != Self.ingredientSig($0)
+        }
+        let converted = await convertRemote(changed)
+        let effectiveSections: [EditorSection] = converted.isEmpty ? editSections : editSections.map { sec in
+            var s = sec
+            s.ingredients = sec.ingredients.map { ing in
+                converted[ing.id].map { withConversions(ing, $0) } ?? ing
             }
+            return s
+        }
+
+        do {
+            try repository.updateFullRecipe(
+                recipeId: recipeId,
+                title: title,
+                recipeDescription: editDescription.trimmed.isEmpty ? nil : editDescription.trimmed,
+                sourceUrls: urls,
+                baseServings: servings,
+                baseServingsMin: servingsMin,
+                baseServingsMax: servingsMax,
+                prepTimeMinutes: prep,
+                cookTimeMinutes: cook,
+                tags: tags,
+                isImported: !editIsPersonalAuthor,
+                authorDisplayName: editIsPersonalAuthor ? personalAuthorName : "Imported",
+                variantName: editIsVariant ? (editVariantName.trimmed.isEmpty ? "Variation" : editVariantName.trimmed) : nil,
+                sections: effectiveSections,
+                deletedSectionIds: Array(deletedSectionIds),
+                deletedIngredientIds: Array(deletedIngredientIds),
+                deletedStepIds: Array(deletedStepIds)
+            )
+            // Push + reconcile the mirror: re-publish when shared, unpublish when private.
+            if let updated = try repository.fetchRecipe(id: recipeId) {
+                if !updated.isImported { await syncService?.pushPersonalRecipe(updated) }
+                if updated.visibility != "private" { _ = await sharedRecipeService.publish(updated) }
+                else { _ = await sharedRecipeService.unpublish(updated.id) }
+            }
+        } catch {
+            // Background best-effort save; the launch-time push self-heals on next sign-in.
         }
     }
 
