@@ -39,3 +39,6 @@ backend/firestore/node_modules/
 # Backend — Cloud Functions
 backend/functions/node_modules/
 backend/functions/.env
+
+# Firebase auth export (contains user PII — never commit)
+/users.json
