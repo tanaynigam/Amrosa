@@ -1,36 +1,44 @@
 /**
- * One-off Firestore migration: copy ALL data from the old project (amrosa-2ec82)
- * into the new project (chef-s-list) for the Chef's List rebrand.
+ * Firestore project-to-project migration: copy ALL data from one Firebase project into
+ * another (used for each app rebrand — amrosa-2ec82 → chef-s-list → chef-s-journal-6a0fd).
  *
  * It recursively copies every top-level collection AND every nested subcollection
  * (personal_recipes/{uid}/recipes, recipe_notes/{id}/notes, shared_recipes/{id}/likes,
  * notifications/{uid}/items, received_recipes/{uid}/items, shared_to/{uid}/recipes, …),
- * preserving document IDs and paths exactly. Because IDs/paths are preserved, this only
- * lines up per-user data if the Auth users were migrated first WITH THE SAME UIDs:
+ * preserving document IDs and paths exactly. Because IDs/paths are preserved, per-user data
+ * only lines up if the Auth users were migrated first WITH THE SAME UIDs:
  *
- *     firebase auth:export users.json --project amrosa-2ec82
- *     firebase auth:import users.json --project chef-s-list
+ *     firebase auth:export users.json --project <SOURCE>
+ *     firebase auth:import users.json --project <DEST>
  *
  * Setup:
  *   1. Download a service-account key from EACH project
- *      (Project Settings → Service accounts → Generate new private key) and save as:
- *        backend/firestore/serviceAccountKey.source.json   (amrosa-2ec82)
- *        backend/firestore/serviceAccountKey.dest.json     (chef-s-list)
- *      (both are gitignored)
- *   2. From backend/firestore/:  node migrate-firestore.js          (copies everything)
- *                                node migrate-firestore.js --dry-run  (counts only, no writes)
+ *      (Project Settings → Service accounts → Generate new private key) into
+ *      backend/firestore/ (serviceAccountKey*.json is gitignored).
+ *   2. From backend/firestore/:
+ *        node migrate-firestore.js --source <srcKey.json> --dest <dstKey.json> --dry-run
+ *        node migrate-firestore.js --source <srcKey.json> --dest <dstKey.json>
+ *      Key paths default to serviceAccountKey.source.json / serviceAccountKey.dest.json.
+ *      The banner prints the resolved project ids — always check the direction before writing.
  *
  * Safe to re-run: documents are written with set() (overwrite), so a second run just
  * re-copies. It never deletes anything in either project.
  */
 
 const admin = require("firebase-admin");
+const path = require("path");
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const BATCH_LIMIT = 400; // Firestore batched-write cap is 500; stay under.
 
-const srcKey = require("./serviceAccountKey.source.json");
-const dstKey = require("./serviceAccountKey.dest.json");
+/** Read a `--flag value` argument, falling back to a default. */
+function argVal(flag, fallback) {
+  const i = process.argv.indexOf(flag);
+  return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
+}
+
+const srcKey = require(path.resolve(argVal("--source", "./serviceAccountKey.source.json")));
+const dstKey = require(path.resolve(argVal("--dest", "./serviceAccountKey.dest.json")));
 
 const srcApp = admin.initializeApp({ credential: admin.credential.cert(srcKey) }, "source");
 const dstApp = admin.initializeApp({ credential: admin.credential.cert(dstKey) }, "dest");
