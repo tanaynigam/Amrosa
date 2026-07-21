@@ -45,7 +45,7 @@ function toHttpsError(err) {
  * Transparently handles regular web pages, Google Sheets, and Google Docs URLs.
  *
  * Input:  { url: "https://..." }
- * Output: { recipe: { ...ChefsList schema... } }
+ * Output: { recipe: { ...Tablefeed schema... } }
  */
 exports.parseRecipeUrl = onCall(
   {
@@ -97,7 +97,7 @@ exports.parseRecipeUrl = onCall(
  * Supports plain text, CSV, and XLSX (Excel) files.
  *
  * Input:  { content: string, type: "text"|"csv"|"xlsx", fileName: string }
- * Output: { recipe: { ...ChefsList schema... } }
+ * Output: { recipe: { ...Tablefeed schema... } }
  */
 exports.parseRecipeContent = onCall(
   {
@@ -149,11 +149,11 @@ exports.parseRecipeContent = onCall(
 // ─── formatRecipeText ─────────────────────────────────────────────────────────
 
 /**
- * Format a freeform recipe typed by the user into the structured ChefsList schema.
+ * Format a freeform recipe typed by the user into the structured Tablefeed schema.
  * Used by the "Add New Recipe → Type it out" flow in the Personal tab.
  *
  * Input:  { text: string }
- * Output: { recipe: { ...ChefsList schema... } }
+ * Output: { recipe: { ...Tablefeed schema... } }
  */
 exports.formatRecipeText = onCall(
   {
@@ -350,7 +350,7 @@ exports.sendPushNotification = onDocumentCreated(
         break;
       case 'recipe_shared':
         title = fromDisplayName + ' shared a recipe';
-        body  = recipeName ? ('"' + recipeName + '"') : 'Tap to view it in ChefsList';
+        body  = recipeName ? ('"' + recipeName + '"') : 'Tap to view it in Tablefeed';
         break;
       default:
         return;
@@ -361,7 +361,7 @@ exports.sendPushNotification = onDocumentCreated(
         token: fcmToken,
         notification: { title, body },
         data: { type: type, shareId: data.shareId ?? '' },
-        android: { notification: { channelId: 'chefslist_social', priority: 'high' } },
+        android: { notification: { channelId: 'tablefeed_social', priority: 'high' } },
       });
       console.log('Push sent: ' + type + ' -> ' + uid);
     } catch (err) {

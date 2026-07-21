@@ -22,6 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ChefsList"
+rootProject.name = "Tablefeed"
 include(":app")
  

@@ -6,7 +6,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:name=".ChefsListApplication"
+        android:name=".TablefeedApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -14,7 +14,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ChefsList">
+        android:theme="@style/Theme.Tablefeed">
 
         <activity
             android:name=".MainActivity"
@@ -26,7 +26,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- App Links: https://chef-s-list.web.app/shared/{recipeId} -->
+            <!-- App Links: https://table-feed-7498c.web.app/shared/{recipeId} -->
             <!-- android:autoVerify="true" lets Android verify domain ownership via assetlinks.json -->
             <!-- When verified, tapping the link opens the app directly with no chooser dialog -->
             <intent-filter android:autoVerify="true">
@@ -35,23 +35,23 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:scheme="https"
-                    android:host="chef-s-list.web.app"
+                    android:host="table-feed-7498c.web.app"
                     android:pathPrefix="/shared/" />
             </intent-filter>
 
-            <!-- Custom scheme fallback: chefslist://shared/{recipeId} -->
+            <!-- Custom scheme fallback: tablefeed://shared/{recipeId} -->
             <!-- Works immediately without domain verification — used as a legacy fallback -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="chefslist" android:host="shared" />
+                <data android:scheme="tablefeed" android:host="shared" />
             </intent-filter>
         </activity>
 
         <!-- FCM: receives push notifications and token refresh events -->
         <service
-            android:name=".service.ChefsListMessagingService"
+            android:name=".service.TablefeedMessagingService"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />

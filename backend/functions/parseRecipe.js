@@ -6,7 +6,7 @@ const { RECIPE_SCHEMA_DESCRIPTION } = require("./recipeSchema");
 // ─── System instructions ──────────────────────────────────────────────────────
 
 const IMPORT_SYSTEM_INSTRUCTION =
-  "You are a recipe parser for the ChefsList recipe app. " +
+  "You are a recipe parser for the Tablefeed recipe app. " +
   "Given text content from a recipe source (web page, spreadsheet, document, or plain text), " +
   "extract the recipe into the exact JSON schema provided. Be thorough — capture every " +
   "ingredient, every step, and link ingredients to steps where mentioned. " +
@@ -20,7 +20,7 @@ const IMPORT_SYSTEM_INSTRUCTION =
   "Return ONLY valid JSON, no markdown, no explanation.";
 
 const FREEFORM_SYSTEM_INSTRUCTION =
-  "You are a recipe formatter for the ChefsList recipe app. " +
+  "You are a recipe formatter for the Tablefeed recipe app. " +
   "The user has typed a recipe from memory — it may be incomplete, informal, partial, or unstructured. " +
   "Your job is to extract everything you can and structure it into the exact JSON schema provided. " +
   "Fill in missing fields with sensible defaults: servings = 1 if not stated, times = null if unknown. " +
@@ -120,7 +120,7 @@ async function parseRecipeFromContent(content, type, fileName, apiKey) {
 }
 
 /**
- * Format a freeform recipe typed by the user into structured ChefsList schema.
+ * Format a freeform recipe typed by the user into structured Tablefeed schema.
  *
  * @param {string} text    — raw user-typed recipe text
  * @param {string} apiKey  — Gemini API key
@@ -166,7 +166,7 @@ async function fetchGoogleSheet(sheetId) {
   try {
     const response = await axios.get(exportUrl, {
       timeout: 15000,
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; ChefsList-RecipeParser/1.0)" },
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; Tablefeed-RecipeParser/1.0)" },
       maxRedirects: 5,
     });
     return typeof response.data === "string"
@@ -188,7 +188,7 @@ async function fetchGoogleDoc(docId) {
   try {
     const response = await axios.get(exportUrl, {
       timeout: 15000,
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; ChefsList-RecipeParser/1.0)" },
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; Tablefeed-RecipeParser/1.0)" },
       maxRedirects: 5,
     });
     return typeof response.data === "string"
@@ -356,7 +356,7 @@ async function callGemini(content, sourceHint, apiKey, systemInstruction) {
   });
 
   const prompt =
-    `Parse the following recipe content into ChefsList's recipe JSON format.\n\n` +
+    `Parse the following recipe content into Tablefeed's recipe JSON format.\n\n` +
     `Source: ${sourceHint}\n\n` +
     `SCHEMA:\n${RECIPE_SCHEMA_DESCRIPTION}\n\n` +
     `CONTENT:\n${content}`;
@@ -538,7 +538,7 @@ function metricFields(value, baseUnit) {
 }
 
 const CONVERT_SYSTEM_INSTRUCTION =
-  "You are a unit-conversion assistant for the ChefsList recipe app. " +
+  "You are a unit-conversion assistant for the Tablefeed recipe app. " +
   "For each ingredient, return its metric VOLUME in ml (`ml`) when it was measured by volume " +
   "(cups, tbsp, tsp, fl oz, ml, L) — otherwise null — AND its metric WEIGHT in grams (`grams`) when " +
   "it is a dry/solid ingredient OR was measured by weight (oz, lb, g, kg) — otherwise null. " +
