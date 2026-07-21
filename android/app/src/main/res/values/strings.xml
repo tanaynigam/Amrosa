@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Tablefeed</string>
+    <string name="app_name">Chef\'s Journal</string>
     <!-- Web client ID from Firebase Console (client_type 3 in google-services.json) -->
-    <string name="google_web_client_id" translatable="false">664275028603-2h4odiih4hnq5fmi1mtprevfbvt4hqh2.apps.googleusercontent.com</string>
+    <string name="google_web_client_id" translatable="false">620368151517-94hvcrfs6t0n46ebhstqj42h17dl7f71.apps.googleusercontent.com</string>
 </resources>

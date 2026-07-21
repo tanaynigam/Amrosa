@@ -1,5 +1,5 @@
 /**
- * Tablefeed recipe JSON schema — used in the Gemini prompt so the model
+ * ChefsJournal recipe JSON schema — used in the Gemini prompt so the model
  * returns data that maps directly onto the Firestore / Room data model.
  */
 

@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.aerion.tablefeed"
+    namespace = "com.aerion.chefsjournal"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -14,7 +14,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.aerion.tablefeed"
+        applicationId = "com.aerion.chefsjournal"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

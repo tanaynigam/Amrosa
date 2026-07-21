@@ -1,7 +1,7 @@
-# Tablefeed — Project Specification
+# Chef's Journal — Project Specification
 ### by Aerion
 
-> **Tablefeed** is the app name. The launch screen shows the **Tablefeed** wordmark. The guiding identity of the app: recipes that are exquisite, elaborate, and deeply personal. (Renamed from "Amrosa" → "Chef's List" → **Tablefeed**; fully rebranded to the `com.aerion.tablefeed` package + the `table-feed-7498c` Firebase project.)
+> **Chef's Journal** is the app name. The launch screen shows the **Chef's Journal** wordmark. The guiding identity of the app: recipes that are exquisite, elaborate, and deeply personal. (Renamed "Amrosa" → "Chef's List" → "Tablefeed" → **Chef's Journal**; fully rebranded to the `com.aerion.chefsjournal` package + the `chef-s-journal-6a0fd` Firebase project. Identifiers use `ChefsJournal`/`chefsjournal` — no apostrophe.)
 
 > ⚙️ **Split-platform workflow (since 2026-06):** New features are implemented on **Android first, in this session**. The **iOS port is handled by a separate Claude session** on a Mac. This CLAUDE.md is the **hand-off contract** between the two: every Android feature must be documented here (schema, data flow, UI, Firestore shape) so the iOS session can port it, and Android-ahead features are tracked under the iOS "Remaining Gaps" tables. Shared infrastructure (Firestore rules, Cloud Functions, indexes) is owned by the Android session and benefits both.
 
@@ -11,7 +11,7 @@
 
 | Field | Detail |
 |---|---|
-| **App Name** | Tablefeed |
+| **App Name** | Chef's Journal |
 | **Company** | Aerion |
 | **Platform** | Android (primary, Kotlin); iOS (Swift/SwiftUI/SwiftData — in progress, separate codebase) |
 | **Android Language** | Kotlin |
@@ -21,7 +21,7 @@
 | **Architecture** | MVVM + Repository Pattern (both platforms) |
 | **Database (local — Android)** | Room (SQLite) — **current: DB v13** (real migrations preserve data; seeder is a no-op) |
 | **Database (local — iOS)** | SwiftData (ModelContainer, no manual migrations) |
-| **Database (cloud)** | Firebase Firestore (`table-feed-7498c`) |
+| **Database (cloud)** | Firebase Firestore (`chef-s-journal-6a0fd`) |
 | **Cloud Storage** | Firebase Storage (planned — images) |
 | **Auth** | Firebase Authentication — **mandatory** (Google Sign-In + email/password + phone OTP) |
 | **AI / Recipe Parsing** | Gemini 2.5 Flash via Firebase Cloud Functions v2 (Node.js 24) |
@@ -31,11 +31,11 @@
 ## Monorepo Structure
 
 ```
-Tablefeed/
+ChefsJournal/
 ├── android/          # Android app (Kotlin + Jetpack Compose) — primary platform
 ├── ios/              # iOS app (Swift + SwiftUI + SwiftData) — in progress
-│   └── Tablefeed/Tablefeed/
-│       ├── TablefeedApp.swift         # Entry point; Firebase init; AppContainer setup
+│   └── ChefsJournal/ChefsJournal/
+│       ├── ChefsJournalApp.swift         # Entry point; Firebase init; AppContainer setup
 │       ├── AppContainer.swift      # DI root; ModelContainer; repositories; onLaunch()
 │       ├── Data/
 │       │   ├── Models/             # SwiftData models (RecipeModel, IngredientModel, etc.)
@@ -60,11 +60,11 @@ Tablefeed/
 │   ├── functions/    # Firebase Cloud Functions (Node.js 24)
 │   │   ├── index.js           # Function entry points
 │   │   ├── parseRecipe.js     # URL/file/Sheets/Docs → Gemini → recipe JSON
-│   │   ├── recipeSchema.js    # Tablefeed JSON schema for Gemini prompt
+│   │   ├── recipeSchema.js    # ChefsJournal JSON schema for Gemini prompt
 │   │   └── package.json       # firebase-functions, axios, @google/generative-ai, xlsx
 │   └── firestore/
 │       └── upload-recipes.js  # Node.js admin upload script (reference only)
-├── hosting/          # Firebase Hosting (deployed to table-feed-7498c.web.app)
+├── hosting/          # Firebase Hosting (deployed to chef-s-journal-6a0fd.web.app)
 │   └── public/
 │       ├── index.html          # Landing page
 │       ├── shared.html         # Recipe viewer (browser fallback for shared links)
@@ -96,9 +96,9 @@ Tab 4 — Account        (👤)  Profile, co-chef system, sync, sign-out
 ```
 
 **Design decisions:**
-- **Auth is mandatory.** `TablefeedNavGraph` observes `authStateFlow()`. When `currentUser == null` or anonymous, the full-screen `AuthScreen` is shown (no back button, no bottom bar). The main `Scaffold` + `NavHost` don't render until sign-in.
+- **Auth is mandatory.** `ChefsJournalNavGraph` observes `authStateFlow()`. When `currentUser == null` or anonymous, the full-screen `AuthScreen` is shown (no back button, no bottom bar). The main `Scaffold` + `NavHost` don't render until sign-in.
 - **Sign-out deletes all local data.** `AccountViewModel.signOut()` calls `container.clearAllLocalData(context)` (Room `clearAllTables()` + sync prefs cleared) before `authRepository.signOut()`. Auth state change recomposes the nav graph back to the auth gate automatically.
-- **Sign-in triggers sync.** `TablefeedApplication` observes `authStateFlow()` and calls `syncService.syncPersonalRecipes()` + `syncService.syncReceivedRecipes()` whenever a real (non-anonymous) user is detected. (There is **no seeding** — fresh installs start empty; the old `DatabaseSeeder`/`recipes` collection was removed in the rebrand.)
+- **Sign-in triggers sync.** `ChefsJournalApplication` observes `authStateFlow()` and calls `syncService.syncPersonalRecipes()` + `syncService.syncReceivedRecipes()` whenever a real (non-anonymous) user is detected. (There is **no seeding** — fresh installs start empty; the old `DatabaseSeeder`/`recipes` collection was removed in the rebrand.)
 - **"All" tab is removed.** My Recipes (route `"yours_tab"`, title "My Recipes") is the primary tab. Filter chips (`All | Personal | Imported | Shared`) provide in-tab filtering.
 - **Filter chips scroll with the list.** On My Recipes, the chips are the first item *inside* the `LazyColumn` (not a fixed header row), so they scroll away as you browse — maximising vertical space for recipe cards. Author/source chips and category chips share a single horizontally-scrollable row separated by a thin vertical divider. The search bar above is a compact rounded field with a clear (✕) button.
 - **"Shared" filter chip (My Recipes tab):** selecting it switches the list to show recipes shared *with* you (live `shared_to/{uid}/recipes/` feed) using the same card design. Category chips and the Add Recipe FAB hide in Shared mode. Tapping a shared card → `received/{shareId}` review screen.
@@ -185,7 +185,7 @@ label = if (isImported) "Imported by $name" else name
 
 **Firestore rule:** `shared_to/{uid}/recipes` allows the recipient to delete their own pointers (consume-on-save + dismiss).
 
-**Notification deep links:** tapping a push routes to the relevant screen — `recipe_shared` → `received/{shareId}` review; `follow_request`/`follow_accepted` → Account tab. `MainActivity` reads the FCM `type`/`shareId` extras (foreground via PendingIntent, background via launch intent) and hands a route to the nav graph through `TablefeedApplication.pendingDeepLink`.
+**Notification deep links:** tapping a push routes to the relevant screen — `recipe_shared` → `received/{shareId}` review; `follow_request`/`follow_accepted` → Account tab. `MainActivity` reads the FCM `type`/`shareId` extras (foreground via PendingIntent, background via launch intent) and hands a route to the nav graph through `ChefsJournalApplication.pendingDeepLink`.
 
 ---
 
@@ -340,7 +340,7 @@ Comments are stored in Firestore only (`shared_recipes/{recipeId}/comments/{comm
 - **Pull sync** on app launch / sign-in: `pullPersonalRecipes()` fetches all docs in `personal_recipes/{uid}/recipes/`. For each, **last-write-wins by `updatedAt`**: if the local copy is newer (an offline edit not yet pushed) it is kept; otherwise the cloud copy replaces it. Then `pushAllPersonalRecipes()` pushes every local personal recipe back up.
 - **Conflict resolution + clean replace**: when the cloud copy wins, content is written via `RecipeDao.replacePulledRecipe` (Android) / `replaceSyncedContent` (iOS), which **clears the recipe's synced children (sections/ingredients/steps/refs) before re-inserting** — so a child removed on another device doesn't linger as an orphan. Local-only `recipe_notes` + `shopping_checks` are preserved. (iOS additionally guards with `firestoreUpdatedAt > existing.updatedAt`; previously it updated only metadata on an existing recipe, so cross-device content edits never propagated — now fixed.)
 - **Push sync** on personal recipe save: `RecipeSyncService.pushPersonalRecipe(recipeId)` → `personal_recipes/{uid}/recipes/{recipeId}`. Fire-and-forget — push failure does not block local save.
-- **Sync on sign-in**: `TablefeedApplication.authStateFlow` observer calls `syncPersonalRecipes()` + `syncReceivedRecipes()` whenever a real user is detected.
+- **Sync on sign-in**: `ChefsJournalApplication.authStateFlow` observer calls `syncPersonalRecipes()` + `syncReceivedRecipes()` whenever a real user is detected.
 - **Received recipes** (Tab 2) are read-only references — always take the mirror, via `replacePulledRecipe` (no timestamp guard, but still orphan-safe).
 - ⚠️ *Remaining minor gap*: the editor's post-save push runs in the editor `viewModelScope` and can be cancelled mid-pop; the launch-time `pushAllPersonalRecipes()` self-heals it.
 
@@ -598,7 +598,7 @@ To stop Gemini from producing believable-but-wrong volume→weight numbers, the 
 
 #### Auth is mandatory
 
-The app **requires** a signed-in account. `TablefeedNavGraph` observes `authStateFlow()` at the outermost level:
+The app **requires** a signed-in account. `ChefsJournalNavGraph` observes `authStateFlow()` at the outermost level:
 - `currentUser == null` or anonymous → renders full-screen `AuthScreen()` with no back button and no bottom bar (the main Scaffold/NavHost do not exist)
 - Real signed-in user → renders `MainAppScaffold()` with all 4 tabs
 
@@ -607,9 +607,9 @@ Anonymous auth has been **removed** — `signInAnonymouslyIfNeeded()` is no long
 #### Sign-out clears local data
 
 `AccountViewModel.signOut()`:
-1. Calls `app.container.clearAllLocalData(context)` — runs Room `database.clearAllTables()` + clears `tablefeed_sync` SharedPreferences
+1. Calls `app.container.clearAllLocalData(context)` — runs Room `database.clearAllTables()` + clears `chefsjournal_sync` SharedPreferences
 2. Calls `authRepository.signOut()`
-3. `authStateFlow` emits null → `TablefeedNavGraph` recomposes to auth gate automatically
+3. `authStateFlow` emits null → `ChefsJournalNavGraph` recomposes to auth gate automatically
 
 **Sign-out dialog** warns the user: *"All recipes will be removed from this device. They'll sync back automatically when you sign in again."*
 
@@ -651,10 +651,10 @@ Tab 4. Always shows a signed-in user (auth is mandatory). Profile card · follow
 - Snackbar shown on success: "Name updated"
 - `AuthRepository.updateDisplayName(name: String)` — wraps `FirebaseUser.updateProfile(UserProfileChangeRequest)`
 
-#### Launch sequence (`TablefeedApplication.onCreate()`)
+#### Launch sequence (`ChefsJournalApplication.onCreate()`)
 ```kotlin
 container = AppContainer(this)
-createNotificationChannel()   // creates "tablefeed_social" NotificationChannel (Android 8+)
+createNotificationChannel()   // creates "chefsjournal_social" NotificationChannel (Android 8+)
 appScope.launch {
     container.authRepository.authStateFlow().collect { user ->
         if (user != null && !user.isAnonymous) {
@@ -671,7 +671,7 @@ appScope.launch {
 `refreshFcmToken()` calls `FirebaseMessaging.getInstance().token.await()` and passes it to `socialRepository.updateFcmToken(token)`. This ensures the stored token is always current on sign-in even if `onNewToken` was never triggered.
 
 #### Firebase config
-Project: `table-feed-7498c`. Web client ID in `res/values/strings.xml` as `google_web_client_id`. SHA-1 debug fingerprint registered in Firebase Console for Google Sign-In.
+Project: `chef-s-journal-6a0fd`. Web client ID in `res/values/strings.xml` as `google_web_client_id`. SHA-1 debug fingerprint registered in Firebase Console for Google Sign-In.
 
 ---
 
@@ -704,7 +704,7 @@ A single **Share icon** appears in the `RecipeDetailScreen` top bar for owners o
 - Recipe remains private — direct share does not publish to `shared_recipes`
 
 **Option B — "Share link"**:
-- **Recipe is already public** → Android system share sheet opens with `https://table-feed-7498c.web.app/shared/{recipeId}`
+- **Recipe is already public** → Android system share sheet opens with `https://chef-s-journal-6a0fd.web.app/shared/{recipeId}`
 - **Recipe is private** → confirm dialog: *"This recipe will be visible to anyone with the link."* → `setVisibility("public")` → once `state.isPublic` becomes true, share sheet opens via `LaunchedEffect`
 - Making private again: the `FilterChip` (lock / globe icon) in the recipe body toggles visibility for owners
 
@@ -716,35 +716,35 @@ A single **Share icon** appears in the `RecipeDetailScreen` top bar for owners o
 
 #### Deep links & sharing URL
 
-Share URL format: **`https://table-feed-7498c.web.app/shared/{recipeId}`**
+Share URL format: **`https://chef-s-journal-6a0fd.web.app/shared/{recipeId}`**
 
 **Android App Links** — `AndroidManifest.xml` has two intent filters on `MainActivity`:
-1. `android:autoVerify="true"` HTTPS filter for `table-feed-7498c.web.app/shared/**` — verified via `assetlinks.json` in Firebase Hosting. When verified, tapping the link opens the app directly with no chooser dialog.
-2. `tablefeed://shared` custom scheme — legacy fallback; works immediately without domain verification.
+1. `android:autoVerify="true"` HTTPS filter for `chef-s-journal-6a0fd.web.app/shared/**` — verified via `assetlinks.json` in Firebase Hosting. When verified, tapping the link opens the app directly with no chooser dialog.
+2. `chefsjournal://shared` custom scheme — legacy fallback; works immediately without domain verification.
 
 NavGraph composable for `"shared/{recipeId}"` handles both:
 ```kotlin
 deepLinks = listOf(
-    navDeepLink { uriPattern = "https://table-feed-7498c.web.app/shared/{recipeId}" },
-    navDeepLink { uriPattern = "tablefeed://shared/{recipeId}" }
+    navDeepLink { uriPattern = "https://chef-s-journal-6a0fd.web.app/shared/{recipeId}" },
+    navDeepLink { uriPattern = "chefsjournal://shared/{recipeId}" }
 )
 ```
 
-**Firebase Hosting** (`table-feed-7498c.web.app`) — deployed:
+**Firebase Hosting** (`chef-s-journal-6a0fd.web.app`) — deployed:
 - `/.well-known/assetlinks.json` — Android App Links domain verification (SHA-256 fingerprint of debug keystore)
-- `/shared/{recipeId}` → `shared.html` — browser fallback page; fetches recipe from Firestore REST API, renders full recipe. Has "Open in Tablefeed" button (tries `tablefeed://` scheme). Works for anyone — app not required.
+- `/shared/{recipeId}` → `shared.html` — browser fallback page; fetches recipe from Firestore REST API, renders full recipe. Has "Open in ChefsJournal" button (tries `chefsjournal://` scheme). Works for anyone — app not required.
 - `/` → `index.html` — minimal landing page.
 
 Firestore rules updated: `shared_recipes` allows `read: if true` (unauthenticated reads for the web page).
 
 **iOS Universal Links** — ✅ wired (pending hosting deploy):
-1. `apple-app-site-association` at `hosting/public/.well-known/apple-app-site-association` (`appID 7S2FY6WF5V.com.aerion.tablefeed`, paths `/shared/*`); served as `application/json` via a `firebase.json` header. **Requires `firebase deploy --only hosting` to go live.**
-2. `Associated Domains` entitlement `applinks:table-feed-7498c.web.app` in `Tablefeed.entitlements`.
-3. `ContentView.onOpenURL` already routes `https://table-feed-7498c.web.app/shared/{id}` → Shared tab (so no app code change was needed beyond the entitlement).
+1. `apple-app-site-association` at `hosting/public/.well-known/apple-app-site-association` (`appID 7S2FY6WF5V.com.aerion.chefsjournal`, paths `/shared/*`); served as `application/json` via a `firebase.json` header. **Requires `firebase deploy --only hosting` to go live.**
+2. `Associated Domains` entitlement `applinks:chef-s-journal-6a0fd.web.app` in `ChefsJournal.entitlements`.
+3. `ContentView.onOpenURL` already routes `https://chef-s-journal-6a0fd.web.app/shared/{id}` → Shared tab (so no app code change was needed beyond the entitlement).
 
 Test Android App Links via ADB:
 ```
-adb shell am start -W -a android.intent.action.VIEW -d "https://table-feed-7498c.web.app/shared/RECIPE_ID" com.aerion.tablefeed
+adb shell am start -W -a android.intent.action.VIEW -d "https://chef-s-journal-6a0fd.web.app/shared/RECIPE_ID" com.aerion.chefsjournal
 ```
 
 #### Author attribution when sharing
@@ -791,7 +791,7 @@ data class ReceivedRecipeData(val recipe: Recipe, val fromDisplayName: String)
 
 Route: `"shared/{recipeId}"`. Entry point is **deep links only** — not reachable from any in-app tab.
 
-`tablefeed://shared/{recipeId}` or `https://table-feed-7498c.web.app/shared/{recipeId}` → opens this screen. Reads from Firestore `shared_recipes`, not Room. Features:
+`chefsjournal://shared/{recipeId}` or `https://chef-s-journal-6a0fd.web.app/shared/{recipeId}` → opens this screen. Reads from Firestore `shared_recipes`, not Room. Features:
 - Yield adjuster, unit toggle (Original/Metric/Imperial)
 - Read-only ingredients + steps
 - **"Copy to My Recipes"** button: saves full copy to Room with new UUIDs, `visibility = "private"`, `isImported = false`, author set to current user
@@ -915,16 +915,16 @@ No notification bell. Push notifications are Android system notifications delive
 
 #### Push notifications (FCM — implemented ✅)
 
-**`TablefeedMessagingService`** (`service/TablefeedMessagingService.kt`) — extends `FirebaseMessagingService`:
+**`ChefsJournalMessagingService`** (`service/ChefsJournalMessagingService.kt`) — extends `FirebaseMessagingService`:
 - `onNewToken(token)` — saves token to `users/{uid}.fcmToken` in Firestore
 - `onMessageReceived(message)` — shows system notification when app is foreground (background handled automatically by OS)
-- Notification channel ID: `"tablefeed_social"`, name: `"Tablefeed"`, importance: DEFAULT
+- Notification channel ID: `"chefsjournal_social"`, name: `"ChefsJournal"`, importance: DEFAULT
 - Registered in `AndroidManifest.xml` with `com.google.firebase.MESSAGING_EVENT` intent filter
 - `POST_NOTIFICATIONS` permission declared (required Android 13+)
 
 **`sendPushNotification` Cloud Function** — Firestore `onDocumentCreated` trigger on `notifications/{uid}/items/{notifId}`:
 1. Reads `users/{uid}.fcmToken`; skips silently if missing
-2. Sends FCM via `admin.messaging().send()` with `android.notification.channelId = "tablefeed_social"`
+2. Sends FCM via `admin.messaging().send()` with `android.notification.channelId = "chefsjournal_social"`
 
 | type | title | body |
 |---|---|---|
@@ -1110,13 +1110,13 @@ constructs a transient `RecipeDetailUiState` to host Cooking Mode for unsaved re
   (run once with the service-account key) — or naturally on the next re-publish.
 
 #### Phase 3b — Polish ✅
-- **Explicit cuisine preferences**: `data/UserPreferences.kt` (SharedPreferences `tablefeed_prefs`,
+- **Explicit cuisine preferences**: `data/UserPreferences.kt` (SharedPreferences `chefsjournal_prefs`,
   local-only) stores chosen cuisine tags. Account → "Recipe preferences" = `FilterChip`s (curated
   list ∪ the user's own tags, minus meal words). When set, they **override** the implicit affinity in
   `DiscoverViewModel.load` (`explicit.ifEmpty { DiscoverRanker.topCuisines(ownTags) }`). Changing prefs
   reflects on the next Discover refresh.
 - **Pull-to-refresh**: `PullToRefreshBox` around the Discover shelves → `vm.refresh()` (`isRefreshing` state).
-- **Discover is now the default tab**: `TablefeedNavGraph` `startDestination = BottomTab.Discover.route`.
+- **Discover is now the default tab**: `ChefsJournalNavGraph` `startDestination = BottomTab.Discover.route`.
 
 ---
 
@@ -1288,10 +1288,10 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | Cloud DB | Firebase Firestore |
 | Auth | Firebase Authentication + `play-services-auth` |
 | Image Storage | Firebase Storage (planned) |
-| Background Sync | On-launch coroutine (`TablefeedApplication`) |
+| Background Sync | On-launch coroutine (`ChefsJournalApplication`) |
 | Recipe AI | Gemini 2.5 Flash via Firebase Cloud Functions v2 (Node.js 24) |
 | Image Loading | Coil |
-| DI | Manual (`AppContainer` in `TablefeedApplication`) |
+| DI | Manual (`AppContainer` in `ChefsJournalApplication`) |
 | State Management | ViewModel + StateFlow |
 | JSON | Gson |
 
@@ -1317,7 +1317,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | Cloud Functions | Node.js 24, Firebase Functions v2 |
 | Recipe parsing | `@google/generative-ai` (Gemini 2.5 Flash) |
 | XLSX parsing | SheetJS (`xlsx` npm package) |
-| Hosting | Firebase Hosting (`table-feed-7498c.web.app`) |
+| Hosting | Firebase Hosting (`chef-s-journal-6a0fd.web.app`) |
 
 > **AI note:** This project uses **Gemini (Google AI)** — NOT the Anthropic Claude API. All AI calls go through the `GEMINI_API_KEY` Firebase secret. Do not add Anthropic dependencies.
 
@@ -1333,7 +1333,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **Recipe detail** | Yield scaling (servings + anchor-based), ingredient checklist, step-ingredient refs, inline substitute swap chips, inline optional include checkboxes, section jump chips |
 | **Cooking mode** | Fullscreen step-by-step, screen-on lock |
 | **F18 — Notes = one cloud thread on every recipe (Comments merged in)** | A single **"Notes"** section on **every** recipe (`notesVisible = recipe != null && !needsReview`), stored in a **dedicated top-level `recipe_notes/{recipeId}`** collection (NOT the mirror) so notes are **visibility-independent** — a note added while the recipe is private persists and **becomes visible to everyone once it's shared/public**. `recipe_notes/{id}` = `{recipeAuthorId, locked}`; `recipe_notes/{id}/notes/{noteId}` = entries (reuses the `Comment` model + `getCommentsFlow`/`addComment`/`deleteComment`, repointed in `SharedRecipeService`). **Any signed-in user may read/add** (the recipe is the in-app gate; per product decision rules don't re-check recipe access); **delete by note author or recipe owner**. Owner **Lock** = `toggleNotesLock` → `recipe_notes/{id}.locked` (rule blocks new notes when locked); the owner's load calls `ensureNotesParent` to record `recipeAuthorId` (enables owner-delete). The old **`shared_recipes/{id}/comments`** subcollection + the private `RecipeNoteEntity` section are retired (entity/`addNote`/`deleteNote` linger unused). **Deploy `firestore:rules`.** **Android only** (iOS pending). |
-| **Firebase Firestore** | Connected (`table-feed-7498c`), security rules deployed |
+| **Firebase Firestore** | Connected (`chef-s-journal-6a0fd`), security rules deployed |
 | **RecipeSyncService** | Pull delta sync + `pushPersonalRecipe()` push to `personal_recipes/{uid}/recipes/` |
 | **Version control** | `version` int + `changeLog` JSON array of `RecipeChange` |
 | **Recipe Editor (F4)** | Full edit; fork dialog; author dropdown (Imported/Personal); cloud push; visibility preserved on save |
@@ -1369,9 +1369,9 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F19 — Cooking-mode polish** | Unit toggle in cooking mode is now the **single cycling chip** (matches the detail screen). The "all done" celebration is its **own page** (`CookDonePage`) with a **Back** button (an accidental tap on the last step no longer exits) + a **heart prompt** for recipes the cook doesn't own. **Both platforms.** |
 | **F20 — Like any non-owned recipe** | Heart toggle added to the Shared-tab detail (`SharedRecipeDetailScreen`/VM `toggleLike` + `likeStateFlow`) and the main detail VM (`isLiked`/`toggleLike`); gated by `canLike` = signed in **and not the author** (your own + your imports live in "My Recipes" and aren't likeable). `Recipe.likeCount` is now read from the mirror (`parseRecipe`). **Like count shows on EVERY card**: Shared & Discover (compactCount), and **My Recipes** — `HomeViewModel` fetches the user's own published counts via `SharedRecipeService.getAuthorLikeCounts(uid)` (one `shared_recipes where authorId == uid` query) and passes them to `RecipeCard`. Main detail shows a heart toggle + count for non-owned recipes; cook-done heart appears for recipes you can like. **Received recipes (Tab 2) are likeable** even though cached with `visibility="private"` (`canLike`/count-observer treat `isReceived` as eligible). Like count shows on **every** card incl. 0; Discover own-recipe cards merge `getAuthorLikeCounts`. You can never like your **own** recipes (incl. copies you saved) — count is read-only there. Counts use `compactCount()` (1.2k / 3M). **Both platforms** (iOS: detail heart for non-owned + `Int.compactCount` badge on My-Recipes/Discover cards via `getAuthorLikeCounts`; received recipes likeable). |
 | **F21 — Unified sections (ingredients ⇄ steps)** | Imported recipes often had steps in a "Main" section but ingredients with a **null** section — a mismatch that broke auto-arrange and drag, and could drop ingredients on edit. Fixed in-app (NOT Gemini): `enterEdit` **normalizes** — there's always ≥1 section and every orphan ingredient/step (null/unknown `sectionId`) is assigned to the **first** section; on save they're stamped with a real `sectionId`. The ingredient & step edit sheets gain a **Section selector** (`SectionSelector`: pick an existing section or create a new one — sections are shared by both); items are located/edited by id across all sections (`updateIngredientAnywhere`/`deleteIngredientAnywhere`/`moveIngredientToSection` + step equivalents) so changing an item's section mid-edit doesn't break the open sheet. **Drag across sections reassigns** the item (`reorderIngredient`/`reorderStep` handle cross-section moves). **Both platforms** (iOS: `enterEdit`/view orphan-normalization onto the first section, `SectionSelector` in the ingredient/step sheets, section-agnostic `*Anywhere`/`moveXToSection` ops; cross-section reassignment via the selector rather than drag). |
-| **F8 — Share button** | Top bar icon (owners only); if public → Android share sheet with `tablefeed://shared/{id}`; if private → dialog → publish → share sheet |
-| **F8 — Deep links + App Links** | HTTPS App Links (`https://table-feed-7498c.web.app/shared/{id}`) + `tablefeed://` fallback; `assetlinks.json` in Firebase Hosting; `navDeepLink` for both patterns in NavGraph |
-| **F8 — Firebase Hosting** | `shared.html` recipe viewer (browser fallback); `index.html` landing page; deployed at `table-feed-7498c.web.app` |
+| **F8 — Share button** | Top bar icon (owners only); if public → Android share sheet with `chefsjournal://shared/{id}`; if private → dialog → publish → share sheet |
+| **F8 — Deep links + App Links** | HTTPS App Links (`https://chef-s-journal-6a0fd.web.app/shared/{id}`) + `chefsjournal://` fallback; `assetlinks.json` in Firebase Hosting; `navDeepLink` for both patterns in NavGraph |
+| **F8 — Firebase Hosting** | `shared.html` recipe viewer (browser fallback); `index.html` landing page; deployed at `chef-s-journal-6a0fd.web.app` |
 | **F8 — Shared tab (reworked)** | Tab 2 (`SharedInboxScreen`, "Shared Recipes") shows received recipes from `shared_to/{uid}/` as full recipe cards (title/times/tags/author). Not community browse. Same feed as My Recipes "Shared" chip. |
 | **Shared recipe author fix** | `buildSharedToDocument()` stores `authorDisplayName` (original author) separately from `fromDisplayName` (sender); recipient sees the original author, not the sender. Old docs fall back to sender. |
 | **F8 — Shared detail** | `SharedRecipeDetailScreen`; read-only; yield adjuster; unit toggle; "Copy to My Recipes"; deep link entry point only |
@@ -1383,13 +1383,13 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 | **F9 — Account tab social** | Co-Chefs section: pending requests inline with Accept/Decline; "Co-Chefs: N" tappable row → FriendsScreen; "Find Co-Chefs" link |
 | **F9 — FriendsScreen** | Lists accepted co-chefs; Remove button → confirmation → `unfriend()` batch delete |
 | **F9 — Direct recipe sharing** | Single Share icon → `ShareOptionsSheet`; "Send to co-chef" → `FollowerPickerSheet`; stores full recipe in `shared_to/{recipientUid}/recipes/{shareId}`; delivers notification → FCM push |
-| **F9 — FCM push notifications** | `TablefeedMessagingService` (`onNewToken` stores token, `onMessageReceived` shows foreground notification); `sendPushNotification` Cloud Function triggered on `notifications/{uid}/items` creation; channel `"tablefeed_social"` created on app start; Co-Chef / recipe share push text |
+| **F9 — FCM push notifications** | `ChefsJournalMessagingService` (`onNewToken` stores token, `onMessageReceived` shows foreground notification); `sendPushNotification` Cloud Function triggered on `notifications/{uid}/items` creation; channel `"chefsjournal_social"` created on app start; Co-Chef / recipe share push text |
 | **F9 — Received recipe (review)** | `ReceivedRecipeScreen` + `ReceivedRecipeViewModel`; `getReceivedRecipe()` returns `ReceivedRecipeData(recipe, fromDisplayName)`; "Shared by [sender]" banner; read-only detail with scaling + Sources section; **"Save Recipe"** → Room copy → `popBackStack()` to Shared tab (card stays in feed) |
 | **Delete recipe** | Red "Delete Recipe" button at bottom of editor; confirmation dialog; calls `repository.deleteFullRecipe(recipeId)` then navigates back |
 | **URL import reliability** | `extractJsonLdRecipe()` extracts `schema.org/Recipe` JSON-LD from raw HTML (before cleanHtml strips scripts) — major recipe sites include this for SEO; realistic browser headers; 402/403 → actionable error message suggesting freeform entry |
 | **Imperial unit fix** | Gemini only populates metric fields; `computeImperialFromMetric()` in Cloud Function computes imperial from metric with exact math: g/kg → oz (< 453.6g) or lb; ml/L → fl oz (1 fl oz = 29.574 ml) |
 | **Recipe Ownership Model v2** | ✅ End-to-end (iOS↔Android). No official recipes; Tab 1 = mine (editable), Tab 2 = received references (read-only, "Remove"); reference-based shares via `shared_recipes` mirror gated by Public; auto-removal on unpublish/delete; author labels "me / Imported by X". See "Recipe Ownership Model (v2)". |
-| **Notification deep links** | Tapping a push routes to the target screen: `recipe_shared` → `received/{shareId}`; follow notifications → Account tab. `MainActivity` reads FCM extras → `TablefeedApplication.pendingDeepLink` → nav graph navigates. |
+| **Notification deep links** | Tapping a push routes to the target screen: `recipe_shared` → `received/{shareId}`; follow notifications → Account tab. `MainActivity` reads FCM extras → `ChefsJournalApplication.pendingDeepLink` → nav graph navigates. |
 | **Update unit conversions (existing recipes)** | `convertIngredients` Cloud Function (Gemini metric w/ density for dry → weight, liquids → volume) + deterministic imperial; editor "Update unit conversions" button above ingredients; `EditorIngredient` now preserves the 6 conversion fields on save (fixes edit wiping conversions); adaptive `impRound()` so tiny amounts don't show `0 oz`. |
 | **Convert validation + learned densities** | Curated `DENSITY_TABLE` is authoritative; bounded density check (0.1–2.5 g/ml) falls back to fl oz; self-growing `ingredient_densities` Firestore table (Admin-SDK-only) learns volume→weight densities and serves them after 3+ sightings. |
 | **F10 — Recipe Variations** | Up to 4 linked editable copies per recipe (`parentRecipeId` + `variantName`, 20-char cap); hidden from lists; "Original / <name> / ＋ Variation" chips on detail; `duplicateAsVariant()` deep-copy with full id remap; cascade delete; sync-aware. |
@@ -1418,7 +1418,7 @@ CookingModeScreen  (pushed from RecipeDetailScreen)
 
 ## iOS Platform Status
 
-The iOS codebase (`ios/Tablefeed/`) is a fully-functional port of the Android app. Swift, SwiftUI, SwiftData. All core features including auth gate, shared recipes, comments, and visibility/share are implemented. Notifications are push-only (no in-app notification screen).
+The iOS codebase (`ios/ChefsJournal/`) is a fully-functional port of the Android app. Swift, SwiftUI, SwiftData. All core features including auth gate, shared recipes, comments, and visibility/share are implemented. Notifications are push-only (no in-app notification screen).
 
 **Recipe Ownership Model v2 — ported (matches the authoritative model above):**
 - `RecipeModel.isReceived` added (SwiftData auto-migrates the additive field). Tab 1 = `isReceived=false`; Tab 2 = `isReceived=true`.
@@ -1490,10 +1490,10 @@ The iOS codebase (`ios/Tablefeed/`) is a fully-functional port of the Android ap
 | **F8 — Shared detail** | `SharedRecipeDetailView`; read-only; yield adjuster; unit toggle; "Copy to My Recipes"; comments |
 | **F8 — Visibility chip** | Owners see Private/Public toggle chip in detail body; confirms before toggling |
 | **F8 — Merged share button** | Single Share icon → `ShareOptionsSheet` ("Send to a follower" / "Share link"); owners only |
-| **F8 — Share link** | iOS share sheet with `https://table-feed-7498c.web.app/shared/{id}`; publish dialog for private recipes |
+| **F8 — Share link** | iOS share sheet with `https://chef-s-journal-6a0fd.web.app/shared/{id}`; publish dialog for private recipes |
 | **F8 — Comments** | Post/delete in owner view + visitor view; commenter or recipe owner can delete |
 | **F8 — SharedRecipeService** | `publish/unpublish`, `sharedRecipesStream()`, `getSharedRecipeDetail`, `commentsStream`, `addComment`, `deleteComment`, `copyToMyRecipes` |
-| **Deep links** | `tablefeed://shared/{id}` custom scheme + `https://table-feed-7498c.web.app/shared/{id}` via `onOpenURL`; routes to `SharedRecipeDetailView` |
+| **Deep links** | `chefsjournal://shared/{id}` custom scheme + `https://chef-s-journal-6a0fd.web.app/shared/{id}` via `onOpenURL`; routes to `SharedRecipeDetailView` |
 | **Tab restructure** | All tab removed; 4 tabs: **My Recipes** · Shared Recipes · Discover (F13 feed) · Account |
 | **My Recipes Shared chip** | `YourRecipesViewModel` has `.shared` filter; loads `receivedRecipesSummaryStream()`; chip switches list to shared `SharedRecipeCard`s, hides FAB, tap → `ReceivedRecipeView`; compact capsule search bar w/ clear button + adaptive placeholder; chips scroll inside the list |
 | **Shared Recipes tab** | `SharedInboxView` + `SharedInboxViewModel`; live `shared_to/{uid}/recipes/` stream; full recipe cards (title, times, tags, author + "from sender"); taps → `ReceivedRecipeView` |
@@ -1518,11 +1518,11 @@ The iOS codebase (`ios/Tablefeed/`) is a fully-functional port of the Android ap
 
 | Gap | Detail |
 |---|---|
-| **🔁 Rebrand → Tablefeed (`com.aerion.tablefeed` / `table-feed-7498c`)** | ✅ **Code/config done in the repo** (compiles with code-signing disabled): bundle id → `com.aerion.tablefeed`; display name → "Tablefeed"; custom scheme `amrosa://` → `tablefeed://`; deep-link host + share URLs → `table-feed-7498c.web.app`; `Associated Domains` → `applinks:table-feed-7498c.web.app`; Xcode **project/target/folders renamed** `Amrosa` → `Tablefeed` (`ios/Tablefeed/Tablefeed/…`, `TablefeedApp`, `Tablefeed.entitlements`, `TablefeedTests`, `project.yml`); dead Amrosa color palette removed; `amrosaCard()`→`cardStyle()`; UserDefaults keys → `tablefeed_*`; notification names → `Tablefeed*`. **⚠️ Two steps require the user's accounts (can't be done in-repo):** (a) **Firebase** — add an iOS app (`com.aerion.tablefeed`) to the `table-feed-7498c` project, download the new **`GoogleService-Info.plist`** (replace `ios/Tablefeed/Tablefeed/GoogleService-Info.plist`, still the old amrosa-2ec82 one), and update the **REVERSED_CLIENT_ID** URL scheme in `project.yml` (currently the old one, annotated); (b) **Signing** — the `com.aerion.tablefeed` App ID needs the **Associated Domains + Push Notifications** capabilities enabled (Xcode automatic signing prompts for this on first real build; the CI build only failed on provisioning, not compilation). Data is already migrated to `table-feed-7498c` with UIDs preserved, so signing in with the same account restores everything. |
+| **🔁 Rebrand → ChefsJournal (`com.aerion.chefsjournal` / `chef-s-journal-6a0fd`)** | ✅ **Code/config done in the repo** (compiles with code-signing disabled): bundle id → `com.aerion.chefsjournal`; display name → "ChefsJournal"; custom scheme `amrosa://` → `chefsjournal://`; deep-link host + share URLs → `chef-s-journal-6a0fd.web.app`; `Associated Domains` → `applinks:chef-s-journal-6a0fd.web.app`; Xcode **project/target/folders renamed** `Amrosa` → `ChefsJournal` (`ios/ChefsJournal/ChefsJournal/…`, `ChefsJournalApp`, `ChefsJournal.entitlements`, `ChefsJournalTests`, `project.yml`); dead Amrosa color palette removed; `amrosaCard()`→`cardStyle()`; UserDefaults keys → `chefsjournal_*`; notification names → `ChefsJournal*`. **⚠️ Two steps require the user's accounts (can't be done in-repo):** (a) **Firebase** — add an iOS app (`com.aerion.chefsjournal`) to the `chef-s-journal-6a0fd` project, download the new **`GoogleService-Info.plist`** (replace `ios/ChefsJournal/ChefsJournal/GoogleService-Info.plist`, still the old amrosa-2ec82 one), and update the **REVERSED_CLIENT_ID** URL scheme in `project.yml` (currently the old one, annotated); (b) **Signing** — the `com.aerion.chefsjournal` App ID needs the **Associated Domains + Push Notifications** capabilities enabled (Xcode automatic signing prompts for this on first real build; the CI build only failed on provisioning, not compilation). Data is already migrated to `chef-s-journal-6a0fd` with UIDs preserved, so signing in with the same account restores everything. |
 | **F16 — Edit mode redesign (jiggle + popups)** | ✅ **Ported (true in-place, zero-reflow).** The detail pencil flips `RecipeDetailContent` into edit mode while rendering the **identical body** — same `ScrollView`/`LazyVStack`, same items, same heights, same scaled/unit quantities — so **nothing on screen moves**: editable rows just gain an outline + jiggle + tap (`.editable`, `UI/Util/EditAffordance.swift`, uses `.overlay`+`.rotationEffect` which don't affect layout). Scroll position is preserved exactly. Add/convert/delete actions live both in the **edit toolbar** (`ellipsis.circle` menu: Recipe details / Add ingredient / Add step / Add section / Update unit conversions / Delete recipe) **and** as in-context **ghost "＋ Add" rows** with view-mode height reserved so adds don't shift content (Phase G). Mirrors Android's `toPreviewRecipe`: lightweight **display value types** (`RecipeDisplayModels.swift`: `DisplaySection`/`DisplayIngredient`/`DisplayStep`) that both the real `RecipeModel` (view) and the live draft (edit) map into via `RecipeDetailViewModel+Display.swift` (same scale+unit + same grouping/empty-section hiding in both modes, incl. a single-nameless-section sentinel so no-section recipes match exactly), so `IngredientRow`/`StepRow` are one component for both. Tapping a row/header/description opens its sheet (`EditSheetHost` in `RecipeEditSheets.swift`: Details/Section/Ingredient/Step via `EditTarget`, state seeded in `init`, opens at `.large`; add-Ingredient/Step sheets have a section picker). Edit state + ops live in `RecipeDetailViewModel+Edit.swift` (`enterEdit`/`cancelEdit`/`saveEdit`/`updateConversions`/`deleteRecipe`); save maps the draft via `updateFullRecipe` (also rewrites step→ingredient refs from `EditorStep.ingredientIds`), pushes, and re-publishes if shared. `RecipeEditorView` is retained for the import/freeform & new-variation entry points. **✅ Now fully aligned with Android** — iOS adopted in-context **ghost "＋ Add" rows** (Phase G), and has the later refinements: optional **chip row per section** (+ Account default), inline substitute **swap chips** + "Substitute for" picker (step refs resolve to the selected member), **per-recipe remembered selections**, quantity **ranges** (F15 `quantityValueMax`), and the scroll-stability bits (greyed chips, constant-height yield, reserved add-row height). |
 | **F17 — Shared with specific people** | ✅ **Ported** — iOS has `sharedWith` on the recipe model, the `"shared"` tier in the visibility chooser + recipients sheet (`searchUsers`/`getUsers`), `setSharedWith`/add/remove + republish, and the direct-share path adding to `sharedWith`. The `sharedWith` ACL rules are shared infra. |
 | **F18 — Notes = one cloud thread on every recipe** | ✅ **Ported.** One **"Notes"** section on every real recipe (`notesVisible = !needsReview`), backed by the top-level **`recipe_notes/{recipeId}`** collection (NOT the mirror) so notes are visibility-independent. `SharedRecipeService` repointed the comment methods to `recipe_notes/{id}/notes` + added `ensureNotesParent`/`setNotesLocked`/`getNotesLocked`. VM `loadNotes()` observes the thread for every recipe (not just shared), records ownership if owner, and loads the lock; `toggleNotesLock()` is owner-only (optimistic). `NotesSection` view: header + count + owner lock toggle; add-note input hidden + "🔒 locked" shown when locked; delete by note author or recipe owner. The old private on-device notes section + the `shared_recipes/{id}/comments` path are dropped (the `RecipeNoteModel`/`NoteRow` linger unused). Rules are shared infra (already in repo; deploy `firestore:rules`). |
-| **Universal Links** | ✅ Wired — `Associated Domains` entitlement (`applinks:table-feed-7498c.web.app`) + AASA at `hosting/public/.well-known/apple-app-site-association` (served as application/json). Pending `firebase deploy --only hosting`. |
+| **Universal Links** | ✅ Wired — `Associated Domains` entitlement (`applinks:chef-s-journal-6a0fd.web.app`) + AASA at `hosting/public/.well-known/apple-app-site-association` (served as application/json). Pending `firebase deploy --only hosting`. |
 | **Recipe images** | Firebase Storage not yet wired up (`imageUrl` field exists in schema) |
 
 ---
@@ -1607,14 +1607,14 @@ The iOS codebase (`ios/Tablefeed/`) is a fully-functional port of the Android ap
 - `isOwnRecipe` in `ImportUiState` defaults to `false` (Imported); resets to `!recipe.isImported` when re-opening a pending recipe.
 
 ### Navigation
-- **Auth gate**: `TablefeedNavGraph` collects `authStateFlow()`. `isSignedIn = currentUser?.isAnonymous == false`. When false → renders `AuthScreen()` (root, no back). When true → renders `MainAppScaffold()`.
+- **Auth gate**: `ChefsJournalNavGraph` collects `authStateFlow()`. `isSignedIn = currentUser?.isAnonymous == false`. When false → renders `AuthScreen()` (root, no back). When true → renders `MainAppScaffold()`.
 - **MainAppScaffold** is a separate private composable with its own `rememberNavController()`. Created fresh on each sign-in.
 - Tab routes: `"yours_tab"`, `"shared_tab"`, `"discover_tab"`, `"account_tab"` (All tab removed)
 - Push routes: `"recipe/{recipeId}?startEdit={bool}"` (inline edit, no separate edit route), `"shared/{recipeId}"`, `"freeform"`, `"import?reviewId={reviewId}"`, `"profile/{uid}?name="`, `"profileRecipe/..."`, `"shopping/..."`, `"user_search"`, `"friends"`, `"received/{shareId}"` (the `"notifications"` route is removed — push is OS-level via FCM)
-- The `"auth"` route is **removed** from the nav graph — auth is handled at the outer `TablefeedNavGraph` level.
+- The `"auth"` route is **removed** from the nav graph — auth is handled at the outer `ChefsJournalNavGraph` level.
 - Import route uses optional query param `reviewId`; default empty string, treated as null in screen.
 - `showBottomBar` is true only when `currentDestination?.route` is one of the 4 tab routes.
-- Deep link `tablefeed://shared/{recipeId}` is registered on the `"shared/{recipeId}"` composable via `navDeepLink`.
+- Deep link `chefsjournal://shared/{recipeId}` is registered on the `"shared/{recipeId}"` composable via `navDeepLink`.
 - `"received/{shareId}"` is a **review screen**: loads via `SocialRepository.getReceivedRecipe()` (returns `ReceivedRecipeData`); "Save Recipe" → Room copy → `popBackStack()` to Shared tab. `onSaved` is `() -> Unit`.
 - `"shared_tab"` (`SharedInboxScreen`) shows received recipes from `shared_to/{uid}/recipes/` as recipe cards — NOT a community browse. Same feed surfaced by the My Recipes "Shared" filter chip.
 - The My Recipes tab (`"yours_tab"`) also passes `onSharedRecipeClick = { navigate("received/$shareId") }` for its Shared chip.
@@ -1624,7 +1624,7 @@ The iOS codebase (`ios/Tablefeed/`) is a fully-functional port of the Android ap
 - Anonymous auth removed. Do not call `signInAnonymouslyIfNeeded()` — it exists in `AuthRepository` for compat but is never called.
 - Sign-out flow: always call `container.clearAllLocalData(context)` before `authRepository.signOut()`.
 - Push sync: only runs for `!authRepository.isAnonymous` users.
-- On sign-in: `TablefeedApplication.authStateFlow` observer automatically triggers seed + sync.
+- On sign-in: `ChefsJournalApplication.authStateFlow` observer automatically triggers seed + sync.
 
 ### Social / Co-Chefs System (F9)
 - **`SocialRepository`** in `data/remote/SocialRepository.kt` — all Firestore ops for users, follows, notifications, shared_to.
@@ -1638,7 +1638,7 @@ The iOS codebase (`ios/Tablefeed/`) is a fully-functional port of the Android ap
 - **`unfriend(targetUid)`** — batch-deletes both `follows/{uid_target}` and `follows/{target_uid}`. No-op for non-existent doc. Also handles cancelling pending outgoing requests.
 - **`getFriendsFlow()`** — queries `followerId == uid AND status == accepted`. Returns correct friend list because acceptance creates both direction docs.
 - **Notification delivery** = write to `notifications/{toUid}/items/{uuid}`. Client-side. The `sendPushNotification` Cloud Function trigger reads this and sends FCM push.
-- **FCM token** — `TablefeedMessagingService.onNewToken()` stores token in `users/{uid}.fcmToken`. `refreshFcmToken()` in `TablefeedApplication` fetches current token on each sign-in. `updateFcmToken(token)` in `SocialRepository` writes the field.
+- **FCM token** — `ChefsJournalMessagingService.onNewToken()` stores token in `users/{uid}.fcmToken`. `refreshFcmToken()` in `ChefsJournalApplication` fetches current token on each sign-in. `updateFcmToken(token)` in `SocialRepository` writes the field.
 - **No in-app notification screen** — `NotificationsScreen`, `NotificationsViewModel`, `getNotificationsFlow()`, `getUnreadCountFlow()`, `markNotificationRead()`, `markAllNotificationsRead()` are all deleted.
 - **Direct share** stores full recipe JSON in `shared_to/{recipientUid}/recipes/{shareId}` + delivers `recipe_shared` notification → FCM push. `buildSharedToDocument()` writes BOTH `fromDisplayName` (sender) and `authorDisplayName` (original recipe author) so the recipient sees the correct author.
 - **`getReceivedRecipe(shareId)`** returns `ReceivedRecipeData(recipe, fromDisplayName)`. `parseSharedRecipe()` reads `authorDisplayName` for the recipe's author (falls back to `fromDisplayName` for old docs missing it).
@@ -1653,7 +1653,7 @@ The iOS codebase (`ios/Tablefeed/`) is a fully-functional port of the Android ap
 - **Delete recipe**: `RecipeDetailViewModel.deleteRecipe()` (inline edit mode) cascades variations, calls `repository.deleteFullRecipe`, removes the cloud copy + unpublishes mirror, sets `deleteComplete = true` → screen pops back.
 
 ### AppContainer
-- `clearAllLocalData(context: Context)` — `database.clearAllTables()` + clears `tablefeed_sync` prefs. Called on sign-out.
+- `clearAllLocalData(context: Context)` — `database.clearAllTables()` + clears `chefsjournal_sync` prefs. Called on sign-out.
 - The `database` field is `private` — access it only through `clearAllLocalData()` or the exposed DAOs via `repository`.
 
 ### RecipeChange
@@ -1680,18 +1680,18 @@ Appended to `changeLog` on every editor save. Summary auto-generated from change
 | Image Loading | Kingfisher 8.x |
 | DI | Manual (AppContainer — @Observable @MainActor) |
 | State Management | @Observable + @State (no ViewModel protocol) |
-| Project generation | xcodegen 2.45.4 (`project.yml` in `ios/Tablefeed/`) |
-| Bundle ID | `com.aerion.tablefeed` |
-| Firebase project | table-feed-7498c |
+| Project generation | xcodegen 2.45.4 (`project.yml` in `ios/ChefsJournal/`) |
+| Bundle ID | `com.aerion.chefsjournal` |
+| Firebase project | chef-s-journal-6a0fd |
 
 ### iOS File Structure
 
 ```
-ios/Tablefeed/
-├── project.yml                         # xcodegen spec (run: xcodegen generate from ios/Tablefeed/)
-├── Tablefeed.xcodeproj/                   # generated — do not edit manually
-└── Tablefeed/
-    ├── TablefeedApp.swift                 # @main, Firebase.configure(), AppContainer init
+ios/ChefsJournal/
+├── project.yml                         # xcodegen spec (run: xcodegen generate from ios/ChefsJournal/)
+├── ChefsJournal.xcodeproj/                   # generated — do not edit manually
+└── ChefsJournal/
+    ├── ChefsJournalApp.swift                 # @main, Firebase.configure(), AppContainer init
     ├── AppContainer.swift              # DI: ModelContainer + all repos/services + clearAllLocalData()
     ├── Data/
     │   ├── DTOs/
@@ -1771,12 +1771,12 @@ ios/Tablefeed/
 | **isOwner flag** | `RecipeDetailViewModel.isOwner` — compares recipe.authorId to auth.uid |
 | **Visibility field** | `RecipeModel.visibility: String` (default "private"); `updateVisibility()` in repository |
 | **F8 — Visibility chip** | Owners see Private/Public toggle chip in detail body; confirms before toggling |
-| **F8 — Share button** | Top bar icon (owners only); if public → iOS share sheet with `https://table-feed-7498c.web.app/shared/{id}`; if private → dialog → publish → share sheet |
+| **F8 — Share button** | Top bar icon (owners only); if public → iOS share sheet with `https://chef-s-journal-6a0fd.web.app/shared/{id}`; if private → dialog → publish → share sheet |
 | **F8 — SharedRecipeService** | `publish/unpublish`, live `sharedRecipesStream()`, `getSharedRecipeDetail`, `commentsStream`, `addComment`, `deleteComment`, `copyToMyRecipes` |
 | **F8 — Shared tab** | `SharedRecipesView` + `SharedRecipesViewModel`; live Firestore stream; search; "Yours" badge; taps route to `SharedRecipeDetailView` |
 | **F8 — Shared detail** | `SharedRecipeDetailView`; read-only detail: yield adjuster, unit toggle, ingredients, steps; "Copy to My Recipes" button; comments section |
 | **F8 — Comments** | `SharedComment` model; post/delete in both owner view and visitor view; delete allowed for commenter OR recipe owner |
-| **Deep links** | `tablefeed://` custom URL scheme registered in project.yml; `https://table-feed-7498c.web.app/shared/{id}` handled via `onOpenURL`; routes to `SharedRecipeDetailView` |
+| **Deep links** | `chefsjournal://` custom URL scheme registered in project.yml; `https://chef-s-journal-6a0fd.web.app/shared/{id}` handled via `onOpenURL`; routes to `SharedRecipeDetailView` |
 | **Version control** | `version` Int + `changeLog` JSON on every editor save |
 
 #### 🔧 Remaining Gaps (vs Android)
@@ -1796,11 +1796,11 @@ ios/Tablefeed/
 - **Swift version**: 5 (not 6). Strict concurrency is OFF — do not add `Sendable` or `actor` isolation unless explicitly needed.
 - **@MainActor everywhere**: All ViewModels and Repositories are `@MainActor`. No `DispatchQueue.main.async` needed.
 - **SwiftData is source of truth**: UI never reads Firestore directly (except `SharedRecipeDetailView` which reads from `SharedRecipeService` since shared recipes are Firestore-only).
-- **xcodegen**: After adding/removing Swift files, run `xcodegen generate` from `ios/Tablefeed/` to regenerate the Xcode project. Never edit `.xcodeproj` manually.
+- **xcodegen**: After adding/removing Swift files, run `xcodegen generate` from `ios/ChefsJournal/` to regenerate the Xcode project. Never edit `.xcodeproj` manually.
 - **Auth gate**: `ContentView` uses `authStateStream()` AsyncStream. `isSignedIn = user != nil && !user.isAnonymous`. When false → `AuthView()` is root (no NavigationStack wrapper needed — just a plain view). When true → `MainAppView` (TabView).
 - **Sign-out**: Always call `container.clearAllLocalData()` before `authRepository.signOut()`. The auth state stream in ContentView will automatically switch back to the auth gate.
 - **SharedRecipe types**: `SharedRecipe`, `SharedSection`, `SharedIngredient`, `SharedStep`, `SharedComment` are Firestore-only value types in `Data/DTOs/SharedRecipe.swift`. Never stored in SwiftData.
-- **Deep links**: `onOpenURL` in ContentView handles both `tablefeed://shared/{id}` and `https://table-feed-7498c.web.app/shared/{id}`. Sets `deepLinkRecipeId` binding which `SharedRecipesView` uses to navigate to `SharedRecipeDetailView`.
+- **Deep links**: `onOpenURL` in ContentView handles both `chefsjournal://shared/{id}` and `https://chef-s-journal-6a0fd.web.app/shared/{id}`. Sets `deepLinkRecipeId` binding which `SharedRecipesView` uses to navigate to `SharedRecipeDetailView`.
 - **Anchor scaling math**: `scaleFactor = scaleAnchorQty / baseAnchorQty`. `adjustScale(delta: Int)` adds `delta × scaleStep` to `scaleAnchorQty` (min = 1 step). Long-press yield → `resetScale()`.
 - **EditorSection/EditorIngredient/EditorStep**: Defined in `RecipeEditorViewModel.swift`. Used by both `RecipeEditorViewModel` and `RecipeRepository.updateFullRecipe`.
 - **Firebase init crash prevention**: `@State private var appContainer: AppContainer` (type annotation only); initialize in `App.init()` body after `FirebaseApp.configure()` using `_appContainer = State(initialValue: AppContainer())`.
