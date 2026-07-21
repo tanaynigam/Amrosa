@@ -72,7 +72,7 @@ async function parseRecipeFromUrl(url, apiKey) {
     );
   }
 
-  const recipe = await callGemini(geminiContent, sourceHint, apiKey, IMPORT_SYSTEM_INSTRUCTION);
+  const recipe = await callGemini(content, sourceHint, apiKey, IMPORT_SYSTEM_INSTRUCTION);
   validateRecipe(recipe);
 
   // Ensure the original URL is captured in sourceUrls
