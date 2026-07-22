@@ -6,7 +6,7 @@
 	<string>production</string>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>applinks:chef-s-list.web.app</string>
+		<string>applinks:chef-s-journal-6a0fd.web.app</string>
 	</array>
 </dict>
 </plist>

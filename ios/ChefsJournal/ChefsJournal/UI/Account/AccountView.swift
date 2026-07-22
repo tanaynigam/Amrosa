@@ -147,7 +147,7 @@ struct AccountView: View {
 
                 // About
                 Section("About") {
-                    LabeledContent("App", value: "Chef's List")
+                    LabeledContent("App", value: "Chef's Journal")
                     LabeledContent("Version", value: "1.0")
                     LabeledContent("By", value: "Aerion")
                 }

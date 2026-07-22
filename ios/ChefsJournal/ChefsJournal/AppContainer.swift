@@ -87,6 +87,6 @@ final class AppContainer {
         // Delete all SwiftData records
         try? recipeRepository.deleteAllRecipes()
         // Clear sync timestamp
-        UserDefaults.standard.removeObject(forKey: "chefslist_last_sync")
+        UserDefaults.standard.removeObject(forKey: "chefsjournal_last_sync")
     }
 }

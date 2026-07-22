@@ -52,13 +52,13 @@ struct ContentView: View {
     }
 
     private func handleDeepLink(_ url: URL) {
-        // Handle chefslist://shared/{recipeId}
-        if url.scheme == "chefslist" && url.host == "shared" {
+        // Handle chefsjournal://shared/{recipeId}
+        if url.scheme == "chefsjournal" && url.host == "shared" {
             let recipeId = url.pathComponents.last
             deepLinkRecipeId = recipeId
         }
-        // Handle https://chef-s-list.web.app/shared/{recipeId}
-        else if url.host == "chef-s-list.web.app", url.pathComponents.count >= 3,
+        // Handle https://chef-s-journal-6a0fd.web.app/shared/{recipeId}
+        else if url.host == "chef-s-journal-6a0fd.web.app", url.pathComponents.count >= 3,
                 url.pathComponents[1] == "shared" {
             deepLinkRecipeId = url.pathComponents[2]
         }

@@ -48,7 +48,7 @@ final class AccountViewModel {
 
     func loadStats() {
         recipeCount = (try? repository.count()) ?? 0
-        let ts = UserDefaults.standard.double(forKey: "chefslist_last_sync")
+        let ts = UserDefaults.standard.double(forKey: "chefsjournal_last_sync")
         lastSyncDate = ts > 0 ? Date(timeIntervalSince1970: ts) : nil
         loadCuisinePrefs()
         includeOptionalsByDefault = container.userPreferences.includeOptionalsByDefault()

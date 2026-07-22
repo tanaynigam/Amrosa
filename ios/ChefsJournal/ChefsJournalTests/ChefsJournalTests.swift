@@ -1,8 +1,8 @@
 import XCTest
 import SwiftData
-@testable import ChefsList
+@testable import ChefsJournal
 
-final class ChefsListTests: XCTestCase {
+final class ChefsJournalTests: XCTestCase {
 
     // MARK: - QuantityScaler
 

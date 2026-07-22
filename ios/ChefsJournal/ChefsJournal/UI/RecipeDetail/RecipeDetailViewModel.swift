@@ -597,7 +597,7 @@ final class RecipeDetailViewModel {
     }
 
     private func openShareSheet() {
-        let urlString = "https://chef-s-list.web.app/shared/\(recipe.id)"
+        let urlString = "https://chef-s-journal-6a0fd.web.app/shared/\(recipe.id)"
         shareURL = URL(string: urlString)
         showShareSheet = true
     }

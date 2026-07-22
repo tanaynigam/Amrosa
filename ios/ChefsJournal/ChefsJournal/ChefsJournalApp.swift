@@ -5,7 +5,7 @@ import GoogleSignIn
 import UserNotifications
 
 @main
-struct ChefsListApp: App {
+struct ChefsJournalApp: App {
     // Wires in our AppDelegate for APNs + FCM delegate callbacks
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 

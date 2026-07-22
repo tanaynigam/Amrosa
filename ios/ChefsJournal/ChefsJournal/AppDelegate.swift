@@ -7,11 +7,11 @@ import UserNotifications
 extension Notification.Name {
     /// Posted when FCM delivers a new registration token.
     /// `object` is the token String.
-    static let fcmTokenRefreshed = Notification.Name("ChefsListFCMTokenRefreshed")
+    static let fcmTokenRefreshed = Notification.Name("ChefsJournalFCMTokenRefreshed")
 
     /// Posted when the user taps a push notification.
     /// `userInfo` contains "type" and "shareId" strings.
-    static let pushNotificationTapped = Notification.Name("ChefsListPushNotificationTapped")
+    static let pushNotificationTapped = Notification.Name("ChefsJournalPushNotificationTapped")
 }
 
 // MARK: - AppDelegate

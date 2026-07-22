@@ -8,7 +8,7 @@ final class RecipeSyncService {
     private let authRepository: AuthRepository
     private let sharedRecipeService: SharedRecipeService
 
-    private let lastSyncKey = "chefslist_last_sync"
+    private let lastSyncKey = "chefsjournal_last_sync"
     var lastSyncDate: Date? {
         get {
             let ts = UserDefaults.standard.double(forKey: lastSyncKey)

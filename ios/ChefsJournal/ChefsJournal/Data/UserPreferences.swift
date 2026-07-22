@@ -5,7 +5,7 @@ import Foundation
 @MainActor
 final class UserPreferences {
     private let defaults = UserDefaults.standard
-    private let key = "chefslist_cuisine_prefs"
+    private let key = "chefsjournal_cuisine_prefs"
 
     /// Preferred cuisine tags (lowercased). Empty = fall back to implicit affinity.
     func cuisinePreferences() -> Set<String> {
