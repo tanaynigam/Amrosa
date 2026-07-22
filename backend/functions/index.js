@@ -350,7 +350,7 @@ exports.sendPushNotification = onDocumentCreated(
         break;
       case 'recipe_shared':
         title = fromDisplayName + ' shared a recipe';
-        body  = recipeName ? ('"' + recipeName + '"') : 'Tap to view it in ChefsJournal';
+        body  = recipeName ? ('"' + recipeName + '"') : "Tap to view it in Chef's Journal";
         break;
       default:
         return;
@@ -362,6 +362,12 @@ exports.sendPushNotification = onDocumentCreated(
         notification: { title, body },
         data: { type: type, shareId: data.shareId ?? '' },
         android: { notification: { channelId: 'chefsjournal_social', priority: 'high' } },
+        // iOS: the `notification` block alone yields a SILENT banner when backgrounded —
+        // the APNs payload needs an explicit sound. `priority: 10` = deliver immediately.
+        apns: {
+          headers: { 'apns-priority': '10' },
+          payload: { aps: { sound: 'default' } },
+        },
       });
       console.log('Push sent: ' + type + ' -> ' + uid);
     } catch (err) {

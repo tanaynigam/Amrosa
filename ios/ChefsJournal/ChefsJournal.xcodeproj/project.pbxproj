@@ -108,6 +108,7 @@
 		44CEF183313266F1CDA5C021 /* QuantityScaler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuantityScaler.swift; sourceTree = "<group>"; };
 		49F2C5B947324BDEAC7D5066 /* RecipeRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeRepository.swift; sourceTree = "<group>"; };
 		53F0586E41F087E3C57E9511 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
+		576F1F3175FCF6A58E595A34 /* ChefsJournalDebug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChefsJournalDebug.entitlements; sourceTree = "<group>"; };
 		57D821C679A0EAA338982549 /* StepModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepModel.swift; sourceTree = "<group>"; };
 		5C80AC9C9CFFAA2396F726BB /* UserSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserSearchView.swift; sourceTree = "<group>"; };
 		5EF6FCF21E17F5614B2EF1DE /* EditAffordance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditAffordance.swift; sourceTree = "<group>"; };
@@ -428,6 +429,7 @@
 				E2EE936F752D5CF0AC124A3C /* Assets.xcassets */,
 				1B6C4E95A4E264F4A33E7228 /* ChefsJournal.entitlements */,
 				E65FA9299D479B63CB90F333 /* ChefsJournalApp.swift */,
+				576F1F3175FCF6A58E595A34 /* ChefsJournalDebug.entitlements */,
 				C29F31CE5A2A30870552F812 /* GoogleService-Info.plist */,
 				FDDCD1A27B5E518FDC796B84 /* Info.plist */,
 				CD8A779FC9001C727149A94D /* Data */,
@@ -782,7 +784,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = ChefsJournal/ChefsJournal.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ChefsJournal/ChefsJournalDebug.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7S2FY6WF5V;

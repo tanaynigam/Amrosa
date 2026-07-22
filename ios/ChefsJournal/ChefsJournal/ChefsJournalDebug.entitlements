@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Debug builds register with the APNs SANDBOX. Using "production" here (as Release does)
+	     makes a dev-signed build get a token the production APNs server rejects (BadDeviceToken),
+	     so pushes silently never arrive. One APNs auth key serves both environments. -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:chef-s-journal-6a0fd.web.app</string>
+	</array>
+</dict>
+</plist>
