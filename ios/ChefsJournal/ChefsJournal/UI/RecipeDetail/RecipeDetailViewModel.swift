@@ -20,9 +20,6 @@ final class RecipeDetailViewModel {
     var checkedIngredientIds: Set<String> = []
     var selectedSubstitutes: [String: String] = [:]  // substituteGroupId → chosen ingredientId
     var enabledOptionals: Set<String> = []            // per-ingredient optional toggle (like Android)
-    var newNoteText = ""
-    var isEditingNote: RecipeNoteModel? = nil
-    var editingNoteText = ""
 
     // Sharing / visibility
     var showShareSheet = false
@@ -425,28 +422,6 @@ final class RecipeDetailViewModel {
         userPreferences?.setRecipeSubstitutes(recipe.id, selectedSubstitutes)
     }
 
-    // MARK: - Notes
-
-    func addNote() {
-        guard !newNoteText.isEmpty else { return }
-        try? repository.addNote(to: recipe.id, content: newNoteText)
-        newNoteText = ""
-    }
-
-    func saveEditingNote() {
-        guard let note = isEditingNote else { return }
-        try? repository.updateNote(note, content: editingNoteText)
-        isEditingNote = nil
-        editingNoteText = ""
-    }
-
-    func deleteNote(_ note: RecipeNoteModel) {
-        try? repository.deleteNote(note)
-    }
-
-    var sortedNotes: [RecipeNoteModel] {
-        recipe.notes.sorted { $0.createdAt < $1.createdAt }
-    }
 
     // MARK: - Visibility & Sharing
 

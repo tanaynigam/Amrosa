@@ -144,6 +144,8 @@ final class RecipeRepository {
             baseServings: parsed.baseServings,
             baseServingsMin: parsed.baseServingsMin,
             baseServingsMax: parsed.baseServingsMax,
+            scaleIngredientId: parsed.scaleIngredientId,
+            scaleStep: parsed.scaleStep,
             prepTimeMinutes: parsed.prepTimeMinutes,
             cookTimeMinutes: parsed.cookTimeMinutes,
             imageUrl: parsed.imageUrl,
@@ -652,6 +654,15 @@ final class RecipeRepository {
             if let v = data["title"] as? String { existing.title = v }
             if let v = data["description"] as? String { existing.recipeDescription = v }
             if let v = data["baseServings"] as? Int { existing.baseServings = v }
+            // Metadata the block below previously skipped — otherwise cross-device edits to these
+            // (and anchor-scaling) silently revert on the next pull.
+            existing.baseServingsMin = data["baseServingsMin"] as? Int
+            existing.baseServingsMax = data["baseServingsMax"] as? Int
+            existing.prepTimeMinutes = data["prepTimeMinutes"] as? Int
+            existing.cookTimeMinutes = data["cookTimeMinutes"] as? Int
+            existing.imageUrl = data["imageUrl"] as? String
+            existing.scaleIngredientId = data["scaleIngredientId"] as? String
+            if let v = data["scaleStep"] as? Double { existing.scaleStep = v }
             if let v = data["authorId"] as? String { existing.authorId = v }
             if let v = data["authorDisplayName"] as? String { existing.authorDisplayName = v }
             if let v = data["isCustomized"] as? Bool { existing.isCustomized = v }
@@ -799,25 +810,6 @@ final class RecipeRepository {
         try context.save()
     }
 
-    func addNote(to recipeId: String, content: String) throws {
-        guard let recipe = try fetchRecipe(id: recipeId) else { return }
-        let note = RecipeNoteModel(id: UUID().uuidString, content: content)
-        context.insert(note)
-        note.recipe = recipe
-        try context.save()
-    }
-
-    func updateNote(_ note: RecipeNoteModel, content: String) throws {
-        note.content = content
-        note.updatedAt = Date()
-        try context.save()
-    }
-
-    func deleteNote(_ note: RecipeNoteModel) throws {
-        context.delete(note)
-        try context.save()
-    }
-
     // MARK: - Private helpers
 
     private func encodeJSON<T: Encodable>(_ value: T) -> String {
@@ -885,7 +877,9 @@ final class RecipeRepository {
             ingredients: ingredients,
             steps: steps,
             stepIngredientRefs: refs,
-            parseNotes: nil
+            parseNotes: nil,
+            scaleIngredientId: data["scaleIngredientId"] as? String,
+            scaleStep: (data["scaleStep"] as? Double) ?? 1.0
         )
     }
 }

@@ -36,10 +36,8 @@
 		66311E4D2FB6C235ED13C7A2 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53F0586E41F087E3C57E9511 /* ProfileView.swift */; };
 		6689094CAFD33D09CCF517BA /* RecipeEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCEAA310CF3D2ADFD9C805A /* RecipeEditorView.swift */; };
 		6ACE8ED0678B05BF36ADD68B /* AuthRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EA7C23BAF3C0E02273248A4 /* AuthRepository.swift */; };
-		7CCE5F9F25C7D1326B571164 /* AllRecipesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07E73EC7253BBCD9543C00D5 /* AllRecipesView.swift */; };
 		7CEC8F7EA18EB8B594EE904E /* SharedInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB845C6A04CAD9AF21546099 /* SharedInboxView.swift */; };
 		7E0C46A835E7D851C5AFC3FE /* StepIngredientRefModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D535AAB135ADB94A76979422 /* StepIngredientRefModel.swift */; };
-		85152208312647FCFAC5B436 /* AllRecipesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18DF12BDFBA6CF7F5971616A /* AllRecipesViewModel.swift */; };
 		852662AD861AB4CC64EC40EA /* Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BD15475DF6167B360F68E25 /* Extensions.swift */; };
 		876F49FC855E4BA3F04AF022 /* ChefsJournalApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E65FA9299D479B63CB90F333 /* ChefsJournalApp.swift */; };
 		8C750889FD46C2C6D3B15C87 /* SocialRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71CC4685FD36F53982B3E7F5 /* SocialRepository.swift */; };
@@ -93,11 +91,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		07E73EC7253BBCD9543C00D5 /* AllRecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllRecipesView.swift; sourceTree = "<group>"; };
 		09C370C015EFC27DC8C8A669 /* YourRecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YourRecipesView.swift; sourceTree = "<group>"; };
 		0FB31BE856B15A96BF919DCC /* AccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountView.swift; sourceTree = "<group>"; };
 		14286250CD459BAC79393E58 /* ShoppingAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShoppingAggregator.swift; sourceTree = "<group>"; };
-		18DF12BDFBA6CF7F5971616A /* AllRecipesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllRecipesViewModel.swift; sourceTree = "<group>"; };
 		1AEA05A09ECA44271AEB439C /* ReceivedRecipeSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceivedRecipeSummary.swift; sourceTree = "<group>"; };
 		1B6C4E95A4E264F4A33E7228 /* ChefsJournal.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChefsJournal.entitlements; sourceTree = "<group>"; };
 		1C7E2D0A433062DDB7B5663D /* RecipeDisplayModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeDisplayModels.swift; sourceTree = "<group>"; };
@@ -255,7 +251,6 @@
 			children = (
 				B444BA301211626B57E49D9D /* ContentView.swift */,
 				162800A9E9669E72F770128B /* Account */,
-				FB761AF65A7B6360144C74D7 /* AllRecipes */,
 				EBEE605B06870885233AD784 /* Auth */,
 				158253CADA921FE1BC66D70F /* Components */,
 				064B01EA63D058C4FFCD8ED9 /* CookingMode */,
@@ -442,15 +437,6 @@
 			path = ChefsJournal;
 			sourceTree = "<group>";
 		};
-		FB761AF65A7B6360144C74D7 /* AllRecipes */ = {
-			isa = PBXGroup;
-			children = (
-				07E73EC7253BBCD9543C00D5 /* AllRecipesView.swift */,
-				18DF12BDFBA6CF7F5971616A /* AllRecipesViewModel.swift */,
-			);
-			path = AllRecipes;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -556,8 +542,6 @@
 			files = (
 				44289504B570D975081CD0EA /* AccountView.swift in Sources */,
 				A5AA31B63CF0D03AE63B1EAF /* AccountViewModel.swift in Sources */,
-				7CCE5F9F25C7D1326B571164 /* AllRecipesView.swift in Sources */,
-				85152208312647FCFAC5B436 /* AllRecipesViewModel.swift in Sources */,
 				0305DD940FF785C3CFCCA55E /* AppContainer.swift in Sources */,
 				D0A954F8098397EC9E7B3C53 /* AppDelegate.swift in Sources */,
 				6ACE8ED0678B05BF36ADD68B /* AuthRepository.swift in Sources */,

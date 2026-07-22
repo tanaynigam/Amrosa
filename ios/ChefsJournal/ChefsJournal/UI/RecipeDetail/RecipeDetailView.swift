@@ -932,43 +932,6 @@ private struct RecipientsSheet: View {
     }
 }
 
-// MARK: - Notes
-
-private struct NoteRow: View {
-    let note: RecipeNoteModel
-    @Bindable var viewModel: RecipeDetailViewModel
-
-    var body: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(note.content).font(.body)
-                Text(note.updatedAt.relativeString()).font(.caption2).foregroundStyle(.tertiary)
-            }
-            Spacer()
-            Menu {
-                Button("Edit") { viewModel.isEditingNote = note; viewModel.editingNoteText = note.content }
-                Button("Delete", role: .destructive) { viewModel.deleteNote(note) }
-            } label: {
-                Image(systemName: "ellipsis").foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .sheet(item: $viewModel.isEditingNote) { _ in
-            NavigationStack {
-                TextEditor(text: Binding(get: { viewModel.editingNoteText }, set: { viewModel.editingNoteText = $0 }))
-                    .padding()
-                    .navigationTitle("Edit Note")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { viewModel.isEditingNote = nil } }
-                        ToolbarItem(placement: .confirmationAction) { Button("Save") { viewModel.saveEditingNote() } }
-                    }
-            }
-        }
-    }
-}
-
 // MARK: - Comments
 
 private struct NotesSection: View {

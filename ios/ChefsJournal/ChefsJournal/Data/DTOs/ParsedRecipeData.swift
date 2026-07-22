@@ -16,6 +16,10 @@ struct ParsedRecipeData {
     let steps: [ParsedStep]
     let stepIngredientRefs: [ParsedStepRef]
     let parseNotes: String?
+    /// Anchor-scaling config — set by Firestore pull paths so multi-device syncs preserve it;
+    /// Gemini import/freeform leave the defaults (servings-based scaling).
+    var scaleIngredientId: String? = nil
+    var scaleStep: Double = 1.0
 }
 
 struct ParsedSection: Codable {
