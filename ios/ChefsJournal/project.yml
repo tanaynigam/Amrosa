@@ -50,10 +50,8 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         CFBundleURLTypes:
-          # ⚠️ Rebrand: replace this reversed client id with the one from the NEW
-          # chef-s-journal-6a0fd GoogleService-Info.plist (REVERSED_CLIENT_ID) when it's swapped in.
           - CFBundleURLSchemes:
-              - "com.googleusercontent.apps.783138326619-g1jvibdncmgs9f23agt46bngmlov1l6r"
+              - "com.googleusercontent.apps.620368151517-9m1lbovkgm056ck5o1rvjkk7m6krro03"
             CFBundleURLName: com.google.reverseClientId
           - CFBundleURLSchemes:
               - "chefsjournal"
