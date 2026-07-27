@@ -23,14 +23,14 @@ android/app/build/
 android/build/
 
 # Android — Firebase config (contains API keys)
-android/app/google-services.json
+**/google-services.json
 
 # iOS — machine-specific and build output
 ios/.build/
 ios/Pods/
 ios/**/xcuserdata/
 ios/DerivedData/
-ios/ChefsList/ChefsList/GoogleService-Info.plist
+**/GoogleService-Info.plist
 
 # Backend — Firebase service account keys (secret — never commit)
 backend/firestore/serviceAccountKey*.json
