@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Chef's Journal launcher icon — MONOCHROME layer (Android 13+ themed icons).
+     One flat silhouette on transparency; the system replaces the colour with the
+     user's wallpaper tint, so only the ALPHA shape matters here.
+
+     Because everything collapses to a single tint, the ribbon would vanish where it
+     crosses the cover. So the cover is drawn with evenOdd fill and the detail is cut
+     THROUGH it as real holes: the two thin slits either side of the ribbon, the spine
+     crease, and the three handwriting lines. Below the cover the ribbon + fork are
+     solid shapes. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="432"
+    android:viewportHeight="432">
+
+    <!-- Cover, with all interior detail cut out as holes -->
+    <path
+        android:fillColor="#000000"
+        android:fillType="evenOdd"
+        android:pathData="M161,126h110a20,20 0 0 1 20,20v140a20,20 0 0 1 -20,20h-110a20,20 0 0 1 -20,-20v-140a20,20 0 0 1 20,-20z
+                          M202,163h70v4h-70z
+                          M202,179h70v4h-70z
+                          M202,194h70v4h-70z
+                          M155,141h3v150h-3z
+                          M170.25,126h3v180h-3z
+                          M184.5,126h3v180h-3z" />
+
+    <!-- Ribbon below the cover -->
+    <path android:fillColor="#000000" android:pathData="M173.25,306h11.25v7.5h-11.25z" />
+
+    <!-- Fork head -->
+    <path android:fillColor="#000000"
+        android:pathData="M190.5,324.75C190.5,322.288 190.209,319.85 189.644,317.575C189.078,315.3 188.25,313.233 187.205,311.492C186.16,309.751 184.92,308.37 183.555,307.427C182.19,306.485 180.727,306 179.25,306C177.773,306 176.31,306.485 174.945,307.427C173.58,308.37 172.34,309.751 171.295,311.492C170.25,313.233 169.422,315.3 168.856,317.575C168.291,319.85 168,322.288 168,324.75L179.25,324.75H190.5Z" />
+
+    <!-- Fork tines -->
+    <path android:strokeColor="#000000" android:strokeWidth="6" android:strokeLineCap="round" android:pathData="M171,324.75L171,333.75" />
+    <path android:strokeColor="#000000" android:strokeWidth="6" android:strokeLineCap="round" android:pathData="M179.25,324.75L179.25,333.75" />
+    <path android:strokeColor="#000000" android:strokeWidth="6" android:strokeLineCap="round" android:pathData="M187.5,324.75L187.5,333.75" />
+</vector>
