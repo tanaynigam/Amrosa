@@ -748,17 +748,53 @@ function appendParseNote(existing, note) {
   return prev ? `${prev} ${note}` : note;
 }
 
-function validateRecipe(recipe) {
-  // These three are the real "is this actually a recipe?" checks — they stay fatal.
+/**
+ * Guarantee a coherent section structure.
+ *
+ * Sections are a structural convenience, not something the user thinks about —
+ * a handwritten recipe ("banana, milk, blend") has ingredients and steps but no
+ * reason for the model to invent a section. Discarding an otherwise-good parse
+ * over that is wrong, and the clients already normalise sections locally, so we
+ * do the same here at the source:
+ *   - no sections at all      → synthesise a single "Main"
+ *   - null/unknown sectionId  → attach the orphan to the first section
+ * That second case is the "steps are in Main but ingredients have none" mismatch
+ * that otherwise leaks into the app and breaks drag/auto-arrange.
+ */
+function normalizeSections(recipe) {
   if (!Array.isArray(recipe.sections) || recipe.sections.length === 0) {
-    throw new Error("Parsed recipe has no sections");
+    recipe.sections = [{ id: "section-main", name: "Main", orderIndex: 0 }];
   }
+
+  recipe.sections.forEach((sec, i) => {
+    if (!sec.id) sec.id = "section-" + (i + 1);
+    if (typeof sec.name !== "string") sec.name = "";
+    if (typeof sec.orderIndex !== "number") sec.orderIndex = i;
+  });
+
+  const known = new Set(recipe.sections.map((sec) => sec.id));
+  const firstId = recipe.sections
+    .slice()
+    .sort((a, b) => a.orderIndex - b.orderIndex)[0].id;
+
+  for (const item of [...(recipe.ingredients || []), ...(recipe.steps || [])]) {
+    if (!item.sectionId || !known.has(item.sectionId)) item.sectionId = firstId;
+  }
+}
+
+function validateRecipe(recipe) {
+  // Only these two are the real "is this actually a recipe?" checks — a parse
+  // with no ingredients or no steps genuinely failed, so they stay fatal.
   if (!Array.isArray(recipe.ingredients) || recipe.ingredients.length === 0) {
     throw new Error("Parsed recipe has no ingredients");
   }
   if (!Array.isArray(recipe.steps) || recipe.steps.length === 0) {
     throw new Error("Parsed recipe has no steps");
   }
+
+  // Structural — repair rather than reject. Must run before linkOrphanIngredients,
+  // which groups by sectionId.
+  normalizeSections(recipe);
 
   // Title is cosmetic and the user renames it in the review sheet, so never fail
   // the whole parse over it. Runs after the ingredient check so a name can be
