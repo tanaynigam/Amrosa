@@ -24,6 +24,9 @@ const FREEFORM_SYSTEM_INSTRUCTION =
   "The user has typed a recipe from memory — it may be incomplete, informal, partial, or unstructured. " +
   "Your job is to extract everything you can and structure it into the exact JSON schema provided. " +
   "Fill in missing fields with sensible defaults: servings = 1 if not stated, times = null if unknown. " +
+  "ALWAYS produce a non-empty title. Handwritten recipes often have no name — if the user did not give one, " +
+  "invent a short descriptive title from the main ingredients or method (e.g. 'Banana Protein Smoothie', " +
+  "'Garlic Tadka Dal'). Never return an empty or missing title, and say so in parseNotes when you invented one. " +
   "Populate ONLY the metric conversion fields for every ingredient where a sensible conversion exists: " +
   "volumes (cups/tbsp/tsp/fl oz) → ml or L; weights (oz/lb) → g or kg. " +
   "If the original unit is already metric (g, kg, ml, L), copy it into the metric fields as-is. " +
@@ -712,10 +715,41 @@ function linkOrphanIngredients(recipe) {
   }
 }
 
+/** Staples that make a poor recipe name on their own. */
+const GENERIC_INGREDIENTS = new Set([
+  "water", "ice", "ice cubes", "salt", "pepper", "black pepper", "sugar",
+  "oil", "olive oil", "vegetable oil", "butter", "ghee", "flour",
+]);
+
+/**
+ * Build a readable fallback title from the recipe's main ingredients.
+ *
+ * Freeform/handwritten recipes frequently have no stated name — the user just
+ * lists ingredients and a method. A missing title is cosmetic (and editable in
+ * the review sheet), so it must never discard an otherwise-good parse.
+ */
+function deriveTitle(recipe) {
+  const clean = (v) => (typeof v === "string" ? v.trim().split(" ").filter(Boolean).join(" ") : "");
+  const names = (recipe.ingredients || [])
+    .map((i) => clean(i && i.name))
+    .filter((n) => n && !GENERIC_INGREDIENTS.has(n.toLowerCase()))
+    .map((n) => (n.length > 24 ? n.slice(0, 24).trim() : n));
+
+  if (names.length === 0) return "Untitled Recipe";
+
+  const titleCase = (t) => t.split(" ").map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w)).join(" ");
+  const picked = names.slice(0, 2).map(titleCase);
+  return picked.length === 2 ? `${picked[0]} & ${picked[1]}` : picked[0];
+}
+
+/** Append a sentence to parseNotes, preserving anything already there. */
+function appendParseNote(existing, note) {
+  const prev = typeof existing === "string" ? existing.trim() : "";
+  return prev ? `${prev} ${note}` : note;
+}
+
 function validateRecipe(recipe) {
-  if (!recipe.title || typeof recipe.title !== "string") {
-    throw new Error("Parsed recipe is missing a title");
-  }
+  // These three are the real "is this actually a recipe?" checks — they stay fatal.
   if (!Array.isArray(recipe.sections) || recipe.sections.length === 0) {
     throw new Error("Parsed recipe has no sections");
   }
@@ -724,6 +758,19 @@ function validateRecipe(recipe) {
   }
   if (!Array.isArray(recipe.steps) || recipe.steps.length === 0) {
     throw new Error("Parsed recipe has no steps");
+  }
+
+  // Title is cosmetic and the user renames it in the review sheet, so never fail
+  // the whole parse over it. Runs after the ingredient check so a name can be
+  // derived from them. Catches undefined, null, "" and whitespace-only alike.
+  if (typeof recipe.title !== "string" || !recipe.title.trim()) {
+    recipe.title = deriveTitle(recipe);
+    recipe.parseNotes = appendParseNote(
+      recipe.parseNotes,
+      `No recipe name was given, so this was titled "${recipe.title}" — rename it if you like.`
+    );
+  } else {
+    recipe.title = recipe.title.trim();
   }
   if (typeof recipe.baseServings !== "number" || recipe.baseServings < 1) {
     recipe.baseServings = 1;
