@@ -9,6 +9,7 @@ const {
   formatRecipeFromText,
   convertIngredientsFromList,
 } = require("./parseRecipe");
+const { editRecipeWithPromptImpl } = require("./editRecipe");
 
 admin.initializeApp();
 
@@ -280,6 +281,53 @@ exports.convertIngredients = onCall(
   }
 );
 
+
+// ─── editRecipeWithPrompt (F22 Surface 1) ────────────────────────────────────
+
+/**
+ * Edit a recipe from a natural-language prompt.
+ * Returns a small list of EDIT OPERATIONS against the ids that were sent — never a
+ * rewritten recipe — so the app can preview each change before applying it.
+ *
+ * Input:  { recipe: { title, ..., sections: [{ id, name, ingredients[], steps[] }] }, prompt }
+ * Output: { operations: [...], notes: string|null, dropped: [...] }
+ */
+exports.editRecipeWithPrompt = onCall(
+  {
+    secrets: [geminiKey],
+    timeoutSeconds: 60,
+    memory: "512MiB",
+    region: "us-central1",
+  },
+  async (request) => {
+    const { recipe, prompt } = request.data ?? {};
+
+    if (!prompt || typeof prompt !== "string" || prompt.trim().length < 2) {
+      throw new HttpsError("invalid-argument", "Tell me what you'd like to change.");
+    }
+    if (prompt.length > 1000) {
+      throw new HttpsError("invalid-argument", "That's a long request — try one change at a time.");
+    }
+    if (!recipe || typeof recipe !== "object" || !Array.isArray(recipe.sections)) {
+      throw new HttpsError("invalid-argument", "A recipe is required.");
+    }
+
+    const apiKey = geminiKey.value();
+    if (!apiKey) {
+      throw new HttpsError("internal", "Gemini API key is not configured.");
+    }
+
+    try {
+      return await editRecipeWithPromptImpl(recipe, prompt.trim(), apiKey);
+    } catch (err) {
+      const msg = err.message || "";
+      if (msg.includes("invalid JSON")) {
+        throw new HttpsError("internal", "I couldn't work out that change — try rewording it.");
+      }
+      throw new HttpsError("internal", `Edit failed: ${msg}`);
+    }
+  }
+);
 
 // ─── Popularity counters (Discover Phase 2) ──────────────────────────────────
 // saveCount / likeCount live on the shared_recipes/{recipeId} mirror and are maintained

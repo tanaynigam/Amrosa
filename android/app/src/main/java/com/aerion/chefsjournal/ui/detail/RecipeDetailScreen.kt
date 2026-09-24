@@ -38,6 +38,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aerion.chefsjournal.ChefsJournalApplication
 import com.aerion.chefsjournal.domain.model.*
+import com.aerion.chefsjournal.ui.edit.AiChangesSheet
+import com.aerion.chefsjournal.ui.edit.AiPromptBar
 import com.aerion.chefsjournal.ui.util.QuantityScaler
 import com.aerion.chefsjournal.ui.util.UnitMode
 import com.aerion.chefsjournal.ui.util.compactCount
@@ -251,6 +253,18 @@ fun RecipeDetailScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            // AI prompt bar — pinned in edit mode so it's always reachable without scrolling.
+            if (state.isEditMode && state.draft != null) {
+                AiPromptBar(
+                    isThinking = state.isAiThinking,
+                    suggestions = remember(state.draft) { viewModel.aiSuggestions() },
+                    message = state.aiMessage,
+                    onSend = viewModel::askAiEdit,
+                    onDismissMessage = viewModel::clearAiMessage,
+                )
+            }
+        },
         topBar = {
             TopAppBar(
                 title = { Text(if (state.isEditMode) "Editing" else state.recipe?.title ?: "", maxLines = 1) },
@@ -1267,7 +1281,18 @@ fun RecipeDetailScreen(
             }
         )
     }
+    // ── AI Assist review sheet (F22) — nothing is applied until the user taps Apply ──
+    state.aiChanges?.let { changes ->
+        AiChangesSheet(
+            changes = changes,
+            notes = state.aiNotes,
+            onToggle = viewModel::toggleAiChange,
+            onApply = viewModel::applyAiChanges,
+            onDismiss = viewModel::dismissAiChanges,
+        )
+    }
 }
+
 
 // ── Share options sheet ───────────────────────────────────────────────────────
 

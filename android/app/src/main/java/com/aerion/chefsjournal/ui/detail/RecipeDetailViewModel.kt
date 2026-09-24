@@ -12,9 +12,14 @@ import com.aerion.chefsjournal.data.remote.SharedRecipeService
 import com.aerion.chefsjournal.data.remote.SocialRepository
 import com.aerion.chefsjournal.data.repository.RecipeRepository
 import com.aerion.chefsjournal.domain.model.*
+import com.aerion.chefsjournal.ui.edit.AiChange
 import com.aerion.chefsjournal.ui.edit.EditorIngredient
 import com.aerion.chefsjournal.ui.edit.EditorSection
 import com.aerion.chefsjournal.ui.edit.EditorStep
+import com.aerion.chefsjournal.ui.edit.applyAiChanges as applyOpsToDraft
+import com.aerion.chefsjournal.ui.edit.parseAiOps
+import com.aerion.chefsjournal.ui.edit.resolveChanges
+import com.aerion.chefsjournal.ui.edit.toSlimPayload
 import com.google.firebase.functions.FirebaseFunctions
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
@@ -103,6 +108,15 @@ data class RecipeDetailUiState(
     val isDeleting: Boolean = false,
     val deleteComplete: Boolean = false,
     val variantCount: Int = 0,
+    // ── AI Assist (F22 Surface 1) ──
+    /** True while `editRecipeWithPrompt` is in flight. */
+    val isAiThinking: Boolean = false,
+    /** Non-null once ops come back → the review sheet is showing. Empty list = "no changes". */
+    val aiChanges: List<AiChange>? = null,
+    /** Gemini's aside (an answer, an assumption, a suggested number it did NOT apply). */
+    val aiNotes: String? = null,
+    /** Transient banner under the prompt bar — errors and "applied N changes". */
+    val aiMessage: String? = null,
 ) {
     val isPublic: Boolean get() = recipe?.visibility == "public"
 
@@ -1208,6 +1222,96 @@ class RecipeDetailViewModel(
             }
         }
     }
+
+    // ── AI Assist — natural-language editing (F22 Surface 1) ────────────────────
+    //
+    // Gemini returns edit OPERATIONS keyed to the draft's own ids, never a rewritten
+    // recipe. Ops are resolved into before → after rows, shown to the user, and applied
+    // to the DRAFT only — so the existing Save/Cancel is already the undo.
+
+    /** Example prompts seeded from the actual recipe — non-technical users freeze at an empty box. */
+    fun aiSuggestions(): List<String> {
+        val draft = _uiState.value.draft ?: return emptyList()
+        val ingredients = draft.sections.flatMap { it.ingredients }
+            .map { it.name.trim() }.filter { it.isNotEmpty() }
+        return buildList {
+            ingredients.firstOrNull()?.let { add("double the $it") }
+            ingredients.getOrNull(1)?.let { add("remove the $it") }
+            add("make it serve ${(draft.baseServings.toIntOrNull() ?: 4) * 2}")
+            add("make the steps simpler")
+        }.take(4)
+    }
+
+    /** Send [prompt] plus the slim draft to `editRecipeWithPrompt` and open the review sheet. */
+    fun askAiEdit(prompt: String) {
+        val text = prompt.trim()
+        if (text.length < 2) return
+        val draft = _uiState.value.draft ?: return
+        if (_uiState.value.isAiThinking) return
+
+        _uiState.update { it.copy(isAiThinking = true, aiMessage = null) }
+        viewModelScope.launch {
+            try {
+                @Suppress("UNCHECKED_CAST")
+                val data = withContext(Dispatchers.IO) {
+                    functions.getHttpsCallable("editRecipeWithPrompt")
+                        .call(hashMapOf("recipe" to draft.toSlimPayload(), "prompt" to text))
+                        .await().getData()
+                } as? Map<String, Any?>
+
+                val result = parseAiOps(data)
+                // Resolve against the CURRENT draft, not the one we sent — the user may have
+                // edited by hand while the call was in flight.
+                val live = _uiState.value.draft
+                if (live == null) {
+                    _uiState.update { it.copy(isAiThinking = false) }
+                    return@launch
+                }
+                val changes = resolveChanges(result.ops, live)
+                _uiState.update {
+                    it.copy(
+                        isAiThinking = false,
+                        aiChanges = changes,
+                        aiNotes = result.notes,
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(isAiThinking = false, aiMessage = e.message ?: "Couldn't reach the assistant")
+                }
+            }
+        }
+    }
+
+    /** Tick / untick one row in the review sheet. */
+    fun toggleAiChange(index: Int) = _uiState.update { state ->
+        val changes = state.aiChanges ?: return@update state
+        if (index !in changes.indices) return@update state
+        state.copy(aiChanges = changes.mapIndexed { i, c ->
+            if (i == index) c.copy(accepted = !c.accepted) else c
+        })
+    }
+
+    /** Apply every accepted row to the draft in one transform, then close the sheet. */
+    fun applyAiChanges() {
+        val changes = _uiState.value.aiChanges ?: return
+        val accepted = changes.filter { it.accepted }
+        if (accepted.isEmpty()) { dismissAiChanges(); return }
+        updateDraft { applyOpsToDraft(it, accepted) }
+        _uiState.update {
+            it.copy(
+                aiChanges = null,
+                aiNotes = null,
+                aiMessage = if (accepted.size == 1) "1 change applied — Save to keep it"
+                            else "${accepted.size} changes applied — Save to keep them",
+            )
+        }
+    }
+
+    /** Close the review sheet without touching the draft. */
+    fun dismissAiChanges() = _uiState.update { it.copy(aiChanges = null, aiNotes = null) }
+
+    fun clearAiMessage() = _uiState.update { it.copy(aiMessage = null) }
 
     // ── Delete recipe (cascade variations) ──────────────────────────────────────
     fun deleteRecipe() {
