@@ -200,6 +200,7 @@ live in separate files to keep this contract small:
 - **`docs/SCREEN-MAP.md`** — every screen + navigation route.
 - **`docs/CHANGELOG.md`** — the shipped-work log (what was built, per platform).
 - **`docs/IOS.md`** — iOS status, file structure, conventions, and remaining-gaps tables.
+- **`docs/AI-ASSIST.md`** — **F22 AI Assist plan** (prompt + voice on edit / cook mode / search). Read before building any Gemini-facing UX.
 
 ## Tech Stack
 
@@ -265,6 +266,7 @@ Consult it for how/why a feature was implemented; add new shipped entries there,
 | — | Gemini brand/substitute suggestions | The deferred half of F11 — AI-suggested top brands + substitutes per ingredient (author notes already ship). |
 | — | iOS: Universal Links | ✅ Wired — AASA file + `Associated Domains` entitlement added. Needs `firebase deploy --only hosting` to publish the AASA. |
 | — | Shopping list — cross-recipe / standalone | Optional: combine multiple recipes into one shopping trip (current F11 is per-recipe). |
+| **F22** | **AI Assist — prompt + voice** | Natural-language (typed or spoken) editing on the detail screen, Q&A in Cooking Mode, and NL search in Discover. Aimed at non-technical testers who "wing it" on quantities. Key decision: Gemini returns **edit operations** against stable ids, not a rewritten recipe, so changes are precise and previewable — every mutation shows **before → after** and must be accepted. **Full plan: `docs/AI-ASSIST.md`.** Not started. |
 | — | **QOL — Freeform entry: reachable "Format with Gemini"** | On the freeform/paste screen the action button sits **below** the text area, so pasting a long recipe forces a long scroll to reach it. Fix: **pin the action** so it's always reachable without scrolling — e.g. a sticky bottom bar (or `Scaffold` bottomBar / floating action) holding "Format with Gemini", with the text field scrolling under it. Must not fight the keyboard (keep `imePadding()`), and shouldn't cover the last lines while typing. Applies to the **import-by-text** path specifically; users who *are* editing should still be able to scroll the full text freely. **Both platforms** (iOS has the same layout). |
 
 **Tech debt / smaller follow-ups:**
